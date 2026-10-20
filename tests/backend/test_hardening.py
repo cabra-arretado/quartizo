@@ -329,7 +329,11 @@ class HttpHardeningTests(unittest.TestCase):
             start = time.monotonic()
             with socket.create_connection(("127.0.0.1", self.port), timeout=10) as s:
                 s.sendall(b"GET /health HTTP/1.1\r\nHost: x\r\n\r\n")
-                self.assertEqual(s.recv(1024), b"", "the 17th connection must be dropped, not served")
+                try:
+                    reply = s.recv(1024)  # Linux: orderly close; macOS: reset
+                except ConnectionResetError:
+                    reply = b""
+                self.assertEqual(reply, b"", "the 17th connection must be dropped, not served")
             self.assertLess(time.monotonic() - start, 9)
         finally:
             for s in holders:

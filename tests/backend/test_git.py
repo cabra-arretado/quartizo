@@ -444,7 +444,7 @@ class HostileConfigTests(GitTree):
         for key in ("core.pager", "pager.status", "pager.diff", "pager.diff-files", "pager.diff-index",
                     "pager.ls-files", "pager.config", "pager.rev-parse"):
             self.git(root, "config", key, pager)
-        if shutil.which("script"):  # control needs a tty
+        if sys.platform == "linux" and shutil.which("script"):  # needs a tty; `script -qc` is util-linux syntax
             subprocess.run(["script", "-qc", f"{GIT} -C '{root}' log -1", os.devnull],
                            capture_output=True, timeout=30, env={**os.environ, "HOME": str(self.setup_home)})
             self.assertEqual(self.marked(), ["pager"])
@@ -891,7 +891,10 @@ class LayoutTests(GitTree):
     def test_non_utf8_and_odd_names(self):
         root = self.make_repo()
         repo = self.register(root)
-        (root / os.fsdecode(b"bad-\xff.txt")).write_text("x\n")
+        try:
+            (root / os.fsdecode(b"bad-\xff.txt")).write_text("x\n")
+        except OSError as e:  # APFS refuses names that are not valid UTF-8 (EILSEQ)
+            self.skipTest(f"filesystem refuses non-UTF-8 file names: {e}")
         (root / "sp ace & 'q'.txt").write_text("y\n")
         st = self.store.status(repo.id)
         by = {e["path"]: e for e in st["entries"]}

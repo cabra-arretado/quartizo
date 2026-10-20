@@ -451,6 +451,23 @@ class TaskHttpTests(unittest.TestCase):
             with self.subTest(method=method, target=target):
                 self.assertEqual(self.call(method, target, {} if method != "GET" else None)[0], 404)
 
+    def declared_length_status(self, target, length, *, ts=None):
+        """POST headers only, declaring *length* bytes: the server answers from Content-Length without
+        reading the body. Sending the real body would race the server closing the socket (macOS
+        resets the connection before the client reads the 413)."""
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.putrequest("POST", target)
+            conn.putheader("X-KiroCrew-Proxy", proxy_header(SECRET, "POST", target, b"", **({"ts": ts} if ts else {})))
+            conn.putheader("X-KiroCrew-Principal", principal_header(SECRET, "POST", target, b""))
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", str(length))
+            conn.endheaders()
+            res = conn.getresponse()
+            return res.status, json.loads(res.read()).get("code")
+        finally:
+            conn.close()
+
     def test_import_body_limit(self):
         big = {"data": {"format": "quartizo.tasks", "version": 1, "tasks": [
             {"title": f"t{i}", "status": "backlog", "description_markdown": "x" * 60000} for i in range(30)]}}
@@ -461,8 +478,7 @@ class TaskHttpTests(unittest.TestCase):
         status, body = self.call("POST", f"/api/workspaces/{self.ws['id']}/tasks/import", big)
         self.assertIn(status, (200, 409), body)
         # ...but not for any other task route.
-        status, body = self.call("POST", self.base, {"title": "t", "description_markdown": "x" * (srv.MAX_BODY_BYTES + 1)})
-        self.assertEqual((status, body.get("code")), (413, "too_large"))
+        self.assertEqual(self.declared_length_status(self.base, srv.MAX_BODY_BYTES + 1), (413, "too_large"))
         # Over the import limit itself is refused, even with a fresh timestamp.
         # The server answers from the declared Content-Length, without reading the body.
         target = f"/api/workspaces/{self.ws['id']}/tasks/import"
@@ -481,15 +497,10 @@ class TaskHttpTests(unittest.TestCase):
 
     def test_import_with_stale_proxy_timestamp_gets_the_1mib_limit(self):
         target = f"/api/workspaces/{self.ws['id']}/tasks/import"
-        body = json.dumps({"data": {"format": "quartizo.tasks", "version": 1, "tasks": [],
-                                    "pad": "x" * (srv.MAX_BODY_BYTES + 1024)}}).encode()
-        self.assertLess(len(body), tasks.MAX_IMPORT_BODY_BYTES)
         stale = int(time.time()) - srv.MAX_SKEW_SECONDS - 60
-        headers = {"X-KiroCrew-Proxy": proxy_header(SECRET, "POST", target, body, ts=stale),
-                   "X-KiroCrew-Principal": principal_header(SECRET, "POST", target, body),
-                   "Content-Type": "application/json"}
-        status, res = _request(self.port, "POST", target, body=body, headers=headers)
-        self.assertEqual((status, res.get("code")), (413, "too_large"))
+        size = srv.MAX_BODY_BYTES + 1024
+        self.assertLess(size, tasks.MAX_IMPORT_BODY_BYTES)
+        self.assertEqual(self.declared_length_status(target, size, ts=stale), (413, "too_large"))
 
     def test_non_owner_cannot_delete_a_workspace_and_its_tasks(self):
         status, body = signed_json(self.port, "POST", "/api/workspaces", {"path": str(self.vault2)})
