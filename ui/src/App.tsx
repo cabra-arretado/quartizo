@@ -2,14 +2,16 @@ import { useAppApi } from '@kirocrew/app-sdk'
 import { PageHeader } from '@kirocrew/app-sdk/ui'
 import { type KeyboardEvent, useCallback, useRef, useState } from 'react'
 import Chat from './Chat'
+import Git from './Git'
 import Notes, { type NotesRequest, type NotesState } from './Notes'
 import type { Workspace } from './notesApi'
 import Tasks from './Tasks'
 
-type Tab = 'notes' | 'tasks' | 'chat'
+type Tab = 'notes' | 'tasks' | 'git' | 'chat'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'notes', label: 'Notes' },
   { id: 'tasks', label: 'Tasks' },
+  { id: 'git', label: 'Git' },
   { id: 'chat', label: 'Chat' },
 ]
 
@@ -24,6 +26,7 @@ export default function Quartizo() {
   // switching tabs neither reopens the slot nor drops a draft.
   const [chatOpened, setChatOpened] = useState(false)
   const [tasksOpened, setTasksOpened] = useState(false)
+  const [gitOpened, setGitOpened] = useState(false)
   // Tasks follow the workspace selected in Notes (one project = one workspace).
   const [notesState, setNotesState] = useState<NotesState>({ workspace: null, note: null })
   const [request, setRequest] = useState<NotesRequest | null>(null)
@@ -37,6 +40,7 @@ export default function Quartizo() {
     setTab(t)
     if (t === 'chat') setChatOpened(true)
     if (t === 'tasks') setTasksOpened(true)
+    if (t === 'git') setGitOpened(true)
   }
   const toNotes = (wsId: number, extra: { path?: string; chat?: boolean }) => {
     setRequest(r => ({ seq: (r?.seq ?? 0) + 1, wsId, ...extra }))
@@ -109,6 +113,16 @@ export default function Quartizo() {
               confirmLeave={confirmLeave}
             />
           )}
+        </div>
+        <div
+          id="qz-panel-git"
+          role="tabpanel"
+          aria-labelledby="qz-tab-git"
+          hidden={tab !== 'git'}
+          style={{ display: tab === 'git' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}
+        >
+          {/* Read-only Git (QTZ-010/011). Its repo selection is its own: it changes nothing in Notes, Tasks or Chat. */}
+          {gitOpened && <Git api={api} active={tab === 'git'} />}
         </div>
         <div
           id="qz-panel-chat"

@@ -1,13 +1,17 @@
-# Architecture (M1-M3)
+# Architecture (M1-M4)
 
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
-  App.tsx        PageHeader + in-page tabs: Notes | Tasks | Chat
+  App.tsx        PageHeader + in-page tabs: Notes | Tasks | Git | Chat
   Notes.tsx      workspace picker/registration, note list + search, editor, preview
   Tasks.tsx      Kanban board of the selected workspace, task details, links (M3)
   tasksApi.ts    typed client for .../workspaces/{id}/tasks
   board.ts       column grouping, move/reindex mirror, keyboard moves, drop index
   taskContext.ts bounded task context block for an agent prompt
+  Git.tsx        repo picker/registration, changed-files list, virtualized diff viewer (M4)
+  gitApi.ts      typed client for .../repos (ids, a path and a mode only)
+  gitList.ts     entry badges, diff modes, changed-files keyboard handling
+  diffView.ts    unified diff -> classified lines, virtual-list window
   Chat.tsx       the QTZ-003 ChatEmbed session (mounted on first visit, then kept)
   notesApi.ts    typed client for /apps/quartizo/api/workspaces/... (useAppApi)
   editorDoc.ts   open-note state: dirty, save base hash, 409 conflict rules
@@ -22,10 +26,12 @@ backend (python3 -I backend/server.py, stdlib only)
   workspace.py   root registry, path validation, fd-based no-follow opens
   notes.py       list/search, read, atomic create/update/rename, trash-delete
   tasks.py       task CRUD, ordered moves, version checks, JSON import/export (M3)
-  db.py          sqlite3 registry + tasks + migrations ($KIROCREW_HOME/apps/quartizo/data)
+  gitrepo.py     repo registry, hardened git runner, status/diff parsing (M4)
+  db.py          sqlite3 registry + tasks + repos + migrations ($KIROCREW_HOME/apps/quartizo/data)
         |
         v
 plain .md files in the registered folders (readable by Obsidian or any editor)
+registered Git repositories, read through `git` (never written)
 ```
 
 Testable logic lives in the plain `.ts` modules and has vitest suites. The
@@ -164,3 +170,57 @@ the human status.
   task's linked session, else the workspace chat, else a new chat. The
   board has no other path to the chat API, and a move calls only
   `POST .../move` (tested).
+
+## Git, read only (M4)
+
+**Repos are their own registry** (`repos`, migration 4), not a property of
+a notes workspace. A notes workspace is a folder of `.md` files that
+Quartizo writes; a repo is a folder Quartizo only reads through `git`.
+Coupling them would force one to be the other (a vault that is not a repo,
+a repo that has no notes). Same id/uid scheme as workspaces.
+
+**Overlap decisions.**
+
+| Case | Decision | Why |
+|---|---|---|
+| Repo overlaps the KiroCrew home or the data dir | Refused | Same as workspaces: secrets and agent state |
+| Same path (or same inode) twice | Refused, 409 `repo_exists` | One registration per repo |
+| A notes workspace inside a repo, a repo inside a workspace, or one folder as both | **Allowed** | Read-only Git cannot alias or clobber a note write. The note confinement (hidden segments, no `.git` access) is unchanged |
+| A nested repo or a submodule inside a registered repo | **Allowed**, as a separate registration | They are separate repositories. The outer repo's status shows a nested repo as an untracked `dir/` and a submodule as one entry, and descends into neither |
+| A subfolder of a repo | Refused, 400 `not_repo_toplevel` | Status and paths are relative to the top level |
+| A bare repo, or the `.git` folder itself | Refused | No work tree |
+
+**Layouts.** Linked worktrees (`.git` is a `gitdir:` file) and submodule
+checkouts can be registered; `info.gitDir` says which. A `.git` symlink is
+refused. Submodules are shown, not descended into
+(`--ignore-submodules=dirty`): a changed submodule commit appears as one
+entry (`submoduleCommitChanged`) and its diff is `Subproject commit …`;
+changes inside the submodule's own work tree are not looked at, because
+that would run git there. Ignored files are not listed
+(`--ignored=no`), and an ignored path cannot be diffed (404). Untracked
+folders are listed as `dir/` (`--untracked-files=normal`), not expanded.
+Renames come from `--find-renames` for staged changes (index vs HEAD); a
+work tree rename that is not staged shows as a deletion plus an untracked
+file, which is what git itself reports.
+
+**Status is parsed in the backend** (porcelain v2, `-z`), so the page gets
+structured entries and never parses git output. Names that are not UTF-8
+are shown lossy and marked `diffable: false`.
+
+**Diffs** use plumbing (`diff-files -p`, `diff-index --cached -p -M`), which
+reads none of git's diff UI config. Before the first commit, staged diffs
+are against the empty tree. Untracked files have no git diff, so the
+backend reads them itself (fd-relative, no symlink followed, 8 MiB cap) and
+builds an all-added diff; a symlink shows its target string.
+
+**Diff viewer.** Lines are classified by `diffView.parseDiff` (headers only
+outside hunks, combined diffs from conflicts included) and rendered as
+React text nodes with add/remove backgrounds. The viewer is a fixed-height
+virtual list (`visibleRange`, 18 px rows), so a 512 KiB diff (about 30 000
+lines) keeps a few dozen rows in the DOM; parsing it takes a few
+milliseconds (tested under 500 ms in Node). Long lines scroll sideways
+(`white-space: pre`), no wrapping, so row heights stay fixed.
+
+**No stage, commit or task-branch link** in M4. `branch_ref` on tasks was
+not added: the task schema, import format and board UI would all need it,
+which is more than "cheap"; the repo `uid` is ready to key it later.
