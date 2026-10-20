@@ -39,9 +39,9 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | QTZ-001 manifest, routed page, Vite build with host externals | Met (build, typecheck, bundle-import test) |
 | QTZ-002 signed backend | Met (unit + real HTTP tests) |
 | QTZ-003 page creates a slot and mounts `ChatEmbed` with `onSend`; error states for `slot_not_found` / `session_approval_not_granted` | Met as code; the page has not been rendered in a real host (app not yet trusted/enabled) |
-| QTZ-004 workspace registry and confinement | Met, by unit and real HTTP tests (`tests/backend/test_workspace.py`). Not run inside the gateway sandbox (app not enabled) |
-| QTZ-005 Markdown read/write API | Met, by unit and real HTTP tests (`tests/backend/test_notes.py`). Delete moves to `.trash` (no unlink) |
-| QTZ-006 notes UI | Met as code with vitest coverage of the logic modules (client, editor/conflict state, line endings, XSS, list navigation). **Not rendered in a real host** (app not enabled). One manual smoke run (2026-10-20): the components were built against a throwaway stub SDK with an in-memory fake backend (not committed) and driven in a browser. Open, split preview, 409 notice then explicit overwrite (CRLF kept), delete confirmation, arrow-key + Enter open, mixed-endings read-only, and the Chat tab all worked |
+| QTZ-004 workspace registry and confinement | Met, by unit and real HTTP tests (`tests/backend/test_workspace.py`, `test_hardening.py`). Registering a workspace worked live under the gateway sandbox (see the live run below) |
+| QTZ-005 Markdown read/write API | Met, by unit and real HTTP tests (`tests/backend/test_notes.py`, `test_hardening.py`). Delete moves to `.trash` (no unlink). List, read, the 409 conflict and a save were exercised live |
+| QTZ-006 notes UI | Met as code with vitest coverage of the logic modules (client, editor/conflict state, line endings, XSS, list navigation). Rendered in the real host in the live run below (register, list, open with preview, 409 conflict, reload, save). Earlier, one manual smoke run (2026-10-20): the components were built against a throwaway stub SDK with an in-memory fake backend (not committed) and driven in a browser. Open, split preview, 409 notice then explicit overwrite (CRLF kept), delete confirmation, arrow-key + Enter open, mixed-endings read-only, and the Chat tab all worked |
 | QTZ-003 slot ownership | **accepted: owner-session default (user decision)**. Page-created slots are owner sessions, accepted for the MVP. Facts (read at f62ab4fd, rechecked unchanged in 0.10.0rc4): the page's `useAppApi()` client is a plain same-origin `fetch` that adds only `X-Session-Key`, so the gateway authenticates it by the owner's `mc_token_<port>` cookie and sets `request["app"] = ""` (`dashboard/token_auth.py`). `POST /api/chat/slots` records app ownership only from `request["app"]` (`dashboard/chat_api/slot_create.py`). So the session the page creates is an owner session with `app == ""`, called a "Quartizo-created session" here. App ownership would need a backend-mediated app-token path, which is not built. Measured on 0.10.0rc4: an app-token create returns a row with `app: "quartizo"`, `origin: "app"`. |
 
 ## Verified by tests
@@ -65,6 +65,7 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | Markdown preview is sanitized: 30 XSS payloads (raw HTML, event handlers, `javascript:` in many encodings, `data:`/`vbscript:`/`file:`, protocol-relative and relative links, reference links, autolinks, images); output tags, attributes and `href`s are checked against allowlists | Vitest | `ui/test/markdown.test.ts` |
 | Editor state: dirty tracking, CRLF round trip, mixed endings read-only, 409 never moves the base hash, only an explicit overwrite does | Vitest | `ui/test/editorDoc.test.ts`, `ui/test/lineEndings.test.ts` |
 | Notes client: routes under `/apps/quartizo/api`, query percent-encoding (`+`), `confirm` only with overwrite / delete, 409 `currentHash` parsing, client-side path rules | Vitest with a mocked `AppApi` | `ui/test/notesApi.test.ts` |
+| Review fixes: rename/trash via `renameat2(RENAME_NOREPLACE)`; the link+unlink fallback rolls back (409) when an injected `os.replace` swaps the source mid-move, and rolls back the trash copy when the unlink fails; unclassified `OSError` -> errno-mapped status without the path (read-only folder -> 403 over HTTP); roots refused when not owned, group/world-writable, or under `/proc` `/sys` `/dev`; foreign-owned subfolders refused; read-only note -> 403 `read_only`; hard links are not spelling aliases; >1 MiB bodies only for fresh note writes (413 before reading otherwise); 16-connection cap; scan bounds applied while iterating | Unit + real HTTP | `tests/backend/test_hardening.py` |
 | Built bundle imports only host import-map specifiers and has a default export | Vitest over `ui/dist/index.mjs` (skips before a build) | `ui/test/bundle.test.ts` |
 | `tsc --noEmit` and `vite build` pass | `npm run typecheck`, `npm run build` | — |
 
@@ -118,34 +119,34 @@ Observed upstream behaviour, recorded as findings:
   asked for the name `main`; it is not the owner's session), and
   `quartizo-it-<ts>` / `quartizo-ap-<ts>` from the test runs. No data was deleted.
 
+## Live run with the app trusted and enabled (kirocrew 0.10.0rc4)
+
+Run by the operator after M1, with `quartizo` trusted
+(`agent.apps_trusted`) and enabled.
+
+| Check | Result |
+|---|---|
+| `tests/integration/test_gateway.py` | **4 passed, 4 skipped.** Passed: signed `/apps/quartizo/api/status` reaches the backend (403 `owner_session_required` for the app-token principal, so the gateway signature verified); a direct unsigned hit on the backend port gets 401; create + reopen of an app-token slot; approve/reject 403 `session_approval_not_granted` without the grant. Skipped: the tests that need `KIROCREW_FOREIGN_SLOT`, a pending approval, or `KIROCREW_OWNER_TOKEN` |
+| Who page calls run as | **`owner-session`**, observed in the page's Chat tab status ("caller: owner-session"). This confirms the source reading |
+| M1 smoke in the dashboard | Registered a workspace, listed notes, opened one with the preview. An external edit then a save showed the 409 conflict notice, and nothing was overwritten. **Reload** loaded the external version, and a following save landed on disk |
+| Uninstall | `kirocrew app uninstall quartizo` **clears `agent.apps_trusted`**. Trust must be granted again after a reinstall |
+| Dashboard console noise | 403/503 errors in the browser console come from the host polling `/api/instances` and `/api/sessions/usage`, not from Quartizo |
+
 ## Not verified
 
-- **Backend file access inside the gateway sandbox.** 0.10.0rc4 spawns
-  backends through `wrap_argv(mode="standard")`. Which host paths a registered
-  root may use under that sandbox, and whether `data/` is writable, was read
-  from source only and not measured (the app is not enabled). The data dir
-  path follows `manager.py::app_data_dir` and the injected `KIROCREW_HOME` /
-  `KIROCREW_APP_NAME`.
-- **`python -I` start-up.** The gateway runs `.py` entry points isolated
-  (`isolated_python_argv(force_isolation=True)`), which drops the script's
-  directory from `sys.path`. `server.py` puts it back explicitly. Tested with
-  `python3 -I backend/server.py` locally, not under the gateway.
-
-- **Signed proxy end to end, backend health, and the direct-hit refusal** in a
-  real gateway: blocked on trust and enable. Covered locally by
-  `tests/backend/test_http.py` and the cross-check with the installed signer.
-- **The page in a real host**: module loading, the Notes/Chat tabs and the
-  notes UI (keyboard navigation, conflict notice, delete confirmation are
-  exercised only through their logic modules), host styling of the plain
-  elements the notes UI uses, `ChatEmbed` rendering, UI component props (export names are confirmed; props of `PageHeader`, `Card`,
-  `CardTitle`, `Btn` are not).
-- **Who page requests run as**: read from source (unchanged in 0.10.0rc4),
-  not observed. For page calls this means: (a) the session is an owner
-  session (accepted, see above); (b) `permissions.api` is enforced only by the
-  SDK's client check; (c) Approve/Reject in the embed works without
-  `sessionApproval`. `OwnerCookieTests` check (a) and (c) and need
-  `KIROCREW_OWNER_TOKEN`. The other integration tests are app-token contract
-  tests and do not reflect the shipped UI.
+- **Sandbox coverage.** The live run used one workspace in the owner's home,
+  and the registry DB under `data/` worked (the backend started under the
+  gateway's `python -I` launch). Which other host paths the
+  `wrap_argv(mode="standard")` sandbox hides was not mapped.
+- **Parts of the notes UI in the host**: rename, delete and keyboard
+  navigation were not exercised live (only through their logic modules and
+  the stub-SDK smoke run). Host styling of the plain elements is unreviewed.
+  Props of `PageHeader`, `Card`, `CardTitle` and `Btn` are inferred (export
+  names are confirmed).
+- **Page-call details beyond the principal kind**: (b) `permissions.api` is
+  enforced only by the SDK's client check; (c) Approve/Reject in the embed
+  works without `sessionApproval`. `OwnerCookieTests` check (c) and need
+  `KIROCREW_OWNER_TOKEN`.
 - **Foreign-slot refusal** for app tokens, and **approval resolution** with
   the grant.
 - **Sending a message / getting a reply**: no turn was sent (`kiro-cli` is not

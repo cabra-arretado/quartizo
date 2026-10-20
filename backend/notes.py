@@ -7,8 +7,10 @@ decoding (BOM and line endings included), so reading and writing back round-trip
 byte for byte. Files that are not valid UTF-8 are refused, never rewritten.
 
 Writes are atomic: a temp file in the same directory, fsync, then
-``os.replace`` (update) or ``link`` (create / rename, which fails instead of
-clobbering), then fsync of the directory. Updates carry the hash the client
+``os.replace`` (update) or ``link`` (create, which fails instead of
+clobbering), then fsync of the directory. Rename and trash move with
+``renameat2(RENAME_NOREPLACE)`` on Linux, else link + inode-checked unlink
+(see ``_move_noreplace``). Updates carry the hash the client
 last read; on mismatch the write is refused with 409 and the current hash.
 
 Delete moves the note to ``<root>/.trash/<same relative path>`` (Obsidian's
@@ -16,17 +18,21 @@ own trash folder; ``.trash`` is a hidden segment, so the API cannot reach it).
 """
 from __future__ import annotations
 
+import ctypes
 import errno
 import hashlib
 import os
 import re
 import secrets
+import stat
+import sys
 import time
 from collections.abc import Iterator
 
 from workspace import (
     ApiError,
     open_dir_at,
+    os_error,
     open_file_at,
     open_parent,
     open_root,
@@ -164,7 +170,68 @@ def _link(src_dir: int, src: str, dst_dir: int, dst: str) -> None:
         if err.errno in (errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.EMLINK):
             raise ApiError(409, "links_unsupported", "this filesystem does not support hard links, which "
                            "Quartizo needs to create, rename and trash notes without clobbering") from None
-        raise ApiError(500, "io_error", f"link failed ({errno.errorcode.get(err.errno, err.errno)})") from None
+        raise os_error(err) from None
+
+
+_RENAME_NOREPLACE = 1
+
+
+def _load_renameat2():
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        fn = ctypes.CDLL(None, use_errno=True).renameat2
+    except (OSError, AttributeError):  # libc without renameat2 (glibc < 2.28, some musl)
+        return None
+    fn.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    fn.restype = ctypes.c_int
+    return fn
+
+
+_renameat2 = _load_renameat2()
+
+
+def _move_noreplace(src_dir: int, src: str, dst_dir: int, dst: str) -> None:
+    """Move *src* to *dst* without ever replacing *dst* (FileExistsError if taken).
+
+    Preferred: one ``renameat2(RENAME_NOREPLACE)``, atomic, so a concurrent
+    atomic replace of *src* is simply carried along. Fallback (non-Linux, or a
+    filesystem that refuses the flag): ``link`` then ``unlink``, but only after
+    checking that *src* is still the inode we linked; otherwise the new link is
+    rolled back and the move refused with 409. The window left between that
+    check and the unlink is documented in docs/threat-model.md.
+    """
+    if _renameat2 is not None:
+        rc = _renameat2(src_dir, os.fsencode(src), dst_dir, os.fsencode(dst), _RENAME_NOREPLACE)
+        if rc == 0:
+            return
+        err = ctypes.get_errno()
+        if err == errno.EEXIST:
+            raise FileExistsError(err, os.strerror(err))
+        if err == errno.ENOENT:
+            raise ApiError(404, "not_found", "no such note")
+        if err == errno.EXDEV:
+            raise ApiError(409, "cross_device", "source and destination are on different filesystems")
+        if err not in (errno.EINVAL, errno.ENOSYS, errno.ENOTSUP, errno.EOPNOTSUPP):
+            raise os_error(OSError(err, os.strerror(err)))
+        # The filesystem does not support the flag: fall through.
+    _link(src_dir, src, dst_dir, dst)
+    try:
+        linked = os.stat(dst, dir_fd=dst_dir, follow_symlinks=False)
+        now = os.stat(src, dir_fd=src_dir, follow_symlinks=False)
+    except OSError:
+        _unlink_quiet(dst_dir, dst)
+        raise ApiError(409, "conflict", "the note changed on disk during the move; nothing was moved",
+                       currentHash=None, currentMtimeMs=None) from None
+    if (now.st_dev, now.st_ino) != (linked.st_dev, linked.st_ino):
+        _unlink_quiet(dst_dir, dst)
+        raise ApiError(409, "conflict", "the note changed on disk during the move; nothing was moved",
+                       currentHash=None, currentMtimeMs=None)
+    try:
+        os.unlink(src, dir_fd=src_dir)
+    except OSError as err:
+        _unlink_quiet(dst_dir, dst)  # roll back: never leave the note in two places
+        raise os_error(err) from None
 
 
 # --------------------------------------------------------------------------
@@ -202,17 +269,22 @@ def list_notes(root: str, query: str = "", content: bool = False) -> dict:
 
 
 def _walk(dir_fd: int, prefix: str, depth: int, state: dict) -> Iterator[tuple[str, int, str, os.stat_result]]:
+    # Bounds apply while reading the directory, so a huge folder is never
+    # listed (or sorted) in full: only the bounded slice is sorted.
+    entries = []
     try:
         with os.scandir(dir_fd) as it:
-            entries = sorted(it, key=lambda e: e.name)
+            for entry in it:
+                state["scanned"] += 1
+                if state["scanned"] > MAX_SCAN_ENTRIES or time.monotonic() > state["deadline"]:
+                    state["truncated"] = True
+                    break
+                entries.append(entry)
     except OSError:
         return
+    entries.sort(key=lambda e: e.name)
     subdirs = []
     for entry in entries:
-        state["scanned"] += 1
-        if state["scanned"] > MAX_SCAN_ENTRIES or time.monotonic() > state["deadline"]:
-            state["truncated"] = True
-            return
         name = entry.name
         if name.startswith(".") or entry.is_symlink():
             continue
@@ -228,6 +300,8 @@ def _walk(dir_fd: int, prefix: str, depth: int, state: dict) -> Iterator[tuple[s
             except OSError:
                 continue
             yield prefix + name, dir_fd, name, st
+    if state["truncated"]:
+        return
     if depth >= MAX_LIST_DEPTH:
         if subdirs:
             state["truncated"] = True
@@ -318,6 +392,8 @@ def update_note(root: str, rel: object, content: object, expected_hash: object) 
         current = _current(parent, name)
         if current is None or current[0] != expected:
             raise _conflict(current)
+        if not current[1].st_mode & stat.S_IWUSR:
+            raise ApiError(403, "read_only", "this note is read-only on disk; Quartizo will not replace it")
         tmp = _write_temp(parent, data, current[1].st_mode & 0o7777)
         try:
             # Re-check as late as possible: an external edit that landed while
@@ -351,24 +427,27 @@ def rename_note(root: str, src_rel: object, dst_rel: object, *, overwrite: objec
         src_st = current[1]
         with open_parent(root, dst, create=True) as dp:
             try:
-                _link(sp, src[-1], dp, dst[-1])
+                _move_noreplace(sp, src[-1], dp, dst[-1])
             except FileExistsError:
                 dst_st = os.stat(dst[-1], dir_fd=dp, follow_symlinks=False)
                 if (dst_st.st_dev, dst_st.st_ino) == (src_st.st_dev, src_st.st_ino):
-                    # Same file under another spelling (case-insensitive FS): a plain rename.
-                    os.rename(src[-1], dst[-1], src_dir_fd=sp, dst_dir_fd=dp)
-                    _fsync_dir(dp)
-                    return {"path": "/".join(dst), "trashed": None}
+                    sd, dd = os.fstat(sp), os.fstat(dp)
+                    if (sd.st_dev, sd.st_ino) == (dd.st_dev, dd.st_ino) and src[-1].casefold() == dst[-1].casefold():
+                        # Same file under another spelling (case-insensitive FS): a plain rename.
+                        os.rename(src[-1], dst[-1], src_dir_fd=sp, dst_dir_fd=dp)
+                        _fsync_dir(dp)
+                        return {"path": "/".join(dst), "trashed": None}
+                    # Two hard links to one inode: not a spelling alias.
+                    raise ApiError(409, "exists", "the destination is another name for this same file") from None
                 if overwrite is not True or confirm is not True:
                     raise ApiError(409, "exists", "the destination exists; resend with overwrite and confirm "
                                    "to move it to .trash and replace it") from None
                 trashed = _trash(root, dst)
                 try:
-                    _link(sp, src[-1], dp, dst[-1])
+                    _move_noreplace(sp, src[-1], dp, dst[-1])
                 except FileExistsError:
                     raise ApiError(409, "exists", "the destination was re-created meanwhile",
                                    trashed=trashed) from None
-            os.unlink(src[-1], dir_fd=sp)
             _fsync_dir(dp)
         _fsync_dir(sp)
     return {"path": "/".join(dst), "trashed": trashed}
@@ -408,13 +487,13 @@ def _trash(root: str, segments: list[str]) -> str:
             for n in range(1000):
                 name = segments[-1] if n == 0 else f"{stem} {n}{NOTE_SUFFIX}"
                 try:
-                    _link(src_dir, segments[-1], fd, name)
+                    # On the fallback path, a failed unlink rolls the trash copy back.
+                    _move_noreplace(src_dir, segments[-1], fd, name)
                 except FileExistsError:
                     continue
                 break
             else:
                 raise ApiError(409, "trash_full", "too many trashed notes with this name")
-            os.unlink(segments[-1], dir_fd=src_dir)
             _fsync_dir(fd)
             _fsync_dir(src_dir)
         finally:

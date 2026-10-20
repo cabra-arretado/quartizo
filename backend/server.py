@@ -45,7 +45,7 @@ from urllib.parse import parse_qs, urlsplit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import notes  # noqa: E402
-from workspace import ApiError, Registry  # noqa: E402
+from workspace import ApiError, Registry, os_error  # noqa: E402
 
 APP_NAME = "quartizo"
 APP_VERSION = "0.1.0"
@@ -53,8 +53,13 @@ SECRET_ENV = "KIROCREW_PROXY_SECRET"
 PROXY_HEADER = "X-KiroCrew-Proxy"
 PRINCIPAL_HEADER = "X-KiroCrew-Principal"
 MAX_SKEW_SECONDS = 60
-# A note may be 2 MiB; JSON escaping can grow it (worst case \u00XX, 6x).
-MAX_BODY_BYTES = 6 * (2 << 20) + (64 << 10)
+MAX_BODY_BYTES = 1 << 20
+# Note writes only: a note may be 2 MiB, and JSON escaping can grow it (worst
+# case \u00XX, 6x). Allowed only after a cheap freshness check of the proxy
+# header, so an unsigned client cannot make us read 12 MiB.
+MAX_NOTE_BODY_BYTES = 6 * (2 << 20) + (64 << 10)
+MAX_IN_FLIGHT = 16
+_NOTE_WRITE_RE = re.compile(r"/api/workspaces/[0-9]{1,12}/note")
 MAX_PRINCIPAL_HEADER_BYTES = 4096
 
 _TS_RE = re.compile(r"[0-9]{1,12}")
@@ -257,6 +262,11 @@ class Handler(BaseHTTPRequestHandler):
         except ApiError as err:
             self._json(err.status, err.body())
             return
+        except OSError as err:
+            # Anything the file layer did not classify; the message never names a path.
+            refusal = os_error(err)
+            self._json(refusal.status, refusal.body())
+            return
         if result is None:
             self._json(404, {"error": "not found"})
         else:
@@ -323,6 +333,18 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "bad_json", "request body must be a JSON object")
         return data
 
+    def _body_limit(self) -> int:
+        """1 MiB, or the note limit for a note write with a fresh proxy timestamp.
+
+        The full HMAC needs the body, so only the timestamp can be checked
+        before reading; the signature is still verified afterwards.
+        """
+        if self.command in ("POST", "PUT") and _NOTE_WRITE_RE.fullmatch(self.path):
+            ts = (self.headers.get(PROXY_HEADER) or "").partition(":")[0]
+            if _TS_RE.fullmatch(ts) and abs(time.time() - int(ts)) <= MAX_SKEW_SECONDS:
+                return MAX_NOTE_BODY_BYTES
+        return MAX_BODY_BYTES
+
     def _read_body(self) -> bytes | None:
         if self.headers.get("Transfer-Encoding"):
             self._json(400, {"error": "chunked bodies are not supported"})
@@ -332,8 +354,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "bad content-length"})
             return None
         length = int(raw_len)
-        if length > MAX_BODY_BYTES:
-            self._json(413, {"error": "body too large"})
+        if length > self._body_limit():
+            self._json(413, {"error": "body too large", "code": "too_large"})
             return None
         return self.rfile.read(length) if length else b""
 
@@ -378,6 +400,28 @@ class Server(ThreadingHTTPServer):
     # bind a live port; the gateway detects collisions by a failed bind.
     allow_reuse_address = not sys.platform.startswith("win")
     daemon_threads = True
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # At most MAX_IN_FLIGHT connections are served at once; the next one
+        # waits (briefly) in the accept loop, then is dropped.
+        self._slots = threading.BoundedSemaphore(MAX_IN_FLIGHT)
+
+    def process_request(self, request, client_address) -> None:
+        if not self._slots.acquire(timeout=5):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
 
 
 def kirocrew_home() -> Path:

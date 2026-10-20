@@ -34,6 +34,9 @@ registration time. Refused:
 | The home directory itself (`$HOME` and the passwd entry, by path and inode) | Holds credentials and dotfiles; pick a folder inside it |
 | Anything that overlaps the KiroCrew home (`$KIROCREW_HOME`) or Quartizo's data dir, in either direction | App secrets, agent prompts and memory are `.md`-adjacent state that agents rely on |
 | Overlap with an already registered root, in either direction (409 `root_overlaps`) | One file, one workspace: no aliasing between roots |
+| Anything under `/proc`, `/sys` or `/dev` | Pseudo-filesystems, not notes |
+| A root not owned by the backend's uid (`root_not_owned`) | Another user could swap its contents or plant links under it |
+| A group- or world-writable root (`mode & 0o022`, `root_writable_by_others`) | Same: others could rename entries under us. Fix with `chmod go-w` |
 
 Overlap is decided twice. First on canonical path strings with a separator
 boundary, so `/a/notes-private` is **not** inside `/a/notes`. Then by
@@ -74,7 +77,9 @@ descriptors (`workspace.open_root`, `open_dir_at`, `open_file_at`):
    O_NOFOLLOW ...)`. **No symlink inside a workspace is followed, whether it
    points out of the root or stays inside it.** A symlink yields 403
    `symlink_refused`. Listing skips symlinks and hidden entries.
-3. The final file is opened with `O_NOFOLLOW | O_NONBLOCK` and then
+3. Every directory segment opened under the root must also be owned by the
+   backend's uid (403 `not_owned` otherwise; listing skips such folders).
+4. The final file is opened with `O_NOFOLLOW | O_NONBLOCK` and then
    `fstat`-ed: it must be a regular file. FIFOs, sockets and devices are
    refused without blocking.
 
@@ -84,9 +89,32 @@ relative to an fd we already hold.
 
 **Writes** never write in place. The temp file is created with
 `O_CREAT | O_EXCL | O_NOFOLLOW` relative to the parent fd. It is then moved
-with `renameat` (update) or `linkat` (create, rename, trash; these fail with
-`EEXIST` instead of clobbering). `.trash` is opened like any other segment, so
-a `.trash` symlink is refused and nothing is moved through it.
+with `renameat` (update) or `linkat` (create, which fails with `EEXIST`
+instead of clobbering). A note whose file lacks the owner-write bit is never
+replaced (403 `read_only`). `.trash` is opened like any other segment, so a
+`.trash` symlink is refused and nothing is moved through it.
+
+**Rename and trash** move with a single `renameat2(..., RENAME_NOREPLACE)` on
+Linux (called through `ctypes` with the directory fds). It is atomic and never
+replaces the target. If an editor atomically replaces the source just before
+the call, the *new* file is what moves, so no version is lost. Elsewhere
+(macOS, or a filesystem that rejects the flag with `EINVAL`), the fallback is
+`linkat(src, dst)`, then a check that `src` is still the inode just linked,
+then `unlinkat(src)`. If the check fails, the new link is removed and the
+request answers 409 `conflict`. If the unlink fails, the new link is removed
+(no note is left in two places, e.g. in `.trash` as well) and the error is
+returned.
+
+**Errors** that the file layer does not classify are mapped by errno, never
+with a path in the message: `EACCES`/`EPERM` 403, `ENOSPC`/`EDQUOT` 507,
+`EROFS` 409, anything else 500 `io_error`.
+
+**Request limits.** Bodies are capped at 1 MiB, except note writes
+(`POST`/`PUT .../note`), which may reach the note limit after JSON escaping
+(about 12 MiB). The larger limit applies only if the `X-KiroCrew-Proxy`
+timestamp is fresh. That is a cheap check made before the body is read; the
+full HMAC is verified afterwards. At most 16 connections are served at once.
+Further ones wait up to 5 s in the accept loop and are then dropped.
 
 **Residual risks (accepted for M1):**
 
@@ -95,24 +123,34 @@ a `.trash` symlink is refused and nothing is moved through it.
   lands in the microseconds between that check and the replace is lost. That
   version is overwritten, not merged. Closing it needs a lock that every
   editor honours, and none exists for plain files.
+- **Move fallback window** (non-Linux, or no `RENAME_NOREPLACE` support). An
+  external atomic replace of the source that lands between the inode check
+  and `unlinkat` removes that new version from the source name. The old
+  version is the one that was moved, so the new edit is lost. The window is
+  two syscalls wide. On Linux with `renameat2` there is no such window.
 - **Filesystems without hard links** (FAT/exFAT, some network and FUSE
-  mounts): create, rename and delete answer 409 `links_unsupported` rather
-  than fall back to a clobbering rename. Update (plain `os.replace`) works.
+  mounts): create answers 409 `links_unsupported` rather than fall back to a
+  clobbering rename, and so do rename and delete when `renameat2` is not
+  available there either. Update (plain `os.replace`) works.
 
 - **Hard links.** A hard link inside the workspace to a file elsewhere is a
   regular file and is readable. Creating one needs write access to the
   workspace and (with Linux `protected_hardlinks`) ownership of the target.
   Writes are not affected: an atomic write replaces the directory entry and
-  never writes through the link.
+  never writes through the link. Renaming a note onto another hard link of
+  the same inode is refused (409 `exists`). Only a same-folder name that
+  differs in case is treated as a spelling alias on a case-insensitive
+  filesystem.
 - **Bind mounts and mount points inside a root** are crossed like ordinary
   directories.
 - **Root renamed, not symlinked.** If the root directory is moved away and a
   *real* directory is created at the same path, Quartizo serves the new
   directory. That path is still the one the owner registered.
 - **The sandbox.** The gateway runs the backend under its OS sandbox
-  (`wrap_argv(mode="standard")` in 0.10.0rc4). Which host paths stay visible
-  and writable inside it was not measured, because the app has not been
-  enabled. A registered root the sandbox hides shows up as `root_missing`.
+  (`wrap_argv(mode="standard")` in 0.10.0rc4). A workspace in the owner's
+  home was registered, read and written in the live smoke run (see
+  compatibility.md). Which other host paths stay visible was not mapped. A
+  registered root that the sandbox hides shows up as `root_missing`.
 - **POSIX only.** Confinement needs `dir_fd` support in `os.open` (Linux,
   macOS). Windows is not supported by the M1 backend.
 

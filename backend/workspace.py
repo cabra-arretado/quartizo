@@ -39,6 +39,7 @@ import db
 MAX_REL_PATH_CHARS = 1024
 MAX_SEGMENT_BYTES = 255
 MAX_NAME_CHARS = 80
+PSEUDO_FS = ("/proc", "/sys", "/dev")
 
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
@@ -94,6 +95,18 @@ def validate_relpath(rel: object) -> list[str]:
     return segments
 
 
+def os_error(err: OSError) -> ApiError:
+    """Map an unexpected OSError to a refusal. Never includes the path."""
+    code = err.errno
+    if code in (errno.EACCES, errno.EPERM):
+        return ApiError(403, "permission_denied", "permission denied")
+    if code in (errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)):
+        return ApiError(507, "no_space", "no space left on the device (or quota exceeded)")
+    if code == errno.EROFS:
+        return ApiError(409, "read_only_fs", "the filesystem is read-only")
+    return ApiError(500, "io_error", f"filesystem error ({errno.errorcode.get(code, code)})")
+
+
 def _classify_open_error(err: OSError, parent_fd: int, name: str) -> ApiError:
     # ENOTDIR is ambiguous (a symlink under O_DIRECTORY|O_NOFOLLOW, or a plain
     # file), so look at what is there without following it.
@@ -108,9 +121,7 @@ def _classify_open_error(err: OSError, parent_fd: int, name: str) -> ApiError:
         return ApiError(403, "symlink_refused", "symlinks are not followed inside a workspace")
     if err.errno == errno.ENOENT:
         return ApiError(404, "not_found", "no such file")
-    if err.errno in (errno.EACCES, errno.EPERM):
-        return ApiError(403, "permission_denied", "permission denied")
-    return ApiError(500, "io_error", f"filesystem error ({errno.errorcode.get(err.errno, err.errno)})")
+    return os_error(err)
 
 
 def open_root(root: str) -> int:
@@ -138,10 +149,18 @@ def open_root(root: str) -> int:
         raise
 
 
+def _owned(fd: int) -> int:
+    """Return *fd* if the directory belongs to this uid; otherwise close it and refuse."""
+    if os.fstat(fd).st_uid != os.getuid():
+        os.close(fd)
+        raise ApiError(403, "not_owned", "a folder in this path belongs to another user")
+    return fd
+
+
 def open_dir_at(parent_fd: int, name: str, *, create: bool = False) -> int:
-    """Open one directory segment relative to *parent_fd*, never following a symlink."""
+    """Open one directory segment relative to *parent_fd*: no symlink, owned by us."""
     try:
-        return os.open(name, _DIR_FLAGS, dir_fd=parent_fd)
+        return _owned(os.open(name, _DIR_FLAGS, dir_fd=parent_fd))
     except FileNotFoundError:
         if not create:
             raise ApiError(404, "not_found", "no such directory") from None
@@ -154,7 +173,7 @@ def open_dir_at(parent_fd: int, name: str, *, create: bool = False) -> int:
     except OSError as err:
         raise _classify_open_error(err, parent_fd, name) from None
     try:
-        return os.open(name, _DIR_FLAGS, dir_fd=parent_fd)
+        return _owned(os.open(name, _DIR_FLAGS, dir_fd=parent_fd))
     except OSError as err:
         raise _classify_open_error(err, parent_fd, name) from None
 
@@ -295,9 +314,17 @@ class Registry:
             home_real = os.path.realpath(home)
             if real == home_real or ident == _ident(home_real):
                 raise ApiError(400, "root_refused", "your home directory itself cannot be a workspace; pick a folder inside it")
+        for pseudo in PSEUDO_FS:
+            if _inside(real, pseudo):
+                raise ApiError(400, "root_refused", f"{pseudo} is not a place for notes")
         for p in self.protected:
             if _overlaps(real, p):
                 raise ApiError(400, "root_refused", "workspace overlaps KiroCrew or Quartizo data")
+        if st.st_uid != os.getuid():
+            raise ApiError(400, "root_not_owned", "the folder must belong to you")
+        if st.st_mode & 0o022:
+            raise ApiError(400, "root_writable_by_others",
+                           "the folder is group- or world-writable; run `chmod go-w` on it first")
         return real
 
     def register(self, raw_path: object, name: object = None) -> Workspace:
