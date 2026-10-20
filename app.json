@@ -1,0 +1,31 @@
+{
+  "name": "quartizo",
+  "version": "0.1.0",
+  "displayName": "Quartizo",
+  "description": "A Kiro Crew app: Quartizo",
+  "author": "felipe",
+  "iconPath": "assets/icon.png",
+  "tags": [],
+  "ui": {
+    "entry": "dist/index.mjs",
+    "pages": [
+      {
+        "route": "/apps/quartizo",
+        "label": "Quartizo",
+        "icon": "Gem"
+      }
+    ]
+  },
+  "backend": {
+    "entryPoint": "backend/server.py",
+    "port": "auto",
+    "healthCheck": "/health",
+    "signedPrincipal": true
+  },
+  "permissions": {
+    "api": [
+      "/api/chat",
+      "/apps/quartizo/api"
+    ]
+  }
+}

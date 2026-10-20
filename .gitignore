@@ -1,0 +1,8 @@
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+.coverage
+# ui/dist is intentionally NOT ignored: installs copy the tree and the
+# publishing guide expects the built bundle (ui/dist/index.mjs) committed.
