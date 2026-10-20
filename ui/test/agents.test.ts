@@ -21,7 +21,7 @@ import {
   tasksForSession,
   VISIBILITY_CANNOT,
   workspaceForSession,
-} from '../src/agents'
+} from '../src/agentsModel'
 import type { Repo } from '../src/gitApi'
 import type { Workspace } from '../src/notesApi'
 import type { Task } from '../src/tasksApi'

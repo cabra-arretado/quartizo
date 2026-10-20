@@ -9,7 +9,7 @@ dashboard page (ui/dist/index.mjs, rendered by the host)
   board.ts       column grouping, move/reindex mirror, keyboard moves, drop index
   taskContext.ts bounded task context block for an agent prompt
   Agents.tsx     read-only session / tool / subagent monitor, bounded polling (M5)
-  agents.ts      slot rows, visibility classification, status, transcript summary, links
+  agentsModel.ts     slot rows, visibility classification, status, transcript summary, links
   freshness.ts   poll cadence, backoff, stale-since, restart detection
   Git.tsx        repo picker/registration, changed-files list, virtualized diff viewer (M4)
   gitApi.ts      typed client for .../repos (ids, a path and a mode only)

@@ -27,7 +27,7 @@ import {
   VISIBILITY_CAN,
   VISIBILITY_CANNOT,
   workspaceForSession,
-} from './agents'
+} from './agentsModel'
 import { Alert } from './Chat'
 import {
   freshnessView,

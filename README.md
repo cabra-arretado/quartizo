@@ -40,7 +40,7 @@ backend/tasks.py      task CRUD, ordered moves, JSON import/export (M3)
 backend/gitrepo.py    repo registry + hardened read-only git: status, diff (M4)
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
                       (src/*.ts: tested logic; src/*.tsx: components)
-                      (agents.ts / freshness.ts + Agents.tsx: M5 monitoring)
+                      (agentsModel.ts / freshness.ts + Agents.tsx: M5 monitoring)
 tests/backend/        backend auth unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
 docs/                 App Kit notes, compatibility matrix, architecture, threat model,
