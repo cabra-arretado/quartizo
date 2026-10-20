@@ -41,6 +41,7 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | QTZ-003 page creates a slot and mounts `ChatEmbed` with `onSend`; error states for `slot_not_found` / `session_approval_not_granted` | Met as code; the page has not been rendered in a real host (app not yet trusted/enabled) |
 | QTZ-004 workspace registry and confinement | Met, by unit and real HTTP tests (`tests/backend/test_workspace.py`). Not run inside the gateway sandbox (app not enabled) |
 | QTZ-005 Markdown read/write API | Met, by unit and real HTTP tests (`tests/backend/test_notes.py`). Delete moves to `.trash` (no unlink) |
+| QTZ-006 notes UI | Met as code with vitest coverage of the logic modules (client, editor/conflict state, line endings, XSS, list navigation). **Not rendered in a real host** (app not enabled). One manual smoke run (2026-10-20): the components were built against a throwaway stub SDK with an in-memory fake backend (not committed) and driven in a browser. Open, split preview, 409 notice then explicit overwrite (CRLF kept), delete confirmation, arrow-key + Enter open, mixed-endings read-only, and the Chat tab all worked |
 | QTZ-003 slot ownership | **accepted: owner-session default (user decision)**. Page-created slots are owner sessions, accepted for the MVP. Facts (read at f62ab4fd, rechecked unchanged in 0.10.0rc4): the page's `useAppApi()` client is a plain same-origin `fetch` that adds only `X-Session-Key`, so the gateway authenticates it by the owner's `mc_token_<port>` cookie and sets `request["app"] = ""` (`dashboard/token_auth.py`). `POST /api/chat/slots` records app ownership only from `request["app"]` (`dashboard/chat_api/slot_create.py`). So the session the page creates is an owner session with `app == ""`, called a "Quartizo-created session" here. App ownership would need a backend-mediated app-token path, which is not built. Measured on 0.10.0rc4: an app-token create returns a row with `app: "quartizo"`, `origin: "app"`. |
 
 ## Verified by tests
@@ -61,6 +62,9 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | Conflicts: external edit before save -> 409 with `currentHash`; edit landing *during* the temp write -> 409 (late re-check); deleted note -> 409, not re-created | Unit + real HTTP | `tests/backend/test_notes.py` |
 | Rename / overwrite needs `overwrite` + `confirm` (displaced note kept in `.trash`); delete needs `confirm: true` and moves to `.trash` with collision suffixes; `.trash` symlink refused | Unit + real HTTP | `tests/backend/test_notes.py` |
 | List/search: hidden entries and symlinks skipped, name vs content match, all bounds (count, depth, entries, query length, large files) | Unit tests | `tests/backend/test_notes.py` |
+| Markdown preview is sanitized: 30 XSS payloads (raw HTML, event handlers, `javascript:` in many encodings, `data:`/`vbscript:`/`file:`, protocol-relative and relative links, reference links, autolinks, images); output tags, attributes and `href`s are checked against allowlists | Vitest | `ui/test/markdown.test.ts` |
+| Editor state: dirty tracking, CRLF round trip, mixed endings read-only, 409 never moves the base hash, only an explicit overwrite does | Vitest | `ui/test/editorDoc.test.ts`, `ui/test/lineEndings.test.ts` |
+| Notes client: routes under `/apps/quartizo/api`, query percent-encoding (`+`), `confirm` only with overwrite / delete, 409 `currentHash` parsing, client-side path rules | Vitest with a mocked `AppApi` | `ui/test/notesApi.test.ts` |
 | Built bundle imports only host import-map specifiers and has a default export | Vitest over `ui/dist/index.mjs` (skips before a build) | `ui/test/bundle.test.ts` |
 | `tsc --noEmit` and `vite build` pass | `npm run typecheck`, `npm run build` | — |
 
@@ -130,8 +134,10 @@ Observed upstream behaviour, recorded as findings:
 - **Signed proxy end to end, backend health, and the direct-hit refusal** in a
   real gateway: blocked on trust and enable. Covered locally by
   `tests/backend/test_http.py` and the cross-check with the installed signer.
-- **The page in a real host**: module loading, `ChatEmbed` rendering, UI
-  component props (export names are confirmed; props of `PageHeader`, `Card`,
+- **The page in a real host**: module loading, the Notes/Chat tabs and the
+  notes UI (keyboard navigation, conflict notice, delete confirmation are
+  exercised only through their logic modules), host styling of the plain
+  elements the notes UI uses, `ChatEmbed` rendering, UI component props (export names are confirmed; props of `PageHeader`, `Card`,
   `CardTitle`, `Btn` are not).
 - **Who page requests run as**: read from source (unchanged in 0.10.0rc4),
   not observed. For page calls this means: (a) the session is an owner
@@ -176,6 +182,11 @@ Observed upstream behaviour, recorded as findings:
 - **Stored slot keys are validated**: only names matching
   `^quartizo-[0-9a-z]+-[0-9a-z]{6}$` (the pattern Quartizo generates) are
   reopened. Anything else in localStorage is discarded.
+- **Notes limits (M1)**: `.md` only (lowercase suffix), UTF-8 only (other
+  encodings 415), 2 MiB per note, hidden files/folders and symlinks not
+  shown or reachable, mixed line endings view-only. No `[[wikilinks]]`,
+  backlinks or image display. The list does not watch the disk, so use
+  **Refresh**. The backend is POSIX only.
 - **Unsupported / not built**: Kanban, Git review, agents,
   skills, crons, panel tabs, session controls.
 

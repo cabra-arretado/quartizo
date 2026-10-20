@@ -1,11 +1,17 @@
 # Quartizo
 
 A third-party [KiroCrew](https://github.com/kirodotdev/KiroCrew) App Kit app.
-This first slice is the skeleton: one routed page that embeds an
-**Quartizo-created chat session** (`ChatEmbed` on a slot the page creates;
-it is owned by the dashboard owner, not by the app, see
-[compatibility](docs/compatibility.md)) and a tiny Python
-backend that verifies the gateway's signed proxy requests.
+It is an Obsidian-like workspace of real `.md` files. You register folders
+(for example an existing Obsidian vault), then browse, search, edit and
+preview their notes from the dashboard. The files stay plain Markdown on
+disk. The page also has a **Chat** tab with a Quartizo-created chat session
+(`ChatEmbed` on a slot the page creates; it is owned by the dashboard owner,
+not by the app, see [compatibility](docs/compatibility.md)). A stdlib Python
+backend verifies the gateway's signed proxy requests and does all file
+access, confined to the registered folders.
+
+M1 scope: workspaces and notes only. Kanban, Git and chat context are not
+built yet.
 
 Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
 (after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
@@ -25,9 +31,10 @@ backend/workspace.py  workspace root registry + fd-based path confinement
 backend/db.py         sqlite3 registry DB with a migrations table
 backend/notes.py      .md list/search/read/create/update/rename/delete
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
+                      (src/*.ts: tested logic; src/*.tsx: components)
 tests/backend/        backend auth unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
-docs/                 App Kit notes, compatibility matrix, threat model
+docs/                 App Kit notes, compatibility, architecture, threat model
 ```
 
 ## Requirements
@@ -59,7 +66,8 @@ built bundle.
 # backend: auth acceptance/refusal + real HTTP round-trips (no dependencies)
 python3 -m unittest discover -s tests -t . -v
 
-# frontend: slot creation / error logic with the SDK mocked, plus a
+# frontend: notes client, editor/conflict state, line endings, Markdown XSS,
+# list navigation, slot creation / error logic with the SDK mocked, plus a
 # bundle-imports check (that one skips until `npm run build` has run)
 cd ui && npm test
 ```
@@ -130,11 +138,30 @@ rebuild, then press **Update** in the App Store, then refresh.
 | Grant | Why |
 |---|---|
 | `permissions.api: "/api/chat"` | `ChatEmbed` reads `GET /api/chat/slots/{slot}`, stops via `/api/chat/slots/{slot}/stop`, approves via `/api/chat/slots/{slot}/approve`; the page creates its slot with `POST /api/chat/slots` and sends with `POST /api/chat`. The matcher grants the prefix and its `/` children, so this one entry covers all of them. |
-| `permissions.api: "/apps/quartizo/api"` | The page calls its own backend through the gateway proxy (`/apps/quartizo/api/status`). The SDK client refuses any path not declared; builtin apps declare their own proxy prefix the same way. |
+| `permissions.api: "/apps/quartizo/api"` | The page calls its own backend through the gateway proxy (`/apps/quartizo/api/status`, `/workspaces/...`). The notes feature needs no other grant. The SDK client refuses any path not declared; builtin apps declare their own proxy prefix the same way. |
 | `backend.signedPrincipal: true` | Not a permission, but security-relevant: the backend receives a signed claim naming the caller kind and refuses requests without one. |
 | *not granted:* `permissions.sessionApproval` | It lets an app act on **any** local user session, far beyond the sessions Quartizo creates. Per the gateway source, page requests made with `useAppApi()` carry the dashboard owner's session cookie, not an app token, so Approve/Reject in the embed are decided as the owner and do not need this grant. If a host ever runs the page under an app token, those decisions return 403 `session_approval_not_granted`, which the page reports. Adding the grant later disables the app until the user re-enables it. |
 | *not granted:* `/api/upload/file` | Attachments are **unsupported**: without this grant the embed hides its attach control and uploads are refused. |
 | *not granted:* `events`, `storage`, `cron`, `network`, `memory`, `mcpTools`, ... | Unused. `ChatEmbed` polls; it does not need WS events. |
+
+## Using the notes
+
+1. Open the app, **Notes** tab, then **Add workspace**. Enter an absolute folder
+   path (not `/` and not your home directory itself; a folder inside it).
+2. Pick a note in the list (arrow keys + Enter work) or **New note**
+   (`folder/name`; `.md` is added). Search filters by path. Tick
+   **Search contents** to search inside notes too.
+3. Edit in the textarea. **Ctrl/Cmd+S** saves. **Edit / Split / Preview**
+   switches the view. The preview is sanitized (no raw HTML, no scripts, no
+   images loaded, only http(s)/mailto links).
+4. If the file changed on disk since you opened it, Save is refused and a
+   notice offers **Reload from disk**, **Keep editing** or **Overwrite with my
+   version…** (explicit, never automatic).
+5. **Delete…** asks first, then moves the note to `<workspace>/.trash/`.
+
+Notes that mix line-ending styles open read-only: a textarea would normalize
+them. See [docs/architecture.md](docs/architecture.md) for the editor
+choice.
 
 ## Backend contract
 

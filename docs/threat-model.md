@@ -1,8 +1,8 @@
 # Threat model (M1: Markdown workspaces)
 
-Scope: the M1 sections only. These are workspace confinement, symlinks and
-TOCTOU, and untrusted Markdown. Kanban, Git and chat-context features (M2+) are
-out of scope.
+Scope: the M1 sections only. These are workspace confinement (§1), symlinks
+and TOCTOU (§2), and untrusted Markdown (§3). Kanban, Git and chat-context
+features (M2+) are out of scope.
 
 ## Assets and actors
 
@@ -115,3 +115,36 @@ a `.trash` symlink is refused and nothing is moved through it.
   enabled. A registered root the sandbox hides shows up as `root_missing`.
 - **POSIX only.** Confinement needs `dir_fd` support in `os.open` (Linux,
   macOS). Windows is not supported by the M1 backend.
+
+## 3. Untrusted Markdown
+
+Note content is rendered into the dashboard page, which holds the owner's
+session and can call every API Quartizo is granted. Hostile Markdown must not
+run script, load resources or navigate with the owner's credentials.
+`ui/src/markdown.ts`:
+
+- **Raw HTML is disabled** (`markdown-it` `html: false`). `<script>`,
+  `<img onerror>`, `<iframe>`, `<svg onload>`, `<details ontoggle>` and HTML
+  comments are emitted as escaped text.
+- **URL allowlist.** A link renders only if its normalized URL starts with
+  `http://`, `https://` or `mailto:`. Anything else stays literal text with no
+  anchor: `javascript:` in any case or with entity, tab or percent tricks,
+  `data:`, `vbscript:`, `file:`, protocol-relative `//host`, and relative
+  paths such as `/api/...`. This covers inline links, reference definitions
+  and autolinks.
+- **No images are loaded.** An image renders as a `[image: alt]` text
+  placeholder, so a preview makes no network request: no tracking pixels and
+  no credentialed GETs against the gateway.
+- **Links open in a new tab** with `rel="noopener noreferrer nofollow"`.
+- Code spans and fences are escaped by markdown-it. Table alignment is the
+  only `style` attribute it emits (`text-align:...`).
+
+`ui/test/markdown.test.ts` renders 30 payloads. For each output it checks
+every tag and attribute against an allowlist and every `href` against the URL
+allowlist, and it asserts that no script-capable element appears.
+
+**Residual risk.** The sanitizer is markdown-it's own escaping plus our
+renderer rules. No second, DOM-based pass (DOMPurify) runs. A markdown-it
+bug that emits raw markup would reach `dangerouslySetInnerHTML`. The pinned
+version and the structural test reduce the risk, but they cannot rule it out.
+Note *names* are rendered as React text, never as HTML.
