@@ -23,6 +23,7 @@ assets/icon.png       512x512 opaque placeholder (same as `kirocrew app init`)
 backend/server.py     stdlib-only HTTP backend: auth, routing
 backend/workspace.py  workspace root registry + fd-based path confinement
 backend/db.py         sqlite3 registry DB with a migrations table
+backend/notes.py      .md list/search/read/create/update/rename/delete
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
 tests/backend/        backend auth unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
@@ -164,5 +165,40 @@ content stays in the files.
 
 See [docs/threat-model.md](docs/threat-model.md) for path confinement
 (no `..`, no hidden segments, no symlinks followed, fd-relative opens).
+
+### Notes
+
+Paths are relative to the workspace root, `/`-separated, and must end in
+`.md`. Query values are percent-decoded once (encode with
+`encodeURIComponent`; a raw `+` would decode to a space). `hash` is the hex
+SHA-256 of the file's bytes. `content` is the file's exact UTF-8 text, BOM and
+line endings included. Files that are not valid UTF-8 are refused (415
+`not_utf8`) and never rewritten.
+
+| Route (under `/api/workspaces/{id}`) | Body / result |
+|---|---|
+| `GET /notes?q=&content=1` | `{files: [{path, size, mtimeMs, match?, snippet?}], truncated}`. Without `q`: every `.md`. With `q`: a case-insensitive substring of the path, plus file contents when `content=1`. Bounded to 2000 results, depth 12, 20000 scanned entries, 64 MiB / 5 s of content search. Hidden entries and symlinks are skipped |
+| `GET /note?path=` | `{path, content, hash, size, mtimeMs}`. 413 over 2 MiB |
+| `POST /note` | `{path, content}` -> 201 `{path, hash, size, mtimeMs}`. Creates missing folders; 409 `exists` instead of overwriting |
+| `PUT /note` | `{path, content, expectedHash}` -> `{path, hash, size, mtimeMs}`. 409 `conflict` with `currentHash` (null if deleted) / `currentMtimeMs` when the file changed since it was read |
+| `POST /rename` | `{from, to, expectedHash?, overwrite?, confirm?}` -> `{path, trashed}`. An existing `to` is 409 `exists` unless **both** `overwrite: true` and `confirm: true`; then the displaced note goes to `.trash` first |
+| `POST /delete` | `{path, confirm: true, expectedHash?}` -> `{trashed}`. Without `confirm: true`: 400 `confirm_required` |
+
+**Writes** are atomic: a temp file in the same folder, `fsync`, then
+`os.replace` (update) or `link` (create, rename and trash, which fail instead
+of clobbering), then `fsync` of the folder. An update keeps the file's mode.
+Notes are capped at 2 MiB on read and on write.
+
+**Delete never unlinks.** It moves the note to `<workspace>/.trash/<same
+relative path>`, the folder Obsidian uses for its own trash, adding ` 1`,
+` 2`... on a name collision. Restore or empty `.trash` with any file manager;
+the API cannot reach it (hidden segment).
+
+**Conflicts.** The hash decides, not the mtime: mtime can have coarse
+granularity and changes without a content change. `mtimeMs` is returned for
+display. The current hash is re-checked after the temp file is written and
+right before the replace, so an external edit is never silently overwritten.
+A residual window of microseconds between that check and `os.replace` remains
+(see the threat model).
 - Binds `127.0.0.1:$PORT` only and never logs headers, the query string or the
   secret.

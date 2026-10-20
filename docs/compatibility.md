@@ -40,6 +40,7 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | QTZ-002 signed backend | Met (unit + real HTTP tests) |
 | QTZ-003 page creates a slot and mounts `ChatEmbed` with `onSend`; error states for `slot_not_found` / `session_approval_not_granted` | Met as code; the page has not been rendered in a real host (app not yet trusted/enabled) |
 | QTZ-004 workspace registry and confinement | Met, by unit and real HTTP tests (`tests/backend/test_workspace.py`). Not run inside the gateway sandbox (app not enabled) |
+| QTZ-005 Markdown read/write API | Met, by unit and real HTTP tests (`tests/backend/test_notes.py`). Delete moves to `.trash` (no unlink) |
 | QTZ-003 slot ownership | **accepted: owner-session default (user decision)**. Page-created slots are owner sessions, accepted for the MVP. Facts (read at f62ab4fd, rechecked unchanged in 0.10.0rc4): the page's `useAppApi()` client is a plain same-origin `fetch` that adds only `X-Session-Key`, so the gateway authenticates it by the owner's `mc_token_<port>` cookie and sets `request["app"] = ""` (`dashboard/token_auth.py`). `POST /api/chat/slots` records app ownership only from `request["app"]` (`dashboard/chat_api/slot_create.py`). So the session the page creates is an owner session with `app == ""`, called a "Quartizo-created session" here. App ownership would need a backend-mediated app-token path, which is not built. Measured on 0.10.0rc4: an app-token create returns a row with `app: "quartizo"`, `origin: "app"`. |
 
 ## Verified by tests
@@ -55,6 +56,11 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | Relative-path refusals: `..`, `.`, empty segments, absolute, backslash, control chars, hidden segments, length; percent-encoding not re-decoded; no Unicode normalization | Unit tests | `tests/backend/test_workspace.py` |
 | fd-based confinement: symlinks out of / inside the root and dangling ones refused; root or its parent swapped for a symlink -> `root_changed`; FIFO and directory are not files | Unit tests on real temp trees | `tests/backend/test_workspace.py` |
 | Workspace routes: signed round trip, 401 unsigned, 403 for every non-owner principal | Real HTTP | `tests/backend/test_workspace.py` |
+| Notes: exact byte round-trip (LF, CRLF, mixed, lone CR, BOM, no trailing newline, NUL, non-BMP), `.md` only, 2 MiB cap on read and write, non-UTF-8 refused | Unit tests | `tests/backend/test_notes.py` |
+| Atomic writes: new inode (no write through a hard link), mode kept, no temp left behind; create never clobbers | Unit tests | `tests/backend/test_notes.py` |
+| Conflicts: external edit before save -> 409 with `currentHash`; edit landing *during* the temp write -> 409 (late re-check); deleted note -> 409, not re-created | Unit + real HTTP | `tests/backend/test_notes.py` |
+| Rename / overwrite needs `overwrite` + `confirm` (displaced note kept in `.trash`); delete needs `confirm: true` and moves to `.trash` with collision suffixes; `.trash` symlink refused | Unit + real HTTP | `tests/backend/test_notes.py` |
+| List/search: hidden entries and symlinks skipped, name vs content match, all bounds (count, depth, entries, query length, large files) | Unit tests | `tests/backend/test_notes.py` |
 | Built bundle imports only host import-map specifiers and has a default export | Vitest over `ui/dist/index.mjs` (skips before a build) | `ui/test/bundle.test.ts` |
 | `tsc --noEmit` and `vite build` pass | `npm run typecheck`, `npm run build` | — |
 

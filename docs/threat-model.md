@@ -73,7 +73,7 @@ descriptors (`workspace.open_root`, `open_dir_at`, `open_file_at`):
 2. Each segment of the relative path is opened with `openat(parent_fd, seg,
    O_NOFOLLOW ...)`. **No symlink inside a workspace is followed, whether it
    points out of the root or stays inside it.** A symlink yields 403
-   `symlink_refused`.
+   `symlink_refused`. Listing skips symlinks and hidden entries.
 3. The final file is opened with `O_NOFOLLOW | O_NONBLOCK` and then
    `fstat`-ed: it must be a regular file. FIFOs, sockets and devices are
    refused without blocking.
@@ -82,7 +82,22 @@ Because the open *is* the check, there is no window in which a path can be
 swapped between validation and use. The kernel resolves each component
 relative to an fd we already hold.
 
+**Writes** never write in place. The temp file is created with
+`O_CREAT | O_EXCL | O_NOFOLLOW` relative to the parent fd. It is then moved
+with `renameat` (update) or `linkat` (create, rename, trash; these fail with
+`EEXIST` instead of clobbering). `.trash` is opened like any other segment, so
+a `.trash` symlink is refused and nothing is moved through it.
+
 **Residual risks (accepted for M1):**
+
+- **Update race window.** The current hash is re-checked after the temp file
+  is fully written, immediately before `os.replace`. An external write that
+  lands in the microseconds between that check and the replace is lost. That
+  version is overwritten, not merged. Closing it needs a lock that every
+  editor honours, and none exists for plain files.
+- **Filesystems without hard links** (FAT/exFAT, some network and FUSE
+  mounts): create, rename and delete answer 409 `links_unsupported` rather
+  than fall back to a clobbering rename. Update (plain `os.replace`) works.
 
 - **Hard links.** A hard link inside the workspace to a file elsewhere is a
   regular file and is readable. Creating one needs write access to the

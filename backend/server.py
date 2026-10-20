@@ -44,6 +44,7 @@ from urllib.parse import parse_qs, urlsplit
 # directory off sys.path; put it back (first) so the sibling modules load.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import notes  # noqa: E402
 from workspace import ApiError, Registry  # noqa: E402
 
 APP_NAME = "quartizo"
@@ -52,7 +53,8 @@ SECRET_ENV = "KIROCREW_PROXY_SECRET"
 PROXY_HEADER = "X-KiroCrew-Proxy"
 PRINCIPAL_HEADER = "X-KiroCrew-Principal"
 MAX_SKEW_SECONDS = 60
-MAX_BODY_BYTES = 1 << 20
+# A note may be 2 MiB; JSON escaping can grow it (worst case \u00XX, 6x).
+MAX_BODY_BYTES = 6 * (2 << 20) + (64 << 10)
 MAX_PRINCIPAL_HEADER_BYTES = 4096
 
 _TS_RE = re.compile(r"[0-9]{1,12}")
@@ -286,8 +288,31 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "DELETE":
                     registry.unregister(ws_id)
                     return 200, {"ok": True}
-            return None
+                return None
+            if len(parts) == 4:
+                return self._handle_notes(registry, ws_id, parts[3], query)
         return None
+
+    def _handle_notes(self, registry: Registry, ws_id: int, action: str, query: dict) -> tuple[int, dict] | None:
+        method = self.command
+        if (method, action) not in _NOTE_ROUTES:
+            return None
+        root = registry.get(ws_id).path
+        if method == "GET" and action == "notes":
+            return 200, notes.list_notes(root, _q(query, "q"), _q(query, "content") in ("1", "true"))
+        if method == "GET":  # note
+            return 200, notes.read_note(root, _q(query, "path", None))
+        body = self._json_body()
+        if action == "note" and method == "POST":
+            return 201, notes.create_note(root, body.get("path"), body.get("content"))
+        if action == "note":  # PUT
+            return 200, notes.update_note(root, body.get("path"), body.get("content"), body.get("expectedHash"))
+        if action == "rename":
+            return 200, notes.rename_note(root, body.get("from"), body.get("to"),
+                                          overwrite=body.get("overwrite", False), confirm=body.get("confirm", False),
+                                          expected_hash=body.get("expectedHash"))
+        return 200, notes.delete_note(root, body.get("path"), confirm=body.get("confirm"),
+                                      expected_hash=body.get("expectedHash"))
 
     def _json_body(self) -> dict:
         try:
@@ -331,6 +356,17 @@ class Handler(BaseHTTPRequestHandler):
         path = (getattr(self, "path", "") or "").split("?", 1)[0]
         status = args[1] if format.startswith('"%s"') and len(args) > 1 else "-"
         sys.stderr.write(f"{APP_NAME}: {command} {path} {status}\n")
+
+
+_NOTE_ROUTES = frozenset({
+    ("GET", "notes"), ("GET", "note"), ("POST", "note"), ("PUT", "note"),
+    ("POST", "rename"), ("POST", "delete"),
+})
+
+
+def _q(query: dict, key: str, default: str | None = "") -> str | None:
+    values = query.get(key)
+    return values[0] if values else default
 
 
 def _parse_id(raw: str) -> int | None:
