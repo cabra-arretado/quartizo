@@ -43,20 +43,24 @@ ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
                       (agents.ts / freshness.ts + Agents.tsx: M5 monitoring)
 tests/backend/        backend auth unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
-docs/                 App Kit notes, compatibility, architecture, threat model
+docs/                 App Kit notes, compatibility matrix, architecture, threat model,
+                      dependencies/audit, CHANGELOG
+Makefile, pyproject.toml, .github/workflows/ci.yml   quality gates
 ```
 
 ## Requirements
 
-- Node 22.12+ (24 LTS recommended upstream; developed on Node 26) and npm.
-- Python 3.10+ (stdlib only; the backend has no dependencies).
+- Node 22.12+ (24 LTS recommended upstream; developed on Node 26; CI uses 22) and npm.
+- Python 3.10+ (stdlib only; the backend has no dependencies; CI tests 3.12 and 3.13).
+- git 2.38+ for the Git tab.
+- macOS or Linux. Windows is unsupported.
 - A running KiroCrew gateway to actually use the app (not needed for tests).
 
 ## Build the UI
 
 ```bash
 cd ui
-npm install
+npm ci
 npm run typecheck     # tsc --noEmit
 npm run build         # -> ui/dist/index.mjs
 ```
@@ -68,6 +72,25 @@ in `ui/src/kirocrew-sdk.d.ts`.
 
 Commit `ui/dist/index.mjs`: installs copy the tree and the gateway serves the
 built bundle.
+
+## Quality gates (`make`)
+
+```bash
+make check    # lint + test + dist-check: what CI runs
+make lint     # ruff check . and tsc --noEmit (strict)
+make test     # backend unittest, then `npm test` (builds, then vitest)
+make build    # rebuild ui/dist/index.mjs
+```
+
+Needs `ruff` on PATH (`pipx install ruff`; override with `make RUFF="uvx ruff"`)
+and `cd ui && npm ci` once. `dist-check` fails if the committed `ui/dist`
+differs from a fresh build, so commit the bundle after UI changes. Python
+lint is a curated ruff rule set (`pyproject.toml`); the formatter is not
+enforced because it would reformat about 24% of lines. The UI has no eslint:
+`tsc` strict plus vitest cover it, and a lint config for ~4k lines of
+TS/React would add dependencies for little signal. CI
+(`.github/workflows/ci.yml`) runs the same steps on ubuntu and macOS, Python
+3.12/3.13, Node 22.
 
 ## Run the tests
 
@@ -109,18 +132,36 @@ The tests exchange the app's own secret for fresh app tokens
 
 ## Install into KiroCrew
 
+Platform: macOS and Linux. The backend is POSIX only (fd-relative file access);
+**Windows is unsupported**.
+
+### Install
+
 ```bash
 kirocrew gateway                                       # in its own terminal
-cd ui && npm install && npm run build && cd ..
+cd ui && npm ci && npm run build && cd ..               # or `make build`
 kirocrew app install /absolute/path/to/quartizo        # copies + registers
 ```
 
-Third-party apps must be **trusted** before they can be enabled or run a
-backend: Dashboard -> Settings -> Security -> Third-party apps, and trust
-`quartizo` (stored as the JSON array `agent.apps_trusted`, e.g. `["quartizo"]`).
-No `kirocrew app trust` command exists (checked on 0.10.0rc4). Until trusted,
-`kirocrew app install` registers the app but warns "registration blocked by
-execution policy", and `kirocrew app enable quartizo` is refused.
+`ui/dist/index.mjs` is committed, so the build step is only needed after UI
+changes. Until the app is trusted, `install` registers it but warns
+"registration blocked by execution policy".
+
+### Trust
+
+Third-party apps must be trusted before they can be enabled or run a backend.
+Trust is the JSON array `agent.apps_trusted`:
+
+```bash
+kirocrew config get agent.apps_trusted                 # see what is already trusted
+kirocrew config set agent.apps_trusted '["quartizo"]'  # replaces the list: include existing entries
+```
+
+The same setting is in Dashboard -> Settings -> Security -> Third-party apps.
+There is no `kirocrew app trust` command (checked on 0.10.0rc4). `enable` is
+refused until the app is trusted.
+
+### Enable
 
 ```bash
 kirocrew app enable quartizo
@@ -129,6 +170,19 @@ kirocrew app info quartizo
 
 The enable/consent dialog lists the permissions below. Open the app at
 `/apps/quartizo` in the dashboard (`kirocrew token` prints the URL).
+
+### Update
+
+Rebuild if the UI changed, then press **Update** in the App Store and refresh
+the page. Do not use `uninstall` as part of an update unless you accept the
+extra step below.
+
+**Measured on 0.10.0rc4: `kirocrew app uninstall quartizo` keeps your data
+but CLEARS the trust.** After uninstall and reinstall the app is untrusted
+again, so run `kirocrew config set agent.apps_trusted '["quartizo"]'` (with
+any other trusted apps in the list) and `kirocrew app enable quartizo` again.
+Back up `quartizo.sqlite3` before upgrading: DB migrations are forward-only
+(see [docs/CHANGELOG.md](docs/CHANGELOG.md) for migration and rollback notes).
 
 ### Dev mode (UI hot reload)
 
@@ -142,10 +196,27 @@ If this repo lives outside the install root, the gateway requires the operator
 to run `kirocrew app dev quartizo --confirm-out-of-install-root` in their own
 terminal (agent shells are refused). Backend changes need the app disabled and
 re-enabled (unverified: whether dev mode restarts the backend is unspecified
-upstream). Without dev mode:
-rebuild, then press **Update** in the App Store, then refresh.
+upstream). Without dev mode: rebuild, then press **Update** in the App Store,
+then refresh. Dev mode has not been exercised live.
+
+### Uninstall and data location
+
+```bash
+kirocrew app uninstall quartizo      # preserves app data by default; clears trust
+```
+
+Data lives in `$KIROCREW_HOME/apps/quartizo/data/` (default
+`~/.kiro/crew/apps/quartizo/data/`): `quartizo.sqlite3` (workspace registry,
+tasks, repos, recorded sessions), `git-home/` (empty HOME for git) and
+`logs/`. Your notes are never there: they stay in your own folders as plain
+`.md` files, and Quartizo's only side effect in them is `<workspace>/.trash/`
+for deleted notes. Removing the data directory forgets registrations and
+tasks; it deletes no note.
 
 ## Permissions (and why)
+
+`app.json` requests exactly two API grants and nothing else. Each is needed;
+everything else is deliberately not granted.
 
 | Grant | Why |
 |---|---|

@@ -1,5 +1,41 @@
 # Compatibility
 
+## Compatibility matrix (0.1.0)
+
+Only what the sections below record. "Live" means exercised against a running
+kirocrew gateway; "tests" means unit/HTTP tests with no gateway.
+
+### Environments
+
+| | Version | Status |
+|---|---|---|
+| **KiroCrew** | **0.10.0rc4** | Verified live (installed wheel, gateway on `127.0.0.1:5476`, app trusted and enabled). No other version has been run; `app.json` sets no `minKiroCrewVersion`. Source pin: `f62ab4fd` (after v0.9.0) |
+| **OS** | Ubuntu 26.04.1 LTS, x86_64 (Linux 7.0) | Verified live and in tests. |
+| | macOS | CI matrix (`macos-latest`), tests only; the `renameat2` fallback path is what runs there. Not run live. Results are in the CI history, not recorded here |
+| | Windows | Unsupported (POSIX `dir_fd`/`openat` backend); not in CI |
+| **Python** | 3.12.13 | The gateway's own venv ran the backend live. 3.12 and 3.13 are in the CI matrix. 3.14.4 ran the suite locally. The backend is stdlib-only; `pyproject.toml` targets 3.10+ for lint, but 3.10/3.11 are not tested |
+| **Node** | 22 | CI (`npm ci`, typecheck, tests, build, `ui/dist` drift check). Package needs 22.12+ |
+| | 26.11.1 | Developed on, and built the committed `ui/dist` |
+| **git** (runtime, for the Git tab) | 2.53.0 | Real-git tests; minimum enforced by the backend is 2.38 (`git_too_old` below). Not run through the gateway sandbox |
+
+### Features: live versus tests only
+
+| Feature | Live on 0.10.0rc4 | Tests |
+|---|---|---|
+| Install, trust, enable, uninstall (clears trust) | Yes | - |
+| Signed proxy: gateway to backend, owner principal, unsigned direct hit refused | Yes | Yes (`test_proxy_auth.py`, `test_http.py`) |
+| Chat tab: page-created slot, reopen by key, approve/reject refusal without grant | Slot create/reopen and the 403 refusal via app token; embed rendered in the host | Yes (`slots.test.ts`) |
+| Sending a message and getting a reply | **No** (`kiro-cli` not installed) | - |
+| Notes: register workspace, list, open, preview, 409 conflict, reload, save | Yes | Yes |
+| Notes: rename, delete to `.trash`, content search, keyboard navigation | **No** | Yes |
+| Note context to chat (M2) | **No** (not rendered in host) | Logic only (`context.test.ts`) |
+| Tasks API and Kanban board (M3) | **No** (stub-SDK harness only) | Yes (`test_tasks.py`, `board.test.ts`) |
+| Git API and Git tab (M4) | **No** (throwaway harness only; behaviour inside the gateway sandbox unverified) | Yes (real git, `test_git.py`) |
+| Agents tab (M5) | Read-only gateway response shapes (4 integration tests); not the rendered tab | Yes (`agents.test.ts`, `freshness.test.ts`) |
+| Dev mode (`app dev`), in-place update | **No** | - |
+| DB migrations 1-5 | Only those that existed at the time of each live run | Yes (fresh DB; `test_workspace.py` and later) |
+| `renameat2` rename path | **No** (rename/delete not exercised live) | Yes, on Linux; the fallback is forced in tests and runs natively on macOS CI |
+
 ## Pinned upstream
 
 - Written against `kirodotdev/KiroCrew` commit

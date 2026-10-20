@@ -1,9 +1,37 @@
-# Threat model (M1: Markdown workspaces)
+# Threat model
 
-Scope: workspace confinement (§1), symlinks and TOCTOU (§2), untrusted
-Markdown (§3), task metadata (§4, M3), read-only Git (§5, M4) and recorded
-sessions (§6). Chat
-context is covered in [m2.md](m2.md).
+Status: consolidated for 0.1.0 (M6). The summary and the residual risks come
+first; sections 1-9 below are the detail.
+Chat context is covered in [m2.md](m2.md).
+
+## Summary
+
+| # | Threat | Mitigations (detail) | Tests |
+|---|---|---|---|
+| T1 | **Root confinement.** The backend reads or writes outside the folders the owner registered | Opt-in registration; root policy (not `/`, not `$HOME`, not KiroCrew/data dirs, no overlaps, owner-owned, not writable by others); relative-path rules; hidden segments unreachable ([§1](#1-workspace-confinement)) | `tests/backend/test_workspace.py`, `test_hardening.py`, `test_notes.py`, `test_git.py` (same policy) |
+| T2 | **Symlinks and TOCTOU.** A link or a swapped directory redirects an access | No path is resolved then reopened: fd-relative `openat` with `O_NOFOLLOW` from the root; regular-file check on the fd; atomic temp+`link`/`replace` writes; `renameat2(NOREPLACE)` with a verified fallback ([§2](#2-symlinks-and-toctou)) | `test_workspace.py` (fd confinement, `root_changed`), `test_hardening.py` (race injections, fallback rollback), `test_notes.py` (conflicts, atomicity) |
+| T3 | **Auth replay and forgery.** A request is forged, tampered with or replayed to the loopback backend | Body-bound `X-KiroCrew-Proxy` HMAC (constant-time, +/-60 s), signed principal claim bound to method/target/body, one-time request ids in a bounded cache that fails closed, owner-only routes, fail closed with no secret, `127.0.0.1` bind ([§7](#7-auth-replay-and-forgery)) | `test_proxy_auth.py` (incl. upstream-signed vectors), `test_http.py`, `tests/integration/test_gateway.py` (live, when configured) |
+| T4 | **Prompt-context leakage.** Note or task text sent to an agent leaks more than the owner chose, or is read as instructions | Nothing is attached or sent automatically; only an explicit selection/whole note/task block, previewed, capped at 8 KB, fenced, framed as quoted data, header values sanitized; full-chat handoff is a draft (`autoSend: false`); sessions Quartizo did not record are never read ([§8](#8-prompt-context-leakage)) | `ui/test/context.test.ts`, `taskContext.test.ts`, `slots.test.ts`, `agents.test.ts` |
+| T5 | **Untrusted Markdown.** Hostile note text runs script or loads resources in the dashboard | markdown-it with `html: false`, URL allowlist, images never loaded, `rel="noopener noreferrer nofollow"`, React text for names ([§3](#3-untrusted-markdown)) | `ui/test/markdown.test.ts` (30 payloads, allowlist checks) |
+| T6 | **Git outputs and hostile config.** Repo config, attributes or output make Quartizo run code, hang, exhaust memory or mutate the repo | Fixed argv, config/env neutralized, filter drivers blanked, no-spawn `RLIMIT_NPROC` trampoline (fails closed), heap and output caps, timeout, plumbing for diffs, no git stderr to the page, React text rendering ([§5](#5-git-read-only-m4)) | `test_git.py` (hostile config per layer, argv injection, caps, not-mutated snapshot), `ui/test/diffView.test.ts` |
+| T7 | **Command injection.** A request field reaches a shell, an option parser or SQL | The only subprocess is `git`, as an argv list with no shell and server-built flags, paths after `--` as `:(literal)`; SQL values are always bound parameters and the few interpolated identifiers come from fixed in-code lists; no `eval`/`exec`/`os.system` ([§9](#9-command-injection)) | `test_git.py` (argv injection), `test_tasks.py`, `test_slots.py` (key patterns), `test_notes.py`/`test_workspace.py` (path rules) |
+
+## Residual risks
+
+Each is accepted for 0.1.0 and explained in the section named.
+
+1. **Update race** (microseconds between the last hash check and `os.replace`): an external write there is overwritten ([§2](#2-symlinks-and-toctou)).
+2. **Move fallback window** where `renameat2` is unavailable (macOS, some filesystems): two syscalls wide ([§2](#2-symlinks-and-toctou)). CI runs the fallback on macOS.
+3. **Root renamed to a real directory** is served as the registered path; bind mounts and hard links inside a root are not detected ([§2](#2-symlinks-and-toctou)).
+4. **Sanitizer is a single layer** (markdown-it escaping plus renderer rules, no DOMPurify pass) ([§3](#3-untrusted-markdown)).
+5. **Git root-swap race** between the fd check and git's `chdir`; `gitdir:` files are trusted; `RLIMIT_NPROC` does not bind root (Quartizo then refuses to run git); the `RLIMIT_DATA` heap cap is only verified on Linux (macOS does not reliably enforce it, so there the 10 s timeout and output caps are the bound; the bomb tests are skipped there) ([§5](#5-git-read-only-m4)).
+6. **Owner-level compromise is out of scope.** Anything running as the owner (or the owner's page) can read the SQLite DB, call the owner-only API and add session records ([§4](#4-task-metadata-m3), [§6](#6-recorded-sessions-m5-review)).
+7. **Loopback exposure.** The backend listens on `127.0.0.1`; other local processes can reach the port but cannot produce a valid signature without the app secret. The secret file is as private as the owner's account ([§7](#7-auth-replay-and-forgery)).
+8. **Prompt injection is not solved, only framed.** Text the owner sends to an agent can still contain instructions the model follows; the fence and framing line reduce, not remove, that ([§8](#8-prompt-context-leakage)).
+9. **Duplicate context on an ambiguous retry** (response lost after the gateway accepted the send) ([m2.md](m2.md)).
+10. **Platform.** POSIX only (Windows unsupported); sandbox coverage beyond the owner's home was not mapped; Unicode normalization is not applied, so lookalike names can appear twice ([§1](#1-workspace-confinement)).
+11. **Dependencies.** No known advisory affects the shipped runtime (`npm audit --omit=dev`: 0), but the dev toolchain has open advisories ([dependencies.md](dependencies.md)).
+12. **Unverified live:** the git sandbox under the gateway's OS sandbox, and macOS behaviour beyond CI ([compatibility.md](compatibility.md)).
 
 ## Assets and actors
 
@@ -336,3 +364,85 @@ agent cannot add to it (agent principals get 403), but anything running as the
 owner's page can, so it is provenance against accidents and look-alike names,
 not a boundary against the owner. An unrecorded session is shown read-only with
 no transcript read, so a look-alike cannot make Quartizo fetch its content.
+
+## 7. Auth replay and forgery
+
+Only the gateway should reach the backend, but the backend listens on a
+loopback TCP port that any local process can connect to, so every request is
+authenticated on its own (`backend/server.py`).
+
+- **Proxy HMAC.** `X-KiroCrew-Proxy` carries a timestamp and an HMAC-SHA256
+  over timestamp, method, the backend-side target (`/api/<path>[?query]`) and
+  the SHA-256 of the body, keyed with the app secret. Compared in constant
+  time; timestamps outside +/-60 s are refused (also in the future). Because
+  method, path, query and body are signed, a captured header cannot be
+  reused for another request or with a changed body.
+- **Principal claim.** `X-KiroCrew-Principal` is a second signed claim with a
+  domain tag, naming the caller kind, bound to the same method, target and
+  body. Every route requires `owner-session`; app tokens, agent calls and
+  unknown kinds get 403.
+- **Replay.** Each claim has a request id kept in an in-memory cache until
+  its skew window ends. A repeat is refused. The cache is bounded and **fails
+  closed**: when full, new requests are refused rather than evicting an id
+  (which would make that request replayable). A backend restart empties the
+  cache, so a request captured within the last 60 s could be replayed once
+  after a restart (it still needs a valid signature, so it can only repeat
+  something the owner already did).
+- **Fail closed.** With no secret in the environment everything except
+  `/health` answers 503. 404 is returned only after authentication, so route
+  existence is not an oracle. `/health` is unsigned and returns a constant.
+- **Network.** Binds `127.0.0.1` only. At most 16 connections; the bigger
+  body limit for note writes applies only after a cheap timestamp check.
+  Headers, query and secret are never logged.
+
+Verified against the **real upstream signer**: known-answer vectors produced
+by 0.10.0rc4's `proxy_auth.py` verify in the backend, and the live gateway
+run reached the backend through the signed proxy (compatibility.md).
+
+## 8. Prompt-context leakage
+
+Sending note or task text to an agent is the one place Quartizo moves
+workspace content outside the owner's page. Controls (details in
+[m2.md](m2.md)):
+
+- **Explicit only.** Nothing is attached or sent automatically. The owner
+  picks a selection, the whole note, or a task, sees the exact block, and it
+  rides with exactly one message, then is cleared. A context picked for one
+  workspace is refused for another; editing the note afterwards drops it.
+- **Bounded and framed.** At most 8 KB (cut at a character boundary, with a
+  `Truncated:` line). The block is one fenced code block whose fence is longer
+  than any backtick run inside; header values (workspace name, note path) are
+  capped and have control, bidi and line-separator characters replaced; a
+  fixed line says the fenced text is quoted data, not instructions.
+- **No auto-send handoff.** "Open in full chat as draft" always passes
+  `autoSend: false`; the owner reviews and sends in KiroCrew.
+- **Task moves launch nothing**, and `note_ref` / `slot_id` grant nothing
+  (§4).
+- **Agents tab reads only recorded sessions.** Transcripts are read only for
+  keys in `created_slots` (§6); other sessions show metadata only. Transcript
+  text, tool input and subagent tasks are shown as React text, cut to bounds.
+- **No upload grant** (`/api/upload/file`) and no `sessionApproval`, so the
+  app cannot attach files or approve tool calls for other sessions.
+
+**Residual.** What the owner sends is visible to the agent and its runtime,
+and a model may follow instructions inside a hostile note. Quartizo cannot
+prevent that; it makes the transfer deliberate, visible and bounded.
+
+## 9. Command injection
+
+- **Processes.** The only subprocess in the backend is `git` (§5): argv list,
+  no shell, `stdin=DEVNULL`, fixed subcommands and flags chosen in
+  `gitrepo.py`. The page supplies an id, a path and an enum. Paths follow
+  `--` as `:(literal)<path>`, so a leading `-`, `--output=`, `-c`, globs and
+  pathspec magic are inert. `.git` segments, `..`, absolute paths and control
+  characters are refused before git is involved.
+- **No dynamic code.** No `eval`, `exec`, `os.system`, `pickle` or template
+  rendering of request data in the backend.
+- **SQL.** All values are bound parameters. The only interpolated pieces are
+  column names built from fixed in-code sets (for example the task update
+  assignments) and a constant column list. Session keys and `note_ref` are
+  validated by anchored full-match patterns and stored as parameters.
+- **File names** are never passed to a shell or used as an option; they are
+  `openat` components after validation.
+- **UI.** Nothing from notes, git or transcripts reaches `innerHTML` except
+  the sanitized Markdown output (§3).
