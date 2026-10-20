@@ -2,8 +2,12 @@
 
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
-  App.tsx        PageHeader + in-page tabs: Notes | Chat
+  App.tsx        PageHeader + in-page tabs: Notes | Tasks | Chat
   Notes.tsx      workspace picker/registration, note list + search, editor, preview
+  Tasks.tsx      Kanban board of the selected workspace, task details, links (M3)
+  tasksApi.ts    typed client for .../workspaces/{id}/tasks
+  board.ts       column grouping, move/reindex mirror, keyboard moves, drop index
+  taskContext.ts bounded task context block for an agent prompt
   Chat.tsx       the QTZ-003 ChatEmbed session (mounted on first visit, then kept)
   notesApi.ts    typed client for /apps/quartizo/api/workspaces/... (useAppApi)
   editorDoc.ts   open-note state: dirty, save base hash, 409 conflict rules
@@ -32,7 +36,7 @@ Testable logic lives in the plain `.ts` modules and has vitest suites. The
 `app.json` keeps its single `ui.pages` entry (`/apps/quartizo`). Every
 builtin app in 0.10.0rc4 declares exactly one page. Extra pages would each
 add a sidebar entry, and the host's handling of sub-routes was not verified.
-So Notes and Chat are **in-page tabs** (`role="tablist"`, arrow keys switch).
+So Notes, Tasks and Chat are **in-page tabs** (`role="tablist"`, arrow keys switch).
 No manifest change and no new permission was needed: the notes routes sit
 under the already-granted `/apps/quartizo/api`.
 
@@ -124,3 +128,39 @@ current task.
 `/move`. The backend has no chat client at all, so it cannot infer or store
 a runtime state; the UI shows a linked session's state read-only next to
 the human status.
+
+## Board UI (M3)
+
+- **Tabs.** Tasks sits between Notes and Chat on the same page, mounted on
+  first visit and then kept (hidden) like Chat. It shows the board of the
+  workspace selected in Notes, so there is one selection on the page. App
+  relays two things: Notes reports its workspace and open note
+  (`NotesState`), and Tasks sends Notes a one-shot request (`NotesRequest`,
+  by `seq`) to select a workspace and open a note or the chat column. A
+  switch asks first when the open note has unsaved edits.
+- **Drag and drop: native HTML5**, no library. A drag carries the task uid
+  under a private MIME type (`application/x-quartizo-task`), so drops from
+  elsewhere are ignored. The drop index comes from the card midpoints
+  (`board.dropIndex`). A DnD library (not measured here; dnd-kit and similar add
+  tens of KB) would add touch and animation, but nothing the board needs, and
+  it would ship inside our bundle, since the host import map does not have
+  one. The bundle is now 225 KB (74 KB gzip).
+- **Keyboard.** Each card has ← ↑ ↓ → buttons with labels such as
+  "Move “x” to Ready" (`board.moveLabel`). Impossible moves are disabled.
+  Focus returns to the same button on the moved card.
+- **Optimistic moves.** `board.applyMove` mirrors the backend reindex
+  exactly. The board updates at once, then takes the server's list. On a
+  failure it reverts, and on 409 `stale` it reloads and says so.
+- **Edits.** The detail form edits title and description against the
+  version it was loaded from. A newer version with the same title and
+  description (a move, a link change) is adopted silently. Anything else
+  is a real conflict, handled like the note editor (Reload, Keep editing,
+  Overwrite…). Link and unlink are immediate PATCHes on the live version.
+- **Agent prompt.** `taskContext.formatTaskContext` builds the block:
+  header, framing line, a description fence it cannot close, a hard 8 KB
+  cap with the cut stated. It reuses `context.ts` helpers. The block is
+  shown first. *Open in full chat as draft* calls
+  `openChat({slotKey?, message, autoSend: false})`. The session is the
+  task's linked session, else the workspace chat, else a new chat. The
+  board has no other path to the chat API, and a move calls only
+  `POST .../move` (tested).

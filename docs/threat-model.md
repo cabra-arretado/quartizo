@@ -225,6 +225,14 @@ lost updates.
 - **Errors.** A SQLite error answers 503 `db_busy` (lock timeout) or 500
   `db_error`, never with SQL or a path.
 
+- **UI.** The board's drop handler accepts only its own MIME type and a uid
+  of a task on this board. `slot_id` is re-checked with `isLinkableSlot`
+  before any status poll or transcript link. `note_ref` is re-checked with
+  `isNoteRef` before linking and is opened only by Notes through the notes
+  API. An import file is size-checked (4 MiB) and JSON-parsed in the page.
+  Then it goes to the backend, which decides; replace and copy each need an
+  explicit confirmation in the page.
+
 **Residual risks.** Task data is plain SQLite in the app data dir, readable
 by anything running as the owner (like the notes themselves). A move's
 `index` is relative to the server's current column, so a move based on a

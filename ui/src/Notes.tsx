@@ -39,9 +39,23 @@ import {
   renameNote,
   saveNote,
   toFailure,
-  unregisterWorkspace,
   type Workspace,
 } from './notesApi'
+import { removeWorkspace, toTaskFailure } from './tasksApi'
+
+/** Sent by the Tasks tab: select a workspace, then open a note and/or the chat column. */
+export interface NotesRequest {
+  seq: number
+  wsId: number
+  path?: string
+  chat?: boolean
+}
+
+/** What the Tasks tab needs to know about the Notes tab. */
+export interface NotesState {
+  workspace: Workspace | null
+  note: { wsId: number; path: string } | null
+}
 
 const WS_KEY = 'quartizo:workspace'
 const CHAT_OPEN_KEY = 'quartizo:notesChatOpen'
@@ -122,13 +136,23 @@ function ErrorLine({ failure }: { failure: ApiFailure | null }) {
   )
 }
 
-export default function Notes({ api }: { api: AppApi }) {
+export default function Notes(props: {
+  api: AppApi
+  dirtyRef?: { current: boolean }
+  request?: NotesRequest | null
+  onState?: (state: NotesState) => void
+}) {
+  const { api, request, onState } = props
   const [workspaces, setWorkspaces] = useState<Load<Workspace[]>>({ status: 'loading' })
   const [wsId, setWsId] = useState<number | null>(loadWsId)
   const [reloadWs, setReloadWs] = useState(0)
   // Set by the open workspace view; checked before switching workspaces.
-  const dirtyRef = useRef(false)
+  const ownDirty = useRef(false)
+  const dirtyRef = props.dirtyRef ?? ownDirty
   const confirmLeave = () => !dirtyRef.current || window.confirm('Discard unsaved changes to the open note?')
+  // Requests from the Tasks tab are handled once each (seq), across workspace views.
+  const handledSeq = useRef(0)
+  const [note, setNote] = useState<NotesState['note']>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -149,6 +173,24 @@ export default function Notes({ api }: { api: AppApi }) {
   const list = workspaces.status === 'ready' ? workspaces.value : []
   const current = list.find(w => w.id === wsId) ?? null
 
+  useEffect(() => {
+    onState?.({ workspace: current, note: note && current && note.wsId === current.id ? note : null })
+  }, [current, note, onState])
+
+  // A request for another workspace switches to it first (asking about unsaved
+  // edits); the workspace view then opens the note / chat.
+  useEffect(() => {
+    if (!request || request.seq <= handledSeq.current || workspaces.status !== 'ready') return
+    if (!workspaces.value.some(w => w.id === request.wsId)) {
+      handledSeq.current = request.seq
+      return
+    }
+    if (request.wsId !== wsId) {
+      if (confirmLeave()) setWsId(request.wsId)
+      else handledSeq.current = request.seq
+    }
+  }, [request, workspaces]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div style={S.column}>
       <WorkspaceBar
@@ -162,7 +204,16 @@ export default function Notes({ api }: { api: AppApi }) {
         }}
       />
       {current ? (
-        <WorkspaceView key={current.id} api={api} workspace={current} dirtyRef={dirtyRef} confirmLeave={confirmLeave} />
+        <WorkspaceView
+          key={current.id}
+          api={api}
+          workspace={current}
+          dirtyRef={dirtyRef}
+          confirmLeave={confirmLeave}
+          request={request ?? null}
+          handledSeq={handledSeq}
+          onNotePath={setNote}
+        />
       ) : (
         workspaces.status === 'ready' && (
           <p className="text-sm text-muted">
@@ -188,6 +239,8 @@ function WorkspaceBar(props: {
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  // Set when the backend refused the removal because the workspace still has tasks.
+  const [taskCount, setTaskCount] = useState<number | null>(null)
   const list = load.status === 'ready' ? load.value : []
 
   const register = async () => {
@@ -206,21 +259,28 @@ function WorkspaceBar(props: {
     }
   }
 
-  const remove = async () => {
+  const remove = async (deleteTasks = false) => {
     if (!current) return
     setBusy(true)
     setFailure(null)
     try {
-      await unregisterWorkspace(api, current.id)
+      await removeWorkspace(api, current.id, deleteTasks)
       // Forget its chat session too (uids are never reused, so this is tidiness, not safety).
       if (isWorkspaceUid(current.uid)) saveWorkspaceSlot(storage(), current.uid, null)
       setConfirmRemove(false)
+      setTaskCount(null)
       props.onChanged(null)
     } catch (err) {
-      setFailure(toFailure(err))
+      const f = toTaskFailure(err)
+      if (f.code === 'project_has_tasks' && !deleteTasks) setTaskCount(f.taskCount ?? 0)
+      else setFailure(f)
     } finally {
       setBusy(false)
     }
+  }
+  const cancelRemove = () => {
+    setConfirmRemove(false)
+    setTaskCount(null)
   }
 
   return (
@@ -261,13 +321,21 @@ function WorkspaceBar(props: {
       {confirmRemove && current && (
         <div role="alertdialog" aria-label="Remove workspace" style={S.notice}>
           <span className="text-sm">
-            Stop showing “{current.name}” in Quartizo? The folder and its files are not touched.
+            {taskCount === null
+              ? `Stop showing “${current.name}” in Quartizo? The folder and its files are not touched.`
+              : `“${current.name}” has ${taskCount} task(s) on its board. Removing the workspace also deletes them. Use Export JSON in the Tasks tab first to keep a copy.`}
           </span>
           <div style={S.row}>
-            <Btn onClick={remove} disabled={busy}>
-              Remove workspace
-            </Btn>
-            <Btn onClick={() => setConfirmRemove(false)} disabled={busy}>
+            {taskCount === null ? (
+              <Btn onClick={() => void remove()} disabled={busy}>
+                Remove workspace
+              </Btn>
+            ) : (
+              <Btn onClick={() => void remove(true)} disabled={busy}>
+                Remove and delete {taskCount} task(s)
+              </Btn>
+            )}
+            <Btn onClick={cancelRemove} disabled={busy}>
               Cancel
             </Btn>
           </div>
@@ -307,8 +375,11 @@ function WorkspaceView(props: {
   workspace: Workspace
   dirtyRef: { current: boolean }
   confirmLeave: () => boolean
+  request: NotesRequest | null
+  handledSeq: { current: number }
+  onNotePath: (note: NotesState['note']) => void
 }) {
-  const { api, workspace, dirtyRef } = props
+  const { api, workspace, dirtyRef, request, handledSeq, onNotePath } = props
   const wsId = workspace.id
   const [q, setQ] = useState('')
   const [searchContent, setSearchContent] = useState(false)
@@ -460,6 +531,17 @@ function WorkspaceView(props: {
   }
 
   const openPath = doc?.path ?? docLoad?.path
+
+  useEffect(() => onNotePath(doc ? { wsId, path: doc.path } : null), [doc?.path, wsId, onNotePath]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A request from the Tasks tab for this workspace: open its note (through the
+  // notes API, which applies all path rules) and/or the chat column. Once each.
+  useEffect(() => {
+    if (!request || request.wsId !== wsId || request.seq <= handledSeq.current) return
+    handledSeq.current = request.seq
+    if (request.chat) showChat(true)
+    if (request.path && request.path !== doc?.path) void open(request.path)
+  }, [request, wsId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div

@@ -69,8 +69,9 @@ built bundle.
 # backend: auth acceptance/refusal + real HTTP round-trips (no dependencies)
 python3 -m unittest discover -s tests -t . -v
 
-# frontend: notes client, editor/conflict state, line endings, Markdown XSS,
-# list navigation, slot creation / error logic with the SDK mocked, plus a
+# frontend: notes and tasks clients, editor/conflict state, line endings,
+# Markdown XSS, list navigation, board ordering and keyboard moves, note and
+# task context formatting, slot logic with the SDK mocked, plus a
 # bundle-imports check (that one skips until `npm run build` has run)
 cd ui && npm test
 ```
@@ -143,9 +144,43 @@ rebuild, then press **Update** in the App Store, then refresh.
 | `permissions.api: "/api/chat"` | `ChatEmbed` reads `GET /api/chat/slots/{slot}`, stops via `/api/chat/slots/{slot}/stop`, approves via `/api/chat/slots/{slot}/approve`; the page creates its slot with `POST /api/chat/slots` and sends with `POST /api/chat`. The matcher grants the prefix and its `/` children, so this one entry covers all of them. |
 | `permissions.api: "/apps/quartizo/api"` | The page calls its own backend through the gateway proxy (`/apps/quartizo/api/status`, `/workspaces/...`). The notes feature needs no other grant. The SDK client refuses any path not declared; builtin apps declare their own proxy prefix the same way. |
 | `backend.signedPrincipal: true` | Not a permission, but security-relevant: the backend receives a signed claim naming the caller kind and refuses requests without one. |
+| *M3: no change* | The task routes sit under the already granted `/apps/quartizo/api`. The board's transcript link, status poll and `openChat` draft use the same `/api/chat` grant and host hooks as M2. `app.json` is unchanged |
 | *not granted:* `permissions.sessionApproval` | It lets an app act on **any** local user session, far beyond the sessions Quartizo creates. Per the gateway source, page requests made with `useAppApi()` carry the dashboard owner's session cookie, not an app token, so Approve/Reject in the embed are decided as the owner and do not need this grant. If a host ever runs the page under an app token, those decisions return 403 `session_approval_not_granted`, which the page reports. Adding the grant later disables the app until the user re-enables it. |
 | *not granted:* `/api/upload/file` | Attachments are **unsupported**: without this grant the embed hides its attach control and uploads are refused. |
 | *not granted:* `events`, `storage`, `cron`, `network`, `memory`, `mcpTools`, ... | Unused. `ChatEmbed` polls; it does not need WS events. |
+
+## Using the board (Tasks tab)
+
+The **Tasks** tab shows the board of the workspace selected in **Notes** (one
+project per workspace). Columns: Backlog, Ready, In Progress, Review, Done.
+
+1. **Add task** creates a card (title plus column). Click a card's title to
+   open its details: edit the title and the Markdown description (Edit /
+   Preview, sanitized like notes), **Save** (Ctrl/Cmd+S), **Delete…** asks
+   first.
+2. **Move** a card by dragging it (native HTML5 drag and drop), or with its
+   ← ↑ ↓ → buttons (each has an aria label such as "Move “x” to Ready";
+   focus stays on the card). A move only changes the column and position.
+   It never starts, messages or stops an agent.
+3. **Links.** *Link current note* stores the note open in Notes;
+   *Open in Notes* opens it there (through the notes API). *Link this
+   workspace chat* stores the workspace's chat session (open the Notes chat
+   column once first). A linked session gets *Open transcript in KiroCrew
+   chat* and, for the workspace chat, *Show in Notes chat column*. Its state
+   (idle / running / …) is shown read-only and never changes the card's
+   column.
+4. **Agent prompt.** *Prepare agent prompt…* shows the exact task context
+   block (bounded to 8 KB). *Open in full chat as draft* hands it to
+   KiroCrew's chat page with `autoSend: false`: you review and send it there.
+5. If the task changed elsewhere (another tab), Save is refused and a notice
+   offers **Reload**, **Keep editing** or **Overwrite with my version…**. A
+   stale move is refused and the board reloads.
+6. **Export JSON** / **Import JSON…**. Importing into a board that has tasks
+   asks before replacing them; tasks that exist in another workspace can be
+   imported as copies.
+
+Removing a workspace that has tasks asks again and deletes its tasks too.
+Export first to keep them.
 
 ## Using the notes
 

@@ -1,12 +1,15 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { PageHeader } from '@kirocrew/app-sdk/ui'
-import { type KeyboardEvent, useState } from 'react'
+import { type KeyboardEvent, useCallback, useRef, useState } from 'react'
 import Chat from './Chat'
-import Notes from './Notes'
+import Notes, { type NotesRequest, type NotesState } from './Notes'
+import type { Workspace } from './notesApi'
+import Tasks from './Tasks'
 
-type Tab = 'notes' | 'chat'
+type Tab = 'notes' | 'tasks' | 'chat'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'notes', label: 'Notes' },
+  { id: 'tasks', label: 'Tasks' },
   { id: 'chat', label: 'Chat' },
 ]
 
@@ -20,11 +23,26 @@ export default function Quartizo() {
   // The chat mounts on first visit and then stays mounted (hidden), so
   // switching tabs neither reopens the slot nor drops a draft.
   const [chatOpened, setChatOpened] = useState(false)
+  const [tasksOpened, setTasksOpened] = useState(false)
+  // Tasks follow the workspace selected in Notes (one project = one workspace).
+  const [notesState, setNotesState] = useState<NotesState>({ workspace: null, note: null })
+  const [request, setRequest] = useState<NotesRequest | null>(null)
+  const notesDirty = useRef(false)
+  const confirmLeave = useCallback(
+    () => !notesDirty.current || window.confirm('Discard unsaved changes to the open note?'),
+    [],
+  )
 
   const select = (t: Tab) => {
     setTab(t)
     if (t === 'chat') setChatOpened(true)
+    if (t === 'tasks') setTasksOpened(true)
   }
+  const toNotes = (wsId: number, extra: { path?: string; chat?: boolean }) => {
+    setRequest(r => ({ seq: (r?.seq ?? 0) + 1, wsId, ...extra }))
+    select('notes')
+  }
+  const workspace: Workspace | null = notesState.workspace
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
     e.preventDefault()
@@ -71,7 +89,26 @@ export default function Quartizo() {
           // `hidden` alone loses to a display utility class, so set display here.
           style={{ display: tab === 'notes' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}
         >
-          <Notes api={api} />
+          <Notes api={api} dirtyRef={notesDirty} request={request} onState={setNotesState} />
+        </div>
+        <div
+          id="qz-panel-tasks"
+          role="tabpanel"
+          aria-labelledby="qz-tab-tasks"
+          hidden={tab !== 'tasks'}
+          style={{ display: tab === 'tasks' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}
+        >
+          {tasksOpened && (
+            <Tasks
+              api={api}
+              workspace={workspace}
+              currentNote={notesState.note}
+              active={tab === 'tasks'}
+              onOpenNote={(wsId, path) => toNotes(wsId, { path })}
+              onShowChat={wsId => toNotes(wsId, { chat: true })}
+              confirmLeave={confirmLeave}
+            />
+          )}
         </div>
         <div
           id="qz-panel-chat"

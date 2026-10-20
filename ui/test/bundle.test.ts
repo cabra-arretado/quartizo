@@ -8,7 +8,8 @@ const BUNDLE = new URL('../dist/index.mjs', import.meta.url)
 export function importSpecifiers(src: string): string[] {
   const patterns = [
     /\bfrom\s*["']([^"']+)["']/g,
-    /\bimport\s*["']([^"']+)["']/g,
+    // Bare side-effect import: only at statement start, so a string such as "/import" is not one.
+    /(?:^|[;{}\n])\s*import\s*["']([^"']+)["']/g,
     /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g,
   ]
   return patterns.flatMap(re => [...src.matchAll(re)].map(m => m[1]))
@@ -18,6 +19,7 @@ describe('built bundle', () => {
   it('finds every import form', () => {
     expect(importSpecifiers('import { a } from "react";import "side-effect";const m = import( \'lazy\' )'))
       .toEqual(['react', 'side-effect', 'lazy'])
+    expect(importSpecifiers('import "a";\nimport "b";const p = "/tasks/import"')).toEqual(['a', 'b'])
   })
 
   it('exists (npm test builds first)', () => {
