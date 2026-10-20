@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.1.0 - 2026-10-20
+## 0.0.1 - 2026-10-20
 
 First release. Written against KiroCrew `f62ab4fd`, verified against
 **kirocrew 0.10.0rc4** (see [compatibility.md](compatibility.md)). `app.json`
-stays at version 0.1.0. License: TBD.
+is at version 0.0.1. License: MIT.
 
 ### Added
 

@@ -1,6 +1,6 @@
 # Threat model
 
-Status: consolidated for 0.1.0 (M6). The summary and the residual risks come
+Status: consolidated for 0.0.1 (M6). The summary and the residual risks come
 first; sections 1-9 below are the detail.
 Chat context is covered in [m2.md](m2.md).
 
@@ -18,7 +18,7 @@ Chat context is covered in [m2.md](m2.md).
 
 ## Residual risks
 
-Each is accepted for 0.1.0 and explained in the section named.
+Each is accepted for 0.0.1 and explained in the section named.
 
 1. **Update race** (microseconds between the last hash check and `os.replace`): an external write there is overwritten ([§2](#2-symlinks-and-toctou)).
 2. **Move fallback window** where `renameat2` is unavailable (macOS, some filesystems): two syscalls wide ([§2](#2-symlinks-and-toctou)). CI runs the fallback on macOS.

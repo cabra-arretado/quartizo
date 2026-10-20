@@ -54,7 +54,7 @@ import tasks  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
 
 APP_NAME = "quartizo"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.0.1"
 SECRET_ENV = "KIROCREW_PROXY_SECRET"
 PROXY_HEADER = "X-KiroCrew-Proxy"
 PRINCIPAL_HEADER = "X-KiroCrew-Principal"

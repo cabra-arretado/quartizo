@@ -1,6 +1,6 @@
 # Compatibility
 
-## Compatibility matrix (0.1.0)
+## Compatibility matrix (0.0.1)
 
 Only what the sections below record. "Live" means exercised against a running
 kirocrew gateway; "tests" means unit/HTTP tests with no gateway.

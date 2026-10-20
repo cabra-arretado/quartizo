@@ -24,8 +24,8 @@ Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
 gateway. See [docs/compatibility.md](docs/compatibility.md) for what was
 measured and what is not verified.
 
-**License: TBD.** No license has been chosen yet; there is intentionally no
-`LICENSE` file.
+**License: MIT.** See [LICENSE](LICENSE). Bundled third-party code is listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Layout
 

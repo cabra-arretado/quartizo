@@ -68,7 +68,7 @@ read-only token.
 
 ## License compatibility note
 
-The project license is **undecided** (README: "License: TBD") and this is
+The project license is **MIT** (chosen for 0.0.1; see LICENSE and THIRD_PARTY_NOTICES.md). This is
 engineering context, not legal advice. All bundled code is permissive
 (MIT, BSD-2-Clause), which can be redistributed inside a project under any of
 the candidates, provided the notices are kept:
