@@ -11,8 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from tests.backend.signing import load_server
-from tests.backend.signing import principal_header, proxy_header
+from tests.backend.signing import load_server, principal_header, proxy_header
 from tests.backend.test_http import SECRET, _request, _start, _stop
 from tests.backend.test_workspace import signed_json
 
@@ -252,7 +251,8 @@ class ConcurrencyTests(StoreTest):
         self.assertEqual((current["title"], current["status"], current["version"]), ("other tab", "backlog", 2))
 
     def test_failed_transaction_rolls_back(self):
-        a, b = self.new("A"), self.new("B")
+        self.new("A")
+        b = self.new("B")
         with mock.patch.object(tasks.TaskStore, "_rows", side_effect=RuntimeError("boom")):
             with self.assertRaises(RuntimeError):
                 self.store.move(self.ws.id, b["id"], {"expectedVersion": 1, "status": "done", "index": 0})

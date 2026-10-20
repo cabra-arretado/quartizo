@@ -13,6 +13,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -180,7 +181,9 @@ class RegistryPolicyTests(GitTree):
         plain_file.write_text("x")
         for raw, code in (("", "bad_root"), ("relative/repo", "bad_root"), (str(self.tmp / "missing"), "bad_root"),
                           (str(plain_file), "bad_root"), ("/", "root_refused"), ("//", "root_refused"),
-                          ("/proc/self", "root_refused"), ("/dev", "root_refused"), ("/sys", "root_refused"),
+                          ("/dev", "root_refused"),
+                          *(p for p in (("/proc/self", "root_refused"), ("/sys", "root_refused"))
+                            if os.path.isdir(p[0])),  # absent on macOS: then it is bad_root, not a policy refusal
                           (str(self.tmp) + "\x00", "bad_root"), (None, "bad_root"), (5, "bad_root")):
             with self.subTest(raw=raw):
                 self.refused(self.register, raw, status=400, code=code)
@@ -714,6 +717,10 @@ class CapsTests(GitTree):
         (root / "a.txt").write_text("two\n")
         return root, self.register(root)
 
+    def _needs_enforced_data_limit(self):
+        if sys.platform != "linux":
+            self.skipTest("RLIMIT_DATA (git's 512 MiB heap cap) is only enforced on Linux; macOS ignores it")
+
     def assert_fails_fast(self, repo, *, limit=3.0):
         for call in (lambda: self.store.status(repo.id), lambda: self.store.diff(repo.id, "a.txt", "worktree")):
             t0 = time.monotonic()
@@ -723,11 +730,13 @@ class CapsTests(GitTree):
             self.assertIn(ctx.exception.code, ("git_failed", "git_out_of_memory"))
 
     def test_attributes_file_bomb_via_config(self):
+        self._needs_enforced_data_limit()
         root, repo = self._bomb_repo()
         self.git(root, "config", "core.attributesFile", "/dev/zero")
         self.assert_fails_fast(repo)
 
     def test_attributes_file_bomb_via_info_symlink(self):
+        self._needs_enforced_data_limit()
         root, repo = self._bomb_repo()
         info = root / ".git" / "info"
         info.mkdir(exist_ok=True)

@@ -32,10 +32,10 @@ from collections.abc import Iterator
 from workspace import (
     ApiError,
     open_dir_at,
-    os_error,
     open_file_at,
     open_parent,
     open_root,
+    os_error,
     validate_relpath,
 )
 

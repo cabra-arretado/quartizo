@@ -25,7 +25,6 @@ app's SQLite DB (``db.py`` migration 3); nothing here touches the filesystem.
 from __future__ import annotations
 
 import re
-import secrets
 import sqlite3
 import time
 from collections.abc import Iterator

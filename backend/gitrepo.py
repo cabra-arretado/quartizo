@@ -71,8 +71,8 @@ from workspace import (
     open_file_at,
     open_parent,
     open_root,
-    writable_by_others,
     validate_relpath,
+    writable_by_others,
 )
 
 GIT_TIMEOUT_S = 10.0

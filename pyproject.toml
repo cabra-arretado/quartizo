@@ -1,0 +1,14 @@
+# Tooling config only. The backend is stdlib-only and is not a Python package.
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["ui"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# E501: long lines are docstrings and test strings; wrapping is the formatter's
+# job and the formatter is not enforced (it would reformat ~24% of lines).
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
