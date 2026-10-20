@@ -719,7 +719,7 @@ class CapsTests(GitTree):
 
     def _needs_enforced_data_limit(self):
         if sys.platform != "linux":
-            self.skipTest("RLIMIT_DATA (git's 512 MiB heap cap) is only verified on Linux (not reliably enforced on macOS)")
+            self.skipTest("RLIMIT_DATA (git's 512 MiB heap cap) is applied on Linux only; macOS rejects it")
 
     def assert_fails_fast(self, repo, *, limit=3.0):
         for call in (lambda: self.store.status(repo.id), lambda: self.store.diff(repo.id, "a.txt", "worktree")):

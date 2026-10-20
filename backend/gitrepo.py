@@ -121,9 +121,12 @@ EMPTY_TREE = {
 GIT_DATA_LIMIT = 512 << 20
 SANDBOX_EXIT = 97
 SANDBOX_MARK = b"quartizo-git-sandbox-unavailable"
+# RLIMIT_DATA is applied on Linux only: macOS rejects it (EINVAL), so there the
+# 10 s timeout and the output caps are the memory bound.
 _LIMITS = ("import os,resource,sys\n"
            "resource.setrlimit(resource.RLIMIT_NPROC,(0,0))\n"
-           f"resource.setrlimit(resource.RLIMIT_DATA,({GIT_DATA_LIMIT},{GIT_DATA_LIMIT}))\n")
+           "if sys.platform=='linux':\n"
+           f" resource.setrlimit(resource.RLIMIT_DATA,({GIT_DATA_LIMIT},{GIT_DATA_LIMIT}))\n")
 _NO_SPAWN = (_LIMITS +
              "try:\n"
              " pid=os.fork()\n"
@@ -139,6 +142,23 @@ _NO_SPAWN = (_LIMITS +
 _OID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 _FILTER_KEY_RE = re.compile(rb"filter\.(.+)\.(?:clean|smudge|process|required)")
 _VERSION_RE = re.compile(rb"git version (\d+)\.(\d+)")
+
+
+def _find_git() -> str | None:
+    """The git binary to run. On macOS ``/usr/bin/git`` is an Xcode shim that
+    spawns ``xcodebuild`` to find the real git, which the no-spawn limit would
+    kill; ask ``xcrun`` once (fixed argv, scrubbed env) for the real path."""
+    found = shutil.which("git")
+    if found == "/usr/bin/git" and sys.platform == "darwin":
+        try:
+            res = subprocess.run(["/usr/bin/xcrun", "--find", "git"], capture_output=True, timeout=10,
+                                 stdin=subprocess.DEVNULL, env={"PATH": "/usr/bin:/bin"})
+            real = res.stdout.decode(errors="replace").strip()
+            if res.returncode == 0 and os.path.isabs(real) and os.access(real, os.X_OK):
+                return real
+        except (OSError, subprocess.SubprocessError):
+            pass
+    return found
 
 
 @dataclass(frozen=True)
@@ -186,7 +206,7 @@ class GitRunner:
                  no_spawn: bool = True) -> None:
         self.home = home
         os.makedirs(home, mode=0o700, exist_ok=True)
-        self.git = git if git is not None else shutil.which("git")
+        self.git = git if git is not None else _find_git()
         self.timeout = timeout
         self.no_spawn = no_spawn  # tests turn layer 4 off to check the other layers alone
         self._version: tuple[int, int] | None = None

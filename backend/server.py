@@ -34,6 +34,7 @@ import hmac
 import json
 import os
 import re
+import socketserver
 import sqlite3
 import sys
 import threading
@@ -503,6 +504,15 @@ class Server(ThreadingHTTPServer):
         # At most MAX_IN_FLIGHT connections are served at once; the next one
         # waits (briefly) in the accept loop, then is dropped.
         self._slots = threading.BoundedSemaphore(MAX_IN_FLIGHT)
+
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind calls socket.getfqdn(), a reverse DNS lookup
+        # that can stall startup for many seconds (seen on macOS CI). The
+        # name is only informational, so skip it.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name = host
+        self.server_port = port
 
     def process_request(self, request, client_address) -> None:
         if not self._slots.acquire(timeout=5):
