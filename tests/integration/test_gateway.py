@@ -205,10 +205,19 @@ class AgentsReadShapeTests(unittest.TestCase):
 
     def test_undeclared_subagent_and_task_routes_are_refused(self):
         # Not in permissions.api, so the gateway refuses the app token (token_auth.app_token_path_allowed).
-        for path in ("/api/sessions/dashboard:quartizo-it-probe/agents", "/api/tasks?limit=1"):
-            with self.subTest(path=path):
-                status, body = call("GET", path)
-                self.assertEqual((status, body.get("code")), (403, "forbidden"), body)
+        # Measured on 0.10.0rc4: a refused call also revokes the token, so each probe
+        # uses a fresh one (a 403 from an already-revoked token would prove nothing),
+        # and the shared token is replaced afterwards for the tests that follow.
+        try:
+            for path in ("/api/sessions/dashboard:quartizo-it-probe/agents", "/api/tasks?limit=1"):
+                with self.subTest(path=path):
+                    fresh = app_token(fresh=True)
+                    self.assertEqual(call("GET", "/api/chat/slots", token=fresh)[0], 200)
+                    status, body = call("GET", path, token=fresh)
+                    self.assertEqual((status, body.get("code")), (403, "forbidden"), body)
+        finally:
+            if SECRET_FILE:
+                app_token(fresh=True)
 
 
 @unittest.skipUnless(GATEWAY and OWNER_TOKEN, NO_OWNER)
