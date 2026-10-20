@@ -46,9 +46,12 @@ MAX_TIMESTAMP_MS = 2 ** 53 - 1
 
 # Same as ui/src/slots.ts SLOT_NAME_RE; group 1 is the workspace uid, if any.
 SLOT_NAME_RE = re.compile(r"quartizo-(?:w([0-9a-f]{32})-)?[0-9a-z]+-[0-9a-z]{6}")
+_WORKSPACE_PREFIX_RE = re.compile(r"quartizo-w([0-9a-f]{32})-")
 UID_RE = re.compile(r"[0-9a-f]{32}")
 # C0, DEL and C1 controls, line/paragraph separators: a title is one plain line.
 _TITLE_BAD = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+# Bidi override / embedding / isolate controls can reorder how a title is displayed.
+_TITLE_BIDI = re.compile("[\u202a-\u202e\u2066-\u2069]")
 
 _CREATE_KEYS = frozenset({"title", "description_markdown", "status", "note_ref", "slot_id"})
 _UPDATE_KEYS = frozenset({"expectedVersion", "title", "description_markdown", "note_ref", "slot_id"})
@@ -95,6 +98,8 @@ def validate_title(value: object) -> str:
         raise ApiError(400, "bad_title", f"title is limited to {MAX_TITLE_CHARS} characters")
     if _TITLE_BAD.search(title):
         raise ApiError(400, "bad_title", "title must be one line without control characters")
+    if _TITLE_BIDI.search(title):
+        raise ApiError(400, "bad_title", "title must not contain bidirectional control characters")
     _encodable(title, "bad_title", "title")
     return title
 
@@ -135,8 +140,11 @@ def validate_slot_id(value: object, project_uid: str) -> str | None:
     m = SLOT_NAME_RE.fullmatch(value) if isinstance(value, str) else None
     if m is None:
         raise ApiError(400, "bad_slot_id", "slot_id must be a Quartizo chat session name")
-    if m.group(1) is not None and m.group(1) != project_uid:
-        raise ApiError(400, "bad_slot_id", "slot_id names the chat session of another workspace")
+    # The optional group is skipped for `quartizo-w<uid>-abcdef`, so look for a uid prefix separately.
+    prefixed = _WORKSPACE_PREFIX_RE.match(value)
+    for uid in (m.group(1), prefixed.group(1) if prefixed else None):
+        if uid is not None and uid != project_uid:
+            raise ApiError(400, "bad_slot_id", "slot_id names the chat session of another workspace")
     return value  # type: ignore[return-value]
 
 
@@ -180,10 +188,10 @@ class TaskStore:
         self.registry = registry
 
     @contextmanager
-    def _tx(self) -> Iterator[sqlite3.Connection]:
+    def _tx(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
         conn = db.connect(self.registry.db_path)
         try:
-            with db.transaction(conn):
+            with db.transaction(conn, write=write):
                 yield conn
         finally:
             conn.close()
@@ -233,14 +241,14 @@ class TaskStore:
     # -- reads -------------------------------------------------------------
 
     def list(self, ws_id: int) -> dict:
-        with self._tx() as conn:
+        with self._tx(write=False) as conn:
             ws = self._project(conn, ws_id)
             rows = self._rows(conn, ws["uid"])
         return {"project": {"id": ws["uid"], "workspaceId": ws["id"], "name": ws["name"]},
                 "statuses": list(STATUSES), "tasks": [to_json(r) for r in rows]}
 
     def get(self, ws_id: int, task_id: int) -> dict:
-        with self._tx() as conn:
+        with self._tx(write=False) as conn:
             ws = self._project(conn, ws_id)
             return {"task": to_json(self._task(conn, ws["uid"], task_id))}
 
@@ -336,7 +344,7 @@ class TaskStore:
     # -- import / export ---------------------------------------------------
 
     def export(self, ws_id: int) -> dict:
-        with self._tx() as conn:
+        with self._tx(write=False) as conn:
             ws = self._project(conn, ws_id)
             rows = self._rows(conn, ws["uid"])
         return {

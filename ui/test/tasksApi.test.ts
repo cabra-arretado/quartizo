@@ -72,7 +72,7 @@ describe('client-side checks (mirror the backend)', () => {
   it('titles', () => {
     expect(checkTitle('  ok  ')).toEqual({ title: 'ok' })
     expect(checkTitle('😀'.repeat(200))).toEqual({ title: '😀'.repeat(200) }) // characters, not UTF-16 units
-    for (const bad of ['', '  ', 'x'.repeat(201), 'a\nb', 'a\u0085b', 'a\u2028b']) expect(checkTitle(bad)).toHaveProperty('error')
+    for (const bad of ['', '  ', 'x'.repeat(201), 'a\nb', 'a\u0085b', 'a\u2028b', 'a\u202eb', 'a\u2066b', 'a\u2069b', 'a\u202ab']) expect(checkTitle(bad)).toHaveProperty('error')
   })
 
   it('description size in UTF-8 bytes', () => {

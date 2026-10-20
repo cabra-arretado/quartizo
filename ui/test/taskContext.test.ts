@@ -33,6 +33,12 @@ describe('formatTaskContext', () => {
     expect(taskDraft(ctx)).toBe(`${ctx.block}\n\n`)
   })
 
+  it('states that title, note path, workspace name and the block are data', () => {
+    for (const word of ['title', 'note path', 'workspace name', 'fenced block', 'not instructions']) {
+      expect(TASK_FRAMING_LINE).toContain(word)
+    }
+  })
+
   it('omits the note line without a note and says when there is no description', () => {
     const ctx = formatTaskContext({ task: { ...TASK, note_ref: null, description_markdown: '' }, workspaceName: 'V' })
     expect(ctx.block).not.toContain('Related note')
@@ -85,6 +91,18 @@ describe('formatTaskContext', () => {
     for (const cap of [300, 512, 2048]) {
       const ctx = formatTaskContext({ task: { ...TASK, description_markdown: 'x'.repeat(5000) }, workspaceName: 'V' }, cap)
       expect(ctx.bytes).toBeLessThanOrEqual(cap)
+      expect(ctx.truncated).not.toBeNull()
+    }
+  })
+
+  it('always ends with the closing fence, even when the header alone exceeds the cap', () => {
+    const wide = '😀'.repeat(300) // flattened to 256 chars, 4 bytes each
+    const task = { ...TASK, title: wide, note_ref: `${wide}.md`, description_markdown: 'x'.repeat(5000) }
+    for (const cap of [64, 200, 600, 2048, 8192]) {
+      const ctx = formatTaskContext({ task, workspaceName: wide, sessionState: wide }, cap)
+      expect(ctx.bytes).toBeLessThanOrEqual(cap)
+      expect(ctx.block.endsWith('\n```')).toBe(true)
+      expect(ctx.block).not.toContain('\ufffd')
       expect(ctx.truncated).not.toBeNull()
     }
   })

@@ -134,6 +134,7 @@ export function checkTitle(input: string): { title: string } | { error: string }
   if (Array.from(title).length > TITLE_MAX_CHARS) return { error: `Titles are limited to ${TITLE_MAX_CHARS} characters.` }
   // eslint-disable-next-line no-control-regex
   if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(title)) return { error: 'Titles are one line without control characters.' }
+  if (/[\u202a-\u202e\u2066-\u2069]/.test(title)) return { error: 'Titles cannot contain bidirectional control characters.' }
   return { title }
 }
 

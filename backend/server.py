@@ -373,7 +373,7 @@ class Handler(BaseHTTPRequestHandler):
     def _json_body(self) -> dict:
         try:
             data = json.loads(self._body or b"{}")
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, RecursionError):
             raise ApiError(400, "bad_json", "request body must be JSON") from None
         if not isinstance(data, dict):
             raise ApiError(400, "bad_json", "request body must be a JSON object")

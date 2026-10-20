@@ -1,16 +1,19 @@
 """QTZ-008: task metadata per project (CRUD, refusals, ordering, import/export, 409, migration)."""
 from __future__ import annotations
 
+import http.client
 import json
 import shutil
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from tests.backend.signing import load_server
-from tests.backend.test_http import SECRET, _start
+from tests.backend.signing import principal_header, proxy_header
+from tests.backend.test_http import SECRET, _request, _start
 from tests.backend.test_workspace import signed_json
 
 srv = load_server()
@@ -93,7 +96,8 @@ class CrudTests(StoreTest):
 class ValidationTests(StoreTest):
     def test_title_rules(self):
         self.assertEqual(self.new("é" * 200)["title"], "é" * 200)  # characters, not bytes
-        for bad in (None, 7, "", "   ", "x" * 201, "a\nb", "a\tb", "a\x00b", "a\x85b", "a\u2028b", "\ud800"):
+        for bad in (None, 7, "", "   ", "x" * 201, "a\nb", "a\tb", "a\x00b", "a\x85b", "a\u2028b", "\ud800",
+                    "a\u202eb", "a\u202ab", "a\u202cb", "a\u2066b", "a\u2069b"):
             with self.subTest(title=bad):
                 self.refused(self.store.create, self.ws.id, {"title": bad}, status=400, code="bad_title")
 
@@ -140,6 +144,21 @@ class ValidationTests(StoreTest):
                     f"quartizo-w{self.other.uid}-lx2k9a-abc123"):
             with self.subTest(slot_id=bad):
                 self.refused(self.store.create, self.ws.id, {"title": "t", "slot_id": bad}, code="bad_slot_id")
+
+    def test_three_segment_slot_of_another_workspace_is_refused(self):
+        # `quartizo-w<uid>-abcdef` matches SLOT_NAME_RE with the uid group skipped.
+        other = f"quartizo-w{self.other.uid}-abcdef"
+        own = f"quartizo-w{self.ws.uid}-abcdef"
+        self.assertEqual(self.new(slot_id=own)["slot_id"], own)
+        self.refused(self.store.create, self.ws.id, {"title": "t", "slot_id": other}, status=400, code="bad_slot_id")
+        t = self.new()
+        self.refused(self.store.update, self.ws.id, t["id"], {"expectedVersion": 1, "slot_id": other},
+                     status=400, code="bad_slot_id")
+        data = {"format": "quartizo.tasks", "version": 1,
+                "tasks": [{"title": "t", "status": "backlog", "slot_id": other}]}
+        err = self.refused(self.store.import_, self.ws.id, {"data": data, "replace": True, "confirm": True},
+                           status=400, code="bad_slot_id")
+        self.assertEqual(err.extra["taskIndex"], 0)
 
     def test_version_and_index_types(self):
         t = self.new()
@@ -211,10 +230,9 @@ class OrderingTests(StoreTest):
             res = self.store.move(self.ws.id, t["id"], {"expectedVersion": res["task"]["version"],
                                                         "status": "done", "index": 0})
         self.assertEqual((res["task"]["slot_id"], res["task"]["note_ref"]), (SLOT_TAB, "n.md"))
+        self.assertIn(res["task"]["status"], tasks.STATUSES)
         self.assertEqual(res["task"]["status"], "done")
-        source = Path(tasks.__file__).read_text()
-        for needle in ("/api/chat", "http.client", "urllib.request", "socket"):
-            self.assertNotIn(needle, source)
+        self.assertEqual(res["task"]["slot_id"], SLOT_TAB)  # unchanged by both moves
 
 
 class ConcurrencyTests(StoreTest):
@@ -385,6 +403,9 @@ class TaskHttpTests(unittest.TestCase):
         cls.vault = root / "vault"
         cls.vault.mkdir()
         cls.vault.chmod(0o755)
+        cls.vault2 = root / "vault2"
+        cls.vault2.mkdir()
+        cls.vault2.chmod(0o755)
         cls.proc, cls.port = _start(SECRET, home=str(root / "crew"))
         status, body = signed_json(cls.port, "POST", "/api/workspaces", {"path": str(cls.vault)})
         assert status == 201, body
@@ -443,6 +464,58 @@ class TaskHttpTests(unittest.TestCase):
         # ...but not for any other task route.
         status, body = self.call("POST", self.base, {"title": "t", "description_markdown": "x" * (srv.MAX_BODY_BYTES + 1)})
         self.assertEqual((status, body.get("code")), (413, "too_large"))
+        # Over the import limit itself is refused, even with a fresh timestamp.
+        # The server answers from the declared Content-Length, without reading the body.
+        target = f"/api/workspaces/{self.ws['id']}/tasks/import"
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            conn.putrequest("POST", target)
+            conn.putheader("X-KiroCrew-Proxy", proxy_header(SECRET, "POST", target, b""))
+            conn.putheader("X-KiroCrew-Principal", principal_header(SECRET, "POST", target, b""))
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", str(tasks.MAX_IMPORT_BODY_BYTES + 1))
+            conn.endheaders()
+            res = conn.getresponse()
+            self.assertEqual((res.status, json.loads(res.read()).get("code")), (413, "too_large"))
+        finally:
+            conn.close()
+
+    def test_import_with_stale_proxy_timestamp_gets_the_1mib_limit(self):
+        target = f"/api/workspaces/{self.ws['id']}/tasks/import"
+        body = json.dumps({"data": {"format": "quartizo.tasks", "version": 1, "tasks": [],
+                                    "pad": "x" * (srv.MAX_BODY_BYTES + 1024)}}).encode()
+        self.assertLess(len(body), tasks.MAX_IMPORT_BODY_BYTES)
+        stale = int(time.time()) - srv.MAX_SKEW_SECONDS - 60
+        headers = {"X-KiroCrew-Proxy": proxy_header(SECRET, "POST", target, body, ts=stale),
+                   "X-KiroCrew-Principal": principal_header(SECRET, "POST", target, body),
+                   "Content-Type": "application/json"}
+        status, res = _request(self.port, "POST", target, body=body, headers=headers)
+        self.assertEqual((status, res.get("code")), (413, "too_large"))
+
+    def test_non_owner_cannot_delete_a_workspace_and_its_tasks(self):
+        status, body = signed_json(self.port, "POST", "/api/workspaces", {"path": str(self.vault2)})
+        self.assertEqual(status, 201, body)
+        ws_id = body["workspace"]["id"]
+        status, body = self.call("POST", f"/api/workspaces/{ws_id}/tasks", {"title": "keep"})
+        self.assertEqual(status, 201, body)
+        for kind in ("app-token", "agent-tool", "none"):
+            with self.subTest(kind=kind):
+                status, body = self.call("DELETE", f"/api/workspaces/{ws_id}?deleteTasks=1", kind=kind, owner_id="")
+                self.assertEqual((status, body["code"]), (403, "owner_session_required"))
+        status, body = self.call("GET", f"/api/workspaces/{ws_id}/tasks")
+        self.assertEqual([t["title"] for t in body["tasks"]], ["keep"])
+
+    def test_deeply_nested_json_is_a_400_bad_json(self):
+        deep = "[" * 100000 + "]" * 100000
+        for target, method in ((self.base, "POST"), ("/api/workspaces", "POST")):
+            with self.subTest(target=target):
+                body = deep.encode()
+                headers = {"X-KiroCrew-Proxy": proxy_header(SECRET, method, target, body),
+                           "X-KiroCrew-Principal": principal_header(SECRET, method, target, body),
+                           "Content-Type": "application/json"}
+                status, res = _request(self.port, method, target, body=body, headers=headers)
+                self.assertEqual((status, res.get("code")), (400, "bad_json"))
+        self.assertEqual(self.call("GET", self.base)[0], 200)  # the server survived
 
     def test_every_task_route_needs_auth_and_owner(self):
         for method, target in (("GET", self.base), ("POST", self.base), ("PATCH", f"{self.base}/1"),

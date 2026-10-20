@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import secrets
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -78,12 +79,28 @@ MIGRATIONS: tuple[str, ...] = (
 )
 
 
+_migrated: set[str] = set()
+_migrate_lock = threading.Lock()
+
+
 def connect(path: Path) -> sqlite3.Connection:
-    """Open (creating if needed) and migrate the DB. One connection per call site."""
+    """Open (creating if needed) the DB, migrating it once per process and path.
+
+    One connection per call site.
+    """
     conn = sqlite3.connect(path, timeout=10, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    migrate(conn)
+    key = str(path)
+    if key not in _migrated:
+        with _migrate_lock:
+            if key not in _migrated:
+                try:
+                    migrate(conn)
+                except BaseException:
+                    conn.close()
+                    raise
+                _migrated.add(key)
     return conn
 
 
@@ -142,13 +159,14 @@ def count_tasks(conn: sqlite3.Connection, workspace_id: int) -> int:
 
 
 @contextmanager
-def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+def transaction(conn: sqlite3.Connection, *, write: bool = True) -> Iterator[sqlite3.Connection]:
     """``BEGIN IMMEDIATE`` .. ``COMMIT``; rolls back on any exception.
 
     IMMEDIATE takes the write lock up front, so a read-check-write sequence
     inside (version check, reindex) cannot interleave with another writer.
+    ``write=False`` uses a plain ``BEGIN`` (a consistent read snapshot, no lock).
     """
-    conn.execute("BEGIN IMMEDIATE")
+    conn.execute("BEGIN IMMEDIATE" if write else "BEGIN")
     try:
         yield conn
         conn.execute("COMMIT")
