@@ -1,7 +1,8 @@
 """Quartizo's registry database (stdlib ``sqlite3``).
 
-It holds the workspace registry (which roots the owner opted in) and, since
-migration 3, the Kanban task metadata of each project (QTZ-008). One project is
+It holds the workspace registry (which roots the owner opted in), since
+migration 3 the Kanban task metadata of each project (QTZ-008), and since
+migration 4 the registered Git repository roots (QTZ-010). One project is
 one registered workspace, keyed by the workspace ``uid``. Note content always
 lives in the Markdown files themselves; a task only stores a workspace-relative
 ``note_ref`` string, never file content and never an absolute path.
@@ -75,6 +76,19 @@ MIGRATIONS: tuple[str, ...] = (
         updated_at           INTEGER NOT NULL
     );
     CREATE INDEX tasks_board ON tasks (project_id, status, sort_order);
+    """,
+    # 4: Git repository roots (QTZ-010), registered separately from notes
+    # workspaces. Same id/uid scheme as workspaces. `path` is the realpath of
+    # the work tree top level at registration time. No FK to workspaces: a repo
+    # may contain, or sit inside, a notes workspace (see docs/architecture.md).
+    """
+    CREATE TABLE repos (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid        TEXT    NOT NULL UNIQUE,
+        name       TEXT    NOT NULL,
+        path       TEXT    NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+    );
     """,
 )
 
@@ -156,6 +170,25 @@ def count_tasks(conn: sqlite3.Connection, workspace_id: int) -> int:
         "SELECT COUNT(*) FROM tasks JOIN workspaces w ON w.uid = tasks.project_id WHERE w.id = ?",
         (workspace_id,),
     ).fetchone()[0]
+
+
+def list_repos(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT id, uid, name, path, created_at FROM repos ORDER BY name, id").fetchall()
+
+
+def get_repo(conn: sqlite3.Connection, repo_id: int) -> sqlite3.Row | None:
+    return conn.execute("SELECT id, uid, name, path, created_at FROM repos WHERE id = ?", (repo_id,)).fetchone()
+
+
+def insert_repo(conn: sqlite3.Connection, name: str, path: str) -> tuple[int, str]:
+    uid = new_uid()
+    cur = conn.execute("INSERT INTO repos (uid, name, path, created_at) VALUES (?, ?, ?, ?)",
+                       (uid, name, path, int(time.time())))
+    return int(cur.lastrowid), uid
+
+
+def delete_repo(conn: sqlite3.Connection, repo_id: int) -> bool:
+    return conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,)).rowcount > 0
 
 
 @contextmanager

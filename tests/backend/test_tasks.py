@@ -377,7 +377,7 @@ class MigrationTests(unittest.TestCase):
 
             conn = db.connect(path)
             self.assertEqual([r[0] for r in conn.execute("SELECT version FROM schema_migrations ORDER BY 1")],
-                             [1, 2, 3])
+                             list(range(1, len(db.MIGRATIONS) + 1)))
             rows = [dict(r) for r in db.list_workspaces(conn)]
             self.assertEqual([(r["id"], r["uid"], r["name"]) for r in rows], [(2, uid, "a")])
             cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)")}

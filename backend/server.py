@@ -21,6 +21,8 @@ Only ``GET /health`` is unsigned (the gateway probes it directly). Every other
 request must carry both valid headers, or it is refused before routing, and
 every route is dashboard-owner only (``owner-session`` principal).
 
+Git repos (QTZ-010) are read only: see gitrepo.py for how git is run.
+
 Workspace registry state lives in ``<KIROCREW_HOME>/apps/<KIROCREW_APP_NAME>/data``
 (the gateway injects both; ``manager.py::app_data_dir`` in 0.10.0rc4).
 """
@@ -45,6 +47,7 @@ from urllib.parse import parse_qs, urlsplit
 # directory off sys.path; put it back (first) so the sibling modules load.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import gitrepo  # noqa: E402
 import notes  # noqa: E402
 import tasks  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
@@ -301,6 +304,8 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._json_body()
                 return 201, {"workspace": registry.register(body.get("path"), body.get("name")).to_json()}
             return None
+        if parts[:2] == ["api", "repos"]:
+            return self._handle_repos(parts[2:], query)
         if len(parts) >= 3 and parts[:2] == ["api", "workspaces"]:
             ws_id = _parse_id(parts[2])
             if ws_id is None:
@@ -318,6 +323,41 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_tasks(ws_id, parts[4:])
             if len(parts) == 4:
                 return self._handle_notes(registry, ws_id, parts[3], query)
+        return None
+
+    def _handle_repos(self, rest: list[str], query: dict) -> tuple[int, dict] | None:
+        """/api/repos[...]: the Git repo registry and read-only status/diff (QTZ-010).
+
+        Clients send ids, a path and a mode only; every git argv is built in gitrepo.py.
+        """
+        method = self.command
+        store: gitrepo.RepoStore = self.server.repos  # type: ignore[attr-defined]
+        if rest == []:
+            if method == "GET":
+                return 200, {"repos": [r.to_json() for r in store.list()]}
+            if method == "POST":
+                body = self._json_body()
+                return 201, {"repo": store.register(body.get("path"), body.get("name")).to_json()}
+            return None
+        repo_id = _parse_id(rest[0])
+        if repo_id is None or len(rest) > 2:
+            return None
+        if len(rest) == 1:
+            if method == "GET":
+                return 200, {"repo": store.get(repo_id).to_json()}
+            if method == "DELETE":
+                store.unregister(repo_id)
+                return 200, {"ok": True}
+            return None
+        if method != "GET":
+            return None
+        if rest[1] == "info":
+            return 200, store.info(repo_id)
+        if rest[1] == "status":
+            return 200, store.status(repo_id)
+        if rest[1] == "diff":
+            return 200, store.diff(repo_id, _q(query, "path", None), _q(query, "mode", None),
+                                   _q(query, "orig", None))
         return None
 
     def _handle_tasks(self, ws_id: int, rest: list[str]) -> tuple[int, dict] | None:
@@ -491,6 +531,8 @@ def make_server(port: int, secret: str, registry: Registry) -> Server:
     server.replay_cache = ReplayCache()  # type: ignore[attr-defined]
     server.registry = registry  # type: ignore[attr-defined]
     server.tasks = tasks.TaskStore(registry)  # type: ignore[attr-defined]
+    server.repos = gitrepo.RepoStore(  # type: ignore[attr-defined]
+        registry, gitrepo.GitRunner(home=str(registry.data_dir / "git-home")))
     return server
 
 

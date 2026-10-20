@@ -1,8 +1,8 @@
 # Threat model (M1: Markdown workspaces)
 
 Scope: workspace confinement (§1), symlinks and TOCTOU (§2), untrusted
-Markdown (§3) and task metadata (§4, M3). Chat context is covered in
-[m2.md](m2.md). Git is not built yet.
+Markdown (§3), task metadata (§4, M3) and read-only Git (§5, M4). Chat
+context is covered in [m2.md](m2.md).
 
 ## Assets and actors
 
@@ -238,3 +238,81 @@ by anything running as the owner (like the notes themselves). A move's
 `index` is relative to the server's current column, so a move based on a
 stale view of the *other* cards lands at that index, not next to a
 particular neighbour; only the moved task's own version is checked.
+
+## 5. Git, read only (M4)
+
+**The threat.** A repository's `.git/config`, `.gitattributes` and
+`.git/info/attributes` are attacker-controlled data. Anything that can write
+in the work tree can write them, in particular an agent working in the repo
+under its own sandbox. Git config can name commands (`core.fsmonitor`,
+`filter.<d>.clean`/`smudge`/`process`, `diff.<d>.textconv`/`command`,
+`diff.external`, `core.pager`, `core.sshCommand`, hooks, credential
+helpers…). If Quartizo's backend ran one of them, the agent would get code
+execution as the owner, outside its sandbox, triggered by the owner just
+looking at a diff. So no read path may run any repo-configured command.
+
+**Registration.** The workspace root policy (§1) applies unchanged
+(`workspace.canonical_root`), plus `.git` must be a real directory or a
+`gitdir:` file (not a symlink) and `git rev-parse --show-toplevel` must
+equal the canonical path. Each call re-opens the root without following a
+symlink (`root_changed` otherwise), re-checks owner and mode, and re-checks
+`.git`.
+
+**How git is run** (`backend/gitrepo.py`, every call):
+
+| Measure | What it stops |
+|---|---|
+| `subprocess.Popen` with an argv list, never a shell; `stdin=DEVNULL`; `cwd=<root>`; own process group | Shell injection; prompts; stray children survive a kill |
+| Fixed subcommands and flags built server-side. The page sends only an id, a path and an enum. Paths go after `--` as `:(literal)<path>` | Option injection (`--output=…`, `-c…`, leading `-`), pathspec magic and globs |
+| 10 s timeout, stdout cap read through the pipe (4 MiB status, 512 KiB diff, 256 KiB other), 16 KiB stderr; on either limit the process group is SIGKILLed | Hangs and memory exhaustion |
+| Environment built from scratch: `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_ATTR_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `GIT_NO_REPLACE_OBJECTS=1`, `LC_ALL=C`, `GIT_CEILING_DIRECTORIES=<parent of root>`, a minimal `PATH`. Nothing is inherited: no `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_PARAMETERS`, `SSH_AUTH_SOCK` | Inherited redirection, the user's global/system config (and its filters, e.g. git-lfs), network, discovery above the root |
+| `HOME` and `XDG_CONFIG_HOME` = an empty, app-owned `0700` dir (`<data>/git-home`). **Decision:** not the user's home. Global config is already off by `GIT_CONFIG_GLOBAL`; this also keeps `~`-relative lookups away from the user's dotfiles. Cost: personal settings (e.g. `core.quotePath`, aliases) are ignored, which is fine for fixed plumbing | Global config and attributes |
+| `-c core.fsmonitor=false -c core.hooksPath=/dev/null -c diff.external= -c core.pager=cat -c protocol.allow=never -c credential.helper= -c status.submoduleSummary=false -c submodule.recurse=false --no-pager --no-optional-locks`; diffs add `--no-ext-diff --no-textconv --no-color --ignore-submodules=dirty` | The named config keys. Command-line config wins over the repo's |
+| `--work-tree=<root>` | A hostile `core.worktree` (or `core.bare`) pointing git at another folder |
+| Plumbing for diffs (`diff-files`, `diff-index`) | Diff UI config: textconv, external diff, color, renames config |
+| Every `filter.<driver>` in the effective config is blanked through `GIT_CONFIG_COUNT` (`clean`, `smudge`, `process` empty; `required=false`). Over 64 drivers: 409 `too_many_filters` | **Clean filters run on read paths.** Measured on git 2.53: `git status` and `git diff-files` run `filter.<d>.clean` on a stat-dirty, same-size file, even with `GIT_OPTIONAL_LOCKS=0` and `--no-optional-locks` (those stop the index *write*, not the content compare). There is no flag that disables all filters, and attributes in `.git/info/attributes` override anything we could set, so the drivers are enumerated (`git config --null --name-only --list`) and neutralized by name. `GIT_CONFIG_COUNT` keeps key and value apart, so a driver name containing `=` cannot break the override |
+| **git may not start any process or thread.** It is exec'd through `python -I -S -c` that sets `RLIMIT_NPROC` to 0 first (soft and hard). Every `fork`/`clone` git attempts then fails with `EAGAIN`; threaded index preload/reading is turned off so git does not need threads | Everything the rows above do not: the **race** where an agent adds a filter driver between the enumeration call and the real call (or flips `includeIf.onbranch`), and any command-running config not known here. Measured: with the drivers *not* blanked, a hostile `required` clean filter makes git fail ("cannot create async thread"), it does not run |
+
+Each layer is tested on its own: the hostile-config tests run every
+endpoint with the no-spawn limit off (flags and blanking alone) and with the
+blanking off (the limit alone). Every hostile test first shows that plain
+git, run the way a user would, does run the hostile command (the marker
+appears), so the test is not vacuous.
+
+**Not mutated.** Status runs with optional locks off (no index refresh
+write, no `index.lock`), diffs are plumbing, and nothing else is run. A test
+snapshots the whole root (`.git` included: index bytes, refs, every file's
+mode, size, mtime, inode and hash, and directory mtimes) before and after
+every endpoint, with a stat-dirty file, an untracked cache, a dirty
+submodule, a staged rename and an untracked file present.
+
+**Paths.** The note path rules (§1) with two changes for Git: dot segments
+are allowed (`.gitignore`, `.github/…`), and any `.git` segment is refused
+in any case. A directory path does not widen a diff: results are matched to
+the exact path. An ignored file cannot be read through the diff route. An
+untracked file is read with the fd-based no-follow helpers (§2); an
+untracked symlink shows its target string, never the target's content.
+
+**Rendering.** Diff text, file names and branch names are React text nodes.
+Nothing from git reaches `innerHTML`. Git's stderr is never sent to the
+page (it names paths); failures map to stable codes.
+
+**Residual risks.**
+
+- **Root swap race.** The root is checked fd-relative, but git gets
+  `cwd=<path>`; a rename of the root to a symlink in the microseconds
+  between the check and git's `chdir` would be followed. The swap needs
+  write access to the root's parent.
+- **`gitdir:` files are trusted.** A `.git` file (worktree, submodule) can
+  point at any repository the owner can read; Quartizo then shows that
+  repository's index and objects against this work tree. Only the owner
+  sees it, and git itself checks ownership (`safe.directory`).
+- **`RLIMIT_NPROC` is counted per user** (per user namespace on Linux 5.14+).
+  It does not apply to root or to processes with `CAP_SYS_RESOURCE` /
+  `CAP_SYS_ADMIN`; Quartizo is not meant to run as root. The trampoline adds
+  about 15 ms per git call (4-6 calls per request).
+- **Resource use inside git.** A huge repository can still make status
+  slow (bounded by the 10 s timeout) or use memory up to the 8 MiB file cap
+  per side for a diff; there is no memory rlimit.
+- **Partial clones** show missing objects as 500 `git_failed`: lazy fetch
+  is refused, by design.

@@ -11,9 +11,11 @@ backend verifies the gateway's signed proxy requests and does all file
 access, confined to the registered folders.
 
 Scope so far: workspaces and notes (M1), note context to the workspace chat
-(M2, [docs/m2.md](docs/m2.md)), and per-workspace task metadata with a Kanban
-board (M3, QTZ-008/009; see [Tasks](#tasks-projects) below). Git is not built
-yet.
+(M2, [docs/m2.md](docs/m2.md)), per-workspace task metadata with a Kanban
+board (M3, QTZ-008/009; see [Tasks](#tasks-projects) below), and a
+**read-only** Git view of registered repositories (M4, QTZ-010/011; see
+[Git](#git-read-only) below). Quartizo never stages, commits or writes to a
+repository.
 
 Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
 (after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
@@ -33,6 +35,7 @@ backend/workspace.py  workspace root registry + fd-based path confinement
 backend/db.py         sqlite3 DB (registry + tasks) with a migrations table
 backend/notes.py      .md list/search/read/create/update/rename/delete
 backend/tasks.py      task CRUD, ordered moves, JSON import/export (M3)
+backend/gitrepo.py    repo registry + hardened read-only git: status, diff (M4)
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
                       (src/*.ts: tested logic; src/*.tsx: components)
 tests/backend/        backend auth unit tests + real HTTP round-trips
@@ -69,9 +72,10 @@ built bundle.
 # backend: auth acceptance/refusal + real HTTP round-trips (no dependencies)
 python3 -m unittest discover -s tests -t . -v
 
-# frontend: notes and tasks clients, editor/conflict state, line endings,
+# frontend: notes, tasks and git clients, editor/conflict state, line endings,
 # Markdown XSS, list navigation, board ordering and keyboard moves, note and
-# task context formatting, slot logic with the SDK mocked, plus a
+# task context formatting, diff line classification, changed-files keys,
+# slot logic with the SDK mocked, plus a
 # bundle-imports check (that one skips until `npm run build` has run)
 cd ui && npm test
 ```
@@ -145,6 +149,7 @@ rebuild, then press **Update** in the App Store, then refresh.
 | `permissions.api: "/apps/quartizo/api"` | The page calls its own backend through the gateway proxy (`/apps/quartizo/api/status`, `/workspaces/...`). The notes feature needs no other grant. The SDK client refuses any path not declared; builtin apps declare their own proxy prefix the same way. |
 | `backend.signedPrincipal: true` | Not a permission, but security-relevant: the backend receives a signed claim naming the caller kind and refuses requests without one. |
 | *M3: no change* | The task routes sit under the already granted `/apps/quartizo/api`. The board's transcript link, status poll and `openChat` draft use the same `/api/chat` grant and host hooks as M2. `app.json` is unchanged |
+| *M4: no change* | The Git routes sit under the already granted `/apps/quartizo/api`; `app.json` is unchanged. The backend runs the host's `git` binary itself (no App Kit permission covers or restricts that) |
 | *not granted:* `permissions.sessionApproval` | It lets an app act on **any** local user session, far beyond the sessions Quartizo creates. Per the gateway source, page requests made with `useAppApi()` carry the dashboard owner's session cookie, not an app token, so Approve/Reject in the embed are decided as the owner and do not need this grant. If a host ever runs the page under an app token, those decisions return 403 `session_approval_not_granted`, which the page reports. Adding the grant later disables the app until the user re-enables it. |
 | *not granted:* `/api/upload/file` | Attachments are **unsupported**: without this grant the embed hides its attach control and uploads are refused. |
 | *not granted:* `events`, `storage`, `cron`, `network`, `memory`, `mcpTools`, ... | Unused. `ChatEmbed` polls; it does not need WS events. |
@@ -181,6 +186,28 @@ project per workspace). Columns: Backlog, Ready, In Progress, Review, Done.
 
 Removing a workspace that has tasks asks again and deletes its tasks too.
 Export first to keep them.
+
+## Using Git (Git tab)
+
+1. **Add repository**: enter the absolute path of a repository's top-level
+   folder (the one containing `.git`). A linked worktree or a submodule
+   checkout can be registered too. Several repositories can be registered;
+   the picker switches between them. Switching only changes this tab's
+   view: nothing global (no workspace, chat or agent working directory)
+   changes.
+2. The header shows the branch (or `detached at …`), its upstream with
+   ahead/behind counts, and how many files are staged, unstaged, untracked
+   or conflicted. **Refresh** reloads (the tab also reloads when you come
+   back to it).
+3. The changed-files list: arrow keys / Home / End / PageUp / PageDown move
+   and show that file's diff, **Enter** moves focus into the diff, **s**
+   switches **Unstaged** (work tree vs index) and **Staged** (index vs
+   HEAD) when a file has both. In the diff, arrows / PageUp / PageDown /
+   Home / End scroll.
+4. Diffs over 512 KiB are cut (it says so), binary files are marked, and
+   files over 8 MiB are not diffed. Untracked files show as all-added;
+   ignored files are not listed.
+5. **Remove…** forgets the repository in Quartizo. Nothing on disk changes.
 
 ## Using the notes
 
@@ -230,6 +257,32 @@ metadata (M3). Note content stays in the files.
 
 See [docs/threat-model.md](docs/threat-model.md) for path confinement
 (no `..`, no hidden segments, no symlinks followed, fd-relative opens).
+
+### Git (read only)
+
+Registered repos live in the same DB (migration 4, table `repos`). The page
+sends only a repo id, a path and a mode: every git argv is built in
+`backend/gitrepo.py` from fixed lists. See
+[threat-model §5](docs/threat-model.md#5-git-read-only-m4) for how git is run.
+
+| Route | Body / result |
+|---|---|
+| `GET /api/repos` | `{repos: [{id, uid, name, path}]}` (no git call) |
+| `POST /api/repos` | `{path, name?}` -> 201 `{repo}`. The workspace root policy (absolute, realpath, not `/`, not `$HOME` itself, not `/proc` `/sys` `/dev`, not overlapping `$KIROCREW_HOME` or the data dir, owned by you, not group/world-writable), plus: `.git` must be a directory or `gitdir:` file (not a symlink) and `git rev-parse --show-toplevel` must be the path itself. 400 `not_a_repo` / `not_repo_toplevel`, 409 `repo_exists` (same path or inode) |
+| `GET /api/repos/{id}` | `{repo}` or 404 `repo_not_found` |
+| `DELETE /api/repos/{id}` | Forgets the repo. Nothing on disk is touched |
+| `GET /api/repos/{id}/info` | `{repo, head, counts, clean, gitDir, shallow}`. `head` is `{oid, branch, detached, unborn, upstream, ahead, behind}`; `counts` is `{staged, unstaged, untracked, conflicted}`; `gitDir` is `directory`, `linked-worktree` or `gitfile` (submodule or separate git dir) |
+| `GET /api/repos/{id}/status` | `{repo, head, counts, clean, entries, truncated}` from `git status --porcelain=v2 -z --branch --untracked-files=normal`. An entry is `{path, origPath, kind, index, worktree, staged, unstaged, submodule, submoduleCommitChanged, score, diffable}`; `kind` is `changed`, `renamed`, `copied`, `unmerged` or `untracked`. At most 5000 entries; output over 4 MiB is 413 `status_too_large` |
+| `GET /api/repos/{id}/diff?path=&mode=&orig=` | `{path, mode, origPath, diff, binary, truncated, untracked}`. `mode` is `worktree` (work tree vs index, `git diff-files`) or `staged` (index vs HEAD, or vs the empty tree before the first commit, `git diff-index --cached`). `orig` (staged only) pairs a rename. `diff` is at most 512 KiB, cut at a line (`truncated`). 413 `file_too_large` over 8 MiB on either side. An untracked, not ignored file is shown as all-added (read by Quartizo, fd-relative, no symlink followed); anything else that is not in the index is 404 `not_changed` |
+
+`path` / `orig` follow the note path rules (relative, `/`-separated, no
+`..`, `.`, empty segments, backslash or control characters), except that
+dot segments such as `.gitignore` are allowed and any `.git` segment (any
+case) is refused. They reach git only as `-- :(literal)<path>`. Git
+failures answer 504 `git_timeout` (10 s), 503 `git_unavailable` /
+`git_too_old` (git 2.38+ is needed), 409 `not_a_repo` / `root_changed` /
+`git_link_refused` / `too_many_filters`, or 500 `git_failed`, never with
+git's stderr.
 
 ### Notes
 

@@ -69,8 +69,12 @@ class Workspace:
         return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path}
 
 
-def validate_relpath(rel: object) -> list[str]:
-    """Split a client-supplied relative path into safe segments, or raise 400."""
+def validate_relpath(rel: object, *, allow_hidden: bool = False) -> list[str]:
+    """Split a client-supplied relative path into safe segments, or raise 400.
+
+    *allow_hidden* (Git paths only, QTZ-010) lets dot segments such as
+    ``.gitignore`` through; every other rule is the same.
+    """
     if not isinstance(rel, str) or not rel:
         raise ApiError(400, "bad_path", "path must be a non-empty string")
     if len(rel) > MAX_REL_PATH_CHARS:
@@ -85,7 +89,7 @@ def validate_relpath(rel: object) -> list[str]:
     for seg in segments:
         if seg in ("", ".", ".."):
             raise ApiError(400, "bad_path", "empty, '.' and '..' path segments are not allowed")
-        if seg.startswith("."):
+        if seg.startswith(".") and not allow_hidden:
             raise ApiError(400, "bad_path", "hidden path segments are not allowed")
         try:
             encoded = seg.encode("utf-8")
@@ -261,6 +265,49 @@ def _overlaps(a: str, b: str) -> bool:
     return (ia is not None and ia in _ancestor_idents(b)) or (ib is not None and ib in _ancestor_idents(a))
 
 
+def canonical_root(raw: object, protected: tuple[str, ...], noun: str = "workspace") -> str:
+    """The root policy shared by workspaces and Git repos: realpath, or raise 400.
+
+    Refused: non-absolute, NUL, missing, not a directory, ``/``, the home
+    directory itself, ``/proc`` ``/sys`` ``/dev``, anything overlapping a
+    *protected* directory (KiroCrew home, the app data dir), not owned by this
+    uid, or group/world-writable.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        raise ApiError(400, "bad_root", "path must be a non-empty string")
+    if "\x00" in raw:
+        raise ApiError(400, "bad_root", "path contains a NUL byte")
+    if not os.path.isabs(raw):
+        raise ApiError(400, "bad_root", f"{noun} path must be absolute")
+    real = os.path.realpath(raw)
+    try:
+        st = os.stat(real)
+    except OSError:
+        raise ApiError(400, "bad_root", f"{noun} path does not exist") from None
+    if not stat.S_ISDIR(st.st_mode):
+        raise ApiError(400, "bad_root", f"{noun} path is not a directory")
+    ident = (st.st_dev, st.st_ino)
+    if real == "/" or ident == _ident("/"):
+        raise ApiError(400, "root_refused", f"the filesystem root cannot be a {noun}")
+    for home in _home_dirs():
+        home_real = os.path.realpath(home)
+        if real == home_real or ident == _ident(home_real):
+            raise ApiError(400, "root_refused",
+                           f"your home directory itself cannot be a {noun}; pick a folder inside it")
+    for pseudo in PSEUDO_FS:
+        if _inside(real, pseudo):
+            raise ApiError(400, "root_refused", f"{pseudo} is not a place for a {noun}")
+    for p in protected:
+        if _overlaps(real, p):
+            raise ApiError(400, "root_refused", f"{noun} overlaps KiroCrew or Quartizo data")
+    if st.st_uid != os.getuid():
+        raise ApiError(400, "root_not_owned", "the folder must belong to you")
+    if st.st_mode & 0o022:
+        raise ApiError(400, "root_writable_by_others",
+                       "the folder is group- or world-writable; run `chmod go-w` on it first")
+    return real
+
+
 class Registry:
     """Registered workspace roots, persisted in the app's SQLite DB."""
 
@@ -295,38 +342,7 @@ class Registry:
 
     def canonical_root(self, raw: object) -> str:
         """Validate a candidate root and return its realpath, or raise."""
-        if not isinstance(raw, str) or not raw.strip():
-            raise ApiError(400, "bad_root", "path must be a non-empty string")
-        if "\x00" in raw:
-            raise ApiError(400, "bad_root", "path contains a NUL byte")
-        if not os.path.isabs(raw):
-            raise ApiError(400, "bad_root", "workspace path must be absolute")
-        real = os.path.realpath(raw)
-        try:
-            st = os.stat(real)
-        except OSError:
-            raise ApiError(400, "bad_root", "workspace path does not exist") from None
-        if not stat.S_ISDIR(st.st_mode):
-            raise ApiError(400, "bad_root", "workspace path is not a directory")
-        ident = (st.st_dev, st.st_ino)
-        if real == "/" or ident == _ident("/"):
-            raise ApiError(400, "root_refused", "the filesystem root cannot be a workspace")
-        for home in _home_dirs():
-            home_real = os.path.realpath(home)
-            if real == home_real or ident == _ident(home_real):
-                raise ApiError(400, "root_refused", "your home directory itself cannot be a workspace; pick a folder inside it")
-        for pseudo in PSEUDO_FS:
-            if _inside(real, pseudo):
-                raise ApiError(400, "root_refused", f"{pseudo} is not a place for notes")
-        for p in self.protected:
-            if _overlaps(real, p):
-                raise ApiError(400, "root_refused", "workspace overlaps KiroCrew or Quartizo data")
-        if st.st_uid != os.getuid():
-            raise ApiError(400, "root_not_owned", "the folder must belong to you")
-        if st.st_mode & 0o022:
-            raise ApiError(400, "root_writable_by_others",
-                           "the folder is group- or world-writable; run `chmod go-w` on it first")
-        return real
+        return canonical_root(raw, self.protected)
 
     def register(self, raw_path: object, name: object = None) -> Workspace:
         real = self.canonical_root(raw_path)
