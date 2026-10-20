@@ -198,10 +198,12 @@ Read only: nothing here sends, stops or changes a session.
 
 1. The **Visibility** box says what the tab can and cannot see. The page
    calls as the dashboard owner, so the gateway lists every session; only
-   sessions Quartizo named (`quartizo-…`) get details. The rest are under
-   **Other sessions (read-only)**: name, owner, status, last activity, and a
-   link to KiroCrew's chat. Quartizo never reads them or attaches context.
-2. The table shows each Quartizo session: Chat tab or workspace, linked
+   sessions Quartizo **recorded creating** (its backend keeps the keys of the
+   chats it opened) get details. A Quartizo-looking name alone does not
+   count. The rest are under **Other sessions (read-only)**: name, owner,
+   status, last activity, and a link to KiroCrew's chat. Quartizo never reads
+   them or attaches context.
+2. The table "Sessions Quartizo created" shows each one: Chat tab or workspace, linked
    task(s), status (`running` / `stopping` / `idle` / `error`), last activity,
    tool calls and errors in its newest 50 transcript rows, and subagents
    (running flag and queued count from the gateway, finished ones from their
@@ -216,8 +218,11 @@ Read only: nothing here sends, stops or changes a session.
    details, **Show in Agents** goes the other way. After a jump, **← Back to …**
    returns.
 5. It polls every 5 s only while the tab is shown and the page is visible.
-   If a poll fails it backs off (up to 60 s), shows **Stale since …** and
-   marks every status "(stale)"; nothing is assumed finished. A gateway
+   Each request gives up after 15 s. If a poll fails it backs off (up to
+   60 s), shows **Stale since …** and marks every status "(stale)"; nothing
+   is assumed finished. A transcript that cannot be read is retried after 60 s
+   (doubling, up to 5 min) and its numbers are marked "(stale)". A running
+   session's transcript is read on every poll. A gateway
    restart is reported and the transcripts are read again.
 
 ## Using Git (Git tab)
@@ -290,6 +295,18 @@ metadata (M3). Note content stays in the files.
 
 See [docs/threat-model.md](docs/threat-model.md) for path confinement
 (no `..`, no hidden segments, no symlinks followed, fd-relative opens).
+
+### Created sessions
+
+Quartizo's own chat sessions (the Chat tab and each workspace's chat) are
+recorded in the same DB (migration 5, table `created_slots`) right after the
+page creates them. The Agents tab calls a session Quartizo's only if its key is
+here.
+
+| Route | Body / result |
+|---|---|
+| `POST /api/slots` | `{key}` -> 200 `{slot: {key, workspaceUid, createdAt}}`. Idempotent. `key` must match `quartizo-[w<32 hex uid>-]<time>-<6 chars>` (else 400 `bad_slot_key`); a workspace key's uid must belong to a registered workspace (else 404 `workspace_not_found`) |
+| `GET /api/slots` | `{slots: [{key, workspaceUid, createdAt}]}` |
 
 ### Git (read only)
 

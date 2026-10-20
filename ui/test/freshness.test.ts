@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
+  DETAIL_MAX_BACKOFF_MS,
+  detailBackoff,
   freshnessView,
   INITIAL_FRESHNESS,
   MAX_BACKOFF_MS,
@@ -7,8 +9,11 @@ import {
   onPollFailure,
   onPollSuccess,
   POLL_MS,
+  REQUEST_TIMEOUT_MS,
+  resumeDelay,
   restartedSince,
   shouldPoll,
+  withTimeout,
 } from '../src/freshness'
 
 describe('nextDelay (backoff)', () => {
@@ -82,5 +87,61 @@ describe('staleness', () => {
     expect(f.generation).toBe('g1')
     f = onPollSuccess(f, 3, 'g1')
     expect(f.restartedAt).toBeNull()
+  })
+})
+
+describe('detailBackoff', () => {
+  it('is 60 s after the first failure, doubling, capped at 5 min', () => {
+    expect([0, 1, 2, 3, 4, 5, 50].map(detailBackoff)).toEqual([0, 60000, 120000, 240000, 300000, 300000, 300000])
+    expect(DETAIL_MAX_BACKOFF_MS).toBe(300000)
+    expect(detailBackoff(Number.NaN)).toBe(0)
+  })
+})
+
+describe('resumeDelay (tab visible again)', () => {
+  it('polls at once when healthy', () => {
+    expect(resumeDelay(0, 0)).toBe(0)
+  })
+  it('waits out the rest of the current backoff instead of polling at once', () => {
+    expect(resumeDelay(2, 5000)).toBe(15000)
+    expect(resumeDelay(2, 25000)).toBe(0)
+    expect(resumeDelay(10, 1000)).toBe(MAX_BACKOFF_MS - 1000)
+  })
+})
+
+describe('withTimeout', () => {
+  it('passes a result through and clears its timer', async () => {
+    vi.useFakeTimers()
+    try {
+      await expect(withTimeout(Promise.resolve(7), 1000)).resolves.toBe(7)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects a get that never resolves, so the poll fails and releases inFlight', async () => {
+    vi.useFakeTimers()
+    try {
+      const never = new Promise<never>(() => {})
+      const get = vi.fn(() => never)
+      let inFlight = true
+      const poll = withTimeout(get()).finally(() => (inFlight = false))
+      const outcome = poll.then(() => 'ok', (e: Error) => e.message)
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS - 1)
+      expect(inFlight).toBe(true)
+      await vi.advanceTimersByTimeAsync(1)
+      await expect(outcome).resolves.toMatch(/timed out after 15 s/)
+      expect(inFlight).toBe(false)
+      // A timeout is a failure like any other: stale banner and backoff apply.
+      const f = onPollFailure(onPollSuccess(INITIAL_FRESHNESS, 0, 'g'), 1, 'request timed out after 15 s')
+      expect(freshnessView(f)).toMatchObject({ kind: 'stale', retryInMs: 10000 })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects with the original error when the request fails first', async () => {
+    await expect(withTimeout(Promise.reject(new Error('API 502')), 1000)).rejects.toThrow('API 502')
   })
 })

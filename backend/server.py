@@ -297,6 +297,12 @@ class Handler(BaseHTTPRequestHandler):
                 "version": APP_VERSION,
                 "principal": {"kind": principal.kind, "ownerId": principal.owner_id},
             }
+        if parts == ["api", "slots"]:
+            if method == "GET":
+                return 200, {"slots": registry.created_slots()}
+            if method == "POST":
+                return 200, {"slot": registry.record_slot(self._json_body().get("key"))}
+            return None
         if parts == ["api", "workspaces"]:
             if method == "GET":
                 return 200, {"workspaces": [w.to_json() for w in registry.list()]}

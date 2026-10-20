@@ -12,6 +12,7 @@ import {
   partitionSessions,
   repoForProject,
   rowFingerprint,
+  shouldReadDetail,
   type SessionRow,
   sessionFlags,
   sessionStatus,
@@ -119,10 +120,25 @@ describe('parseSlotRow / parseSlotList', () => {
 })
 
 describe('classifySession (visibility)', () => {
-  it('Quartizo-created: generated names on owner or quartizo app sessions', () => {
-    expect(classifySession({ key: TAB_KEY, app: '' })).toEqual({ cls: 'quartizo', kind: 'chat-tab' })
-    expect(classifySession({ key: WS_KEY, app: '' })).toEqual({ cls: 'quartizo', kind: 'workspace', workspaceUid: UID })
-    expect(classifySession({ key: TAB_KEY, app: 'quartizo' }).cls).toBe('quartizo')
+  const CREATED = new Set([TAB_KEY, WS_KEY])
+
+  it('Quartizo-created: recorded generated names on owner or quartizo app sessions', () => {
+    expect(classifySession({ key: TAB_KEY, app: '' }, CREATED)).toEqual({ cls: 'quartizo', kind: 'chat-tab' })
+    expect(classifySession({ key: WS_KEY, app: '' }, CREATED)).toEqual({ cls: 'quartizo', kind: 'workspace', workspaceUid: UID })
+    expect(classifySession({ key: TAB_KEY, app: 'quartizo' }, CREATED).cls).toBe('quartizo')
+  })
+
+  it('a matching name that was never recorded is other', () => {
+    const unrecorded = 'quartizo-lx2k9b-ffffff'
+    expect(classifySession({ key: unrecorded, app: '' }, CREATED)).toEqual({ cls: 'other' })
+    expect(classifySession({ key: TAB_KEY, app: '' }, new Set())).toEqual({ cls: 'other' })
+    const p = partitionSessions([row({ key: unrecorded }), row({ key: TAB_KEY })], CREATED)
+    expect(p.quartizo.map(r => r.key)).toEqual([TAB_KEY])
+    expect(p.other.map(r => r.key)).toEqual([unrecorded])
+  })
+
+  it('a recorded key that is not a Quartizo name is still other', () => {
+    expect(classifySession({ key: 'main', app: 'quartizo' }, new Set(['main']))).toEqual({ cls: 'other' })
   })
 
   it('everything else is other (read-only)', () => {
@@ -135,7 +151,7 @@ describe('classifySession (visibility)', () => {
       { key: `${TAB_KEY} `, app: '' },
       { key: 'QUARTIZO-a-000000', app: '' },
     ]) {
-      expect(classifySession(r), r.key).toEqual({ cls: 'other' })
+      expect(classifySession(r, new Set([...CREATED, r.key])), r.key).toEqual({ cls: 'other' })
     }
   })
 
@@ -143,9 +159,38 @@ describe('classifySession (visibility)', () => {
     const a = row({ key: TAB_KEY, last_ts: '2026-10-20T10:00:00Z' })
     const b = row({ key: WS_KEY, last_ts: '2026-10-20T12:00:00Z' })
     const o = row({ key: 'dashboard:x', last_ts: '2026-10-20T13:00:00Z' })
-    const p = partitionSessions([a, o, b])
+    const p = partitionSessions([a, o, b], new Set([TAB_KEY, WS_KEY, 'dashboard:x']))
     expect(p.quartizo.map(r => r.key)).toEqual([WS_KEY, TAB_KEY])
     expect(p.other.map(r => r.key)).toEqual(['dashboard:x'])
+  })
+})
+
+describe('shouldReadDetail', () => {
+  const r = row()
+  const ok = { fp: rowFingerprint(r), failure: null, failedAt: null, failures: 0 }
+  const failed = (failures: number, failedAt = 1000) => ({ ...ok, failure: { kind: 'unknown' }, failedAt, failures })
+
+  it('reads a key never read, or whose fingerprint changed; skips an unchanged idle one', () => {
+    expect(shouldReadDetail(undefined, r, 0)).toBe(true)
+    expect(shouldReadDetail(ok, r, 0)).toBe(false)
+    expect(shouldReadDetail({ ...ok, fp: 'old' }, r, 0)).toBe(true)
+  })
+
+  it('always re-reads a running session, even with an unchanged fingerprint', () => {
+    const running = row({ running: true })
+    expect(shouldReadDetail({ ...ok, fp: rowFingerprint(running) }, running, 0)).toBe(true)
+  })
+
+  it('backs a failed key off 60 s, doubling to 5 min, whatever its fingerprint', () => {
+    const running = row({ running: true })
+    expect(shouldReadDetail(failed(1), r, 1000 + 59_999)).toBe(false)
+    expect(shouldReadDetail(failed(1), r, 1000 + 60_000)).toBe(true)
+    expect(shouldReadDetail(failed(2), r, 1000 + 119_999)).toBe(false)
+    expect(shouldReadDetail(failed(2), r, 1000 + 120_000)).toBe(true)
+    expect(shouldReadDetail(failed(1), running, 1000 + 1)).toBe(false)
+    expect(shouldReadDetail({ ...failed(3), fp: 'old' }, r, 1000 + 239_999)).toBe(false)
+    expect(shouldReadDetail(failed(9), r, 1000 + 299_999)).toBe(false)
+    expect(shouldReadDetail(failed(9), r, 1000 + 300_000)).toBe(true)
   })
 })
 

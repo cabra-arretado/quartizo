@@ -173,7 +173,7 @@ class AgentsReadShapeTests(unittest.TestCase):
         self.assertEqual(status, 200, rows)
         self.assertIsInstance(rows, list)
         if not rows:
-            self.skipTest("the gateway lists no sessions")
+            self.skipTest("the gateway lists no sessions; an empty gateway checks nothing")
         for row in rows:
             missing = [f for f in AGENTS_ROW_FIELDS if f not in row]
             self.assertEqual(missing, [], row.get("key"))
@@ -186,7 +186,7 @@ class AgentsReadShapeTests(unittest.TestCase):
         self.assertEqual(status, 200, rows)
         owned = [r["key"] for r in rows if r.get("app") == "quartizo"]
         if not owned:
-            self.skipTest("no app-owned slot to read")
+            self.skipTest("no app-owned slot to read; an empty gateway checks nothing")
         key = urllib.parse.quote(owned[0])
         status, body = call("GET", f"/api/chat/slots/{key}?limit=50")
         self.assertEqual(status, 200, body)
@@ -199,7 +199,7 @@ class AgentsReadShapeTests(unittest.TestCase):
         self.assertEqual(status, 200, rows)
         owner = [r["key"] for r in rows if r.get("app") == ""]
         if not owner:
-            self.skipTest("no owner session listed")
+            self.skipTest("no owner session listed; an empty gateway checks nothing")
         status, body = call("GET", f"/api/chat/slots/{urllib.parse.quote(owner[0])}?limit=1")
         self.assertEqual((status, body.get("code")), (404, "slot_not_found"))
 

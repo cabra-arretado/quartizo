@@ -2,7 +2,8 @@
 
 It holds the workspace registry (which roots the owner opted in), since
 migration 3 the Kanban task metadata of each project (QTZ-008), and since
-migration 4 the registered Git repository roots (QTZ-010). One project is
+migration 4 the registered Git repository roots (QTZ-010) and since migration 5
+the session keys Quartizo created (M5). One project is
 one registered workspace, keyed by the workspace ``uid``. Note content always
 lives in the Markdown files themselves; a task only stores a workspace-relative
 ``note_ref`` string, never file content and never an absolute path.
@@ -88,6 +89,17 @@ MIGRATIONS: tuple[str, ...] = (
         name       TEXT    NOT NULL,
         path       TEXT    NOT NULL UNIQUE,
         created_at INTEGER NOT NULL
+    );
+    """,
+    # 5: session keys Quartizo itself created (M5 review). The Agents tab calls a
+    # session Quartizo's only if its key is here; a name pattern alone proves
+    # nothing. `workspace_uid` is set for workspace chats. No FK: the record
+    # outlives an unregistered workspace.
+    """
+    CREATE TABLE created_slots (
+        key           TEXT PRIMARY KEY,
+        workspace_uid TEXT,
+        created_at    INTEGER NOT NULL
     );
     """,
 )
@@ -189,6 +201,16 @@ def insert_repo(conn: sqlite3.Connection, name: str, path: str) -> tuple[int, st
 
 def delete_repo(conn: sqlite3.Connection, repo_id: int) -> bool:
     return conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,)).rowcount > 0
+
+
+def insert_created_slot(conn: sqlite3.Connection, key: str, workspace_uid: str | None) -> None:
+    """Idempotent: an existing key keeps its first created_at."""
+    conn.execute("INSERT OR IGNORE INTO created_slots (key, workspace_uid, created_at) VALUES (?, ?, ?)",
+                 (key, workspace_uid, int(time.time())))
+
+
+def list_created_slots(conn: sqlite3.Connection) -> list[sqlite3.Row]:
+    return conn.execute("SELECT key, workspace_uid, created_at FROM created_slots ORDER BY created_at, key").fetchall()
 
 
 @contextmanager

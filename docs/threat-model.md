@@ -1,7 +1,8 @@
 # Threat model (M1: Markdown workspaces)
 
 Scope: workspace confinement (§1), symlinks and TOCTOU (§2), untrusted
-Markdown (§3), task metadata (§4, M3) and read-only Git (§5, M4). Chat
+Markdown (§3), task metadata (§4, M3), read-only Git (§5, M4) and recorded
+sessions (§6). Chat
 context is covered in [m2.md](m2.md).
 
 ## Assets and actors
@@ -320,3 +321,18 @@ page (it names paths); failures map to stable codes.
   are not counted by that limit; the 10 s timeout and output caps bound the rest.
 - **Partial clones** show missing objects as 500 `git_failed`: lazy fetch
   is refused, by design.
+
+## 6. Recorded sessions (M5 review)
+
+`POST /api/slots {key}` stores a session key in `created_slots` so the Agents
+tab can tell sessions Quartizo created from sessions that merely have a
+Quartizo-looking name (any session can be named `quartizo-…`, including by an
+agent). Owner-only like every route. The key must match the UI's slot-name
+pattern (full match, ASCII, no trailing newline) and a workspace key's uid must
+belong to a registered workspace; the table holds nothing but that key, an
+optional uid and a timestamp, and the key is only ever a SQL parameter. The
+record is a claim made by the page after the gateway created the session: an
+agent cannot add to it (agent principals get 403), but anything running as the
+owner's page can, so it is provenance against accidents and look-alike names,
+not a boundary against the owner. An unrecorded session is shown read-only with
+no transcript read, so a look-alike cannot make Quartizo fetch its content.

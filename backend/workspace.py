@@ -27,6 +27,7 @@ import errno
 import grp
 import os
 import pwd
+import re
 import sqlite3
 import stat
 import threading
@@ -329,6 +330,14 @@ def canonical_root(raw: object, protected: tuple[str, ...], noun: str = "workspa
     return real
 
 
+# Port of ui/src/slots.ts SLOT_NAME_RE (use fullmatch: `$` would admit a trailing newline).
+SLOT_NAME_RE = re.compile(r"quartizo-(?:w([0-9a-f]{32})-)?[0-9a-z]+-[0-9a-z]{6}")
+
+
+def _slot_json(row: sqlite3.Row) -> dict:
+    return {"key": row["key"], "workspaceUid": row["workspace_uid"], "createdAt": row["created_at"]}
+
+
 class Registry:
     """Registered workspace roots, persisted in the app's SQLite DB."""
 
@@ -360,6 +369,27 @@ class Registry:
         if row is None:
             raise ApiError(404, "workspace_not_found", "no such workspace")
         return Workspace(row["id"], row["uid"], row["name"], row["path"])
+
+    def record_slot(self, raw: object) -> dict:
+        """Remember a session key Quartizo created (idempotent).
+
+        The key must match the names the UI generates (slots.ts SLOT_NAME_RE);
+        for a workspace chat the uid must belong to a registered workspace.
+        """
+        m = SLOT_NAME_RE.fullmatch(raw) if isinstance(raw, str) else None
+        if m is None:
+            raise ApiError(400, "bad_slot_key", "not a session name Quartizo generates")
+        uid = m.group(1)
+        with self._lock, self._conn() as conn:
+            if uid is not None and not any(w["uid"] == uid for w in db.list_workspaces(conn)):
+                raise ApiError(404, "workspace_not_found", "no such workspace")
+            db.insert_created_slot(conn, raw, uid)
+            row = next(r for r in db.list_created_slots(conn) if r["key"] == raw)
+        return _slot_json(row)
+
+    def created_slots(self) -> list[dict]:
+        with self._conn() as conn:
+            return [_slot_json(r) for r in db.list_created_slots(conn)]
 
     def canonical_root(self, raw: object) -> str:
         """Validate a candidate root and return its realpath, or raise."""

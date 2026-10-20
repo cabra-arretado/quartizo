@@ -18,6 +18,7 @@ import {
   type SessionRow,
   sessionFlags,
   sessionStatus,
+  shouldReadDetail,
   type SubagentRecord,
   SUMMARY_ROWS,
   summarizeTranscript,
@@ -28,10 +29,20 @@ import {
   workspaceForSession,
 } from './agents'
 import { Alert } from './Chat'
-import { freshnessView, type Freshness, INITIAL_FRESHNESS, nextDelay, onPollFailure, onPollSuccess, POLL_MS } from './freshness'
+import {
+  freshnessView,
+  type Freshness,
+  INITIAL_FRESHNESS,
+  nextDelay,
+  onPollFailure,
+  onPollSuccess,
+  POLL_MS,
+  resumeDelay,
+  withTimeout,
+} from './freshness'
 import { listRepos, type Repo } from './gitApi'
 import { listWorkspaces, toFailure, type Workspace } from './notesApi'
-import { classifyError, type Failure, SLOTS_PATH, slotDetailPath, transcriptPath } from './slots'
+import { classifyError, type Failure, listCreatedSlots, SLOTS_PATH, slotDetailPath, transcriptPath } from './slots'
 import { listTasks, type Task } from './tasksApi'
 
 const S = {
@@ -85,6 +96,9 @@ interface SummaryEntry {
   summary: TranscriptSummary | null
   at: number | null
   failure: Failure | null
+  /** Latest failed read (epoch ms) and consecutive failures: the per-key backoff. */
+  failedAt: number | null
+  failures: number
 }
 
 interface Links {
@@ -142,6 +156,7 @@ export default function Agents(props: AgentsProps) {
   const { api, active } = props
   const navigate = useNavigate()
   const [rows, setRows] = useState<SessionRow[] | null>(null)
+  const [created, setCreated] = useState<ReadonlySet<string>>(new Set())
   const [freshness, setFreshness] = useState<Freshness>(INITIAL_FRESHNESS)
   const [summaries, setSummaries] = useState<Record<string, SummaryEntry>>({})
   const [selected, setSelected] = useState<string | null>(null)
@@ -190,7 +205,8 @@ export default function Agents(props: AgentsProps) {
       inFlight = true
       lastStart = Date.now()
       try {
-        const list = parseSlotList(await api.get(SLOTS_PATH))
+        const [raw, createdKeys] = await Promise.all([withTimeout(api.get(SLOTS_PATH)), withTimeout(listCreatedSlots(api))])
+        const list = parseSlotList(raw)
         if (cancelled) return
         const gen = listGeneration(list)
         const prev = freshRef.current
@@ -198,23 +214,26 @@ export default function Agents(props: AgentsProps) {
         if (gen && prev.generation && gen !== prev.generation) cache.current = {}
         setFresh(onPollSuccess(prev, Date.now(), gen))
         setRows(list)
+        setCreated(createdKeys)
         const keys = new Set(list.map(r => r.key))
         for (const k of Object.keys(cache.current)) if (!keys.has(k)) delete cache.current[k]
-        const { quartizo } = partitionSessions(list)
+        const { quartizo } = partitionSessions(list, createdKeys)
         for (const row of detailTargets(quartizo, selectedRef.current)) {
           if (cancelled) return
           const fp = rowFingerprint(row)
           const before = cache.current[row.key]
-          if (before && before.fp === fp && !before.failure) continue
+          if (!shouldReadDetail(before, row, Date.now())) continue
           try {
-            const detail = await api.get(slotDetailPath(row.key, DETAIL_ROWS))
-            cache.current[row.key] = { fp, summary: summarizeTranscript(detail), at: Date.now(), failure: null }
+            const detail = await withTimeout(api.get(slotDetailPath(row.key, DETAIL_ROWS)))
+            cache.current[row.key] = { fp, summary: summarizeTranscript(detail), at: Date.now(), failure: null, failedAt: null, failures: 0 }
           } catch (err) {
             cache.current[row.key] = {
               fp,
               summary: before?.summary ?? null,
               at: before?.at ?? null,
               failure: classifyError(err, { missingIsSlotNotFound: true }),
+              failedAt: Date.now(),
+              failures: (before?.failures ?? 0) + 1,
             }
           }
         }
@@ -232,7 +251,7 @@ export default function Agents(props: AgentsProps) {
     }
     const onVisibility = () => {
       if (document.hidden) clearTimeout(timer)
-      else schedule(0)
+      else schedule(resumeDelay(freshRef.current.failures, Date.now() - lastStart))
     }
     document.addEventListener('visibilitychange', onVisibility)
     // A host `slots` frame or a new selection: poll soon, at most once a second, never during a backoff.
@@ -261,7 +280,7 @@ export default function Agents(props: AgentsProps) {
     pollSoon.current?.()
   }, [props.request?.seq]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const parts = useMemo(() => partitionSessions(rows ?? []), [rows])
+  const parts = useMemo(() => partitionSessions(rows ?? [], created), [rows, created])
   const view = freshnessView(freshness)
   const stale = view.kind === 'stale'
   const now = Date.now()
@@ -314,9 +333,9 @@ export default function Agents(props: AgentsProps) {
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(340px, 44%)', gap: 12, flex: 1, minHeight: 0 }}>
         <div style={{ ...S.column, overflowY: 'auto' }}>
           <section aria-label="Quartizo sessions" style={S.panel}>
-            <strong className="text-sm">Quartizo sessions ({parts.quartizo.length})</strong>
+            <strong className="text-sm">Sessions Quartizo created (recorded by Quartizo) ({parts.quartizo.length})</strong>
             {rows !== null && parts.quartizo.length === 0 && (
-              <span className="text-sm text-muted">No Quartizo-created sessions are listed. Open the Chat tab or a workspace chat first.</span>
+              <span className="text-sm text-muted">No session recorded by Quartizo is listed. Open the Chat tab or a workspace chat first.</span>
             )}
             {parts.quartizo.length > 0 && (
               <table style={S.table}>
@@ -336,6 +355,7 @@ export default function Agents(props: AgentsProps) {
                       row={row}
                       entry={summaries[row.key]}
                       links={links}
+                      created={created}
                       stale={stale}
                       now={now}
                       selected={row.key === selected}
@@ -355,8 +375,8 @@ export default function Agents(props: AgentsProps) {
           <details>
             <summary className="text-sm">Other sessions (read-only) ({parts.other.length})</summary>
             <p className="text-sm text-muted" style={{ margin: '4px 0' }}>
-              Sessions Quartizo did not create, as the gateway lists them to the dashboard owner. Quartizo does not read their
-              transcripts and never attaches context to them.
+              Sessions Quartizo did not record creating, as the gateway lists them to the dashboard owner (a Quartizo-looking name
+              alone does not count). Quartizo does not read their transcripts and never attaches context to them.
             </p>
             {parts.other.length > 0 && (
               <table style={S.table}>
@@ -400,6 +420,7 @@ export default function Agents(props: AgentsProps) {
               entry={summaries[current.key]}
               rows={rows ?? []}
               links={links}
+              created={created}
               stale={stale}
               now={now}
               selectedSub={selectedSub}
@@ -418,7 +439,7 @@ export default function Agents(props: AgentsProps) {
                 Other session (read-only): <StatusBadge status={sessionStatus(selectedOther)} stale={stale} /> · last activity{' '}
                 {fmtWhen(selectedOther.lastActivityAt, now)}
               </span>
-              <span className="text-sm text-muted">Quartizo did not create this session, so it shows only the list fields above.</span>
+              <span className="text-sm text-muted">Quartizo has no record of creating this session, so it shows only the list fields above.</span>
               <div style={S.row}>
                 <Btn onClick={() => openTranscript(selectedOther.key)}>Open in KiroCrew chat</Btn>
               </div>
@@ -437,7 +458,7 @@ function VisibilityNote(props: { quartizo: number; other: number; loaded: boolea
     <div role="note" aria-label="Visibility" style={S.note}>
       <strong>Visibility:</strong>{' '}
       {props.loaded
-        ? `the gateway lists ${props.quartizo} Quartizo session(s) and ${props.other} other session(s) to this page.`
+        ? `the gateway lists ${props.quartizo} session(s) Quartizo created (recorded by Quartizo) and ${props.other} other session(s) to this page.`
         : 'reading the session list…'}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 8, marginTop: 4 }}>
         <div>
@@ -461,8 +482,8 @@ function VisibilityNote(props: { quartizo: number; other: number; loaded: boolea
   )
 }
 
-function sessionLabel(row: SessionRow, links: Links): string {
-  const vis = classifySession(row)
+function sessionLabel(row: SessionRow, links: Links, created: ReadonlySet<string>): string {
+  const vis = classifySession(row, created)
   if (vis.cls !== 'quartizo') return 'other'
   if (vis.kind === 'chat-tab') return 'Chat tab'
   const ws = workspaceForSession(links.workspaces, row.key)
@@ -473,6 +494,7 @@ function SessionLine(props: {
   row: SessionRow
   entry: SummaryEntry | undefined
   links: Links
+  created: ReadonlySet<string>
   stale: boolean
   now: number
   selected: boolean
@@ -490,18 +512,18 @@ function SessionLine(props: {
           {clip(row.title, 60) || <span style={S.mono}>{clip(row.key, 60)}</span>}
         </button>
         <div className="text-muted" style={{ fontSize: 12 }}>
-          {sessionLabel(row, links)}
+          {sessionLabel(row, links, props.created)}
         </div>
       </td>
       <td style={S.cell}>{tasks.length ? tasks.map(t => clip(t.task.title, 40)).join(', ') : '—'}</td>
       <td style={S.cell}>
-        <StatusBadge status={status} stale={props.stale} />
+        <StatusBadge status={status} stale={props.stale || !!entry?.failure} />
       </td>
       <td style={S.cell} title={row.lastActivityAt ? new Date(row.lastActivityAt).toLocaleString() : undefined}>
         {fmtWhen(row.lastActivityAt, props.now)}
       </td>
-      <td style={S.cell}>{summary ? summary.toolCalls : '—'}</td>
-      <td style={S.cell}>{summary ? summary.errors : '—'}</td>
+      <td style={S.cell}>{summary ? `${summary.toolCalls}${entry?.failure ? ' (stale)' : ''}` : '—'}</td>
+      <td style={S.cell}>{summary ? `${summary.errors}${entry?.failure ? ' (stale)' : ''}` : '—'}</td>
       <td style={S.cell}>
         {row.subagentsRunning ? 'running' : ''}
         {row.subagentsQueued > 0 ? ` ${row.subagentsQueued} queued` : ''}
@@ -524,6 +546,7 @@ function SessionDetail(props: {
   entry: SummaryEntry | undefined
   rows: SessionRow[]
   links: Links
+  created: ReadonlySet<string>
   stale: boolean
   now: number
   selectedSub: string | null
@@ -548,7 +571,7 @@ function SessionDetail(props: {
         <strong style={S.mono}>{clip(row.key, 120)}</strong>
         {row.title && <span className="text-sm">{clip(row.title, 120)}</span>}
         <span className="text-sm">
-          <StatusBadge status={status} stale={props.stale} /> · {sessionLabel(row, links)} · last activity{' '}
+          <StatusBadge status={status} stale={props.stale || !!entry?.failure} /> · {sessionLabel(row, links, props.created)} · last activity{' '}
           {fmtWhen(row.lastActivityAt, props.now)}
           {row.app === 'quartizo' ? ' · app-token session' : ''}
         </span>
@@ -644,7 +667,7 @@ function SessionDetail(props: {
       )}
 
       <div style={S.panel}>
-        <strong className="text-sm">Recent transcript</strong>
+        <strong className="text-sm">Recent transcript{summary && entry?.failure ? ' (stale)' : ''}</strong>
         {!summary && !entry?.failure && <span className="text-sm text-muted">Reading…</span>}
         {summary && (
           <>

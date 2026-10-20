@@ -24,6 +24,7 @@
  * All strings that reach the page are untrusted (tool args and outputs, agent
  * text, titles): they are flattened and clipped here, and rendered as text nodes.
  */
+import { detailBackoff } from './freshness'
 import type { Repo } from './gitApi'
 import type { Workspace } from './notesApi'
 import { isSlotName, slotWorkspaceUid } from './slots'
@@ -156,21 +157,23 @@ export type Visibility =
   | { cls: 'other' }
 
 /**
- * Quartizo-created = a name the page generates (`isSlotName`) on an owner
- * session or one owned by Quartizo's app token. Anything else, including a
- * Quartizo-looking name owned by another app, is "other": shown read-only,
+ * Quartizo-created = a key the backend recorded when Quartizo's own `openSlot`
+ * created it (`created`), with a name the page generates (`isSlotName`), on an
+ * owner session or one owned by Quartizo's app token. A name pattern alone
+ * proves nothing. Anything else, including a Quartizo-looking name that was
+ * never recorded or is owned by another app, is "other": shown read-only,
  * never given a transcript read or any context.
  */
-export function classifySession(row: Pick<SessionRow, 'key' | 'app'>): Visibility {
-  if (!isSlotName(row.key) || (row.app !== '' && row.app !== 'quartizo')) return { cls: 'other' }
+export function classifySession(row: Pick<SessionRow, 'key' | 'app'>, created: ReadonlySet<string>): Visibility {
+  if (!created.has(row.key) || !isSlotName(row.key) || (row.app !== '' && row.app !== 'quartizo')) return { cls: 'other' }
   const uid = slotWorkspaceUid(row.key)
   return uid ? { cls: 'quartizo', kind: 'workspace', workspaceUid: uid } : { cls: 'quartizo', kind: 'chat-tab' }
 }
 
-export function partitionSessions(rows: SessionRow[]): { quartizo: SessionRow[]; other: SessionRow[] } {
+export function partitionSessions(rows: SessionRow[], created: ReadonlySet<string>): { quartizo: SessionRow[]; other: SessionRow[] } {
   const quartizo: SessionRow[] = []
   const other: SessionRow[] = []
-  for (const r of rows) (classifySession(r).cls === 'quartizo' ? quartizo : other).push(r)
+  for (const r of rows) (classifySession(r, created).cls === 'quartizo' ? quartizo : other).push(r)
   const byActivity = (a: SessionRow, b: SessionRow) =>
     (b.lastActivityAt ?? b.createdAt ?? 0) - (a.lastActivityAt ?? a.createdAt ?? 0) || a.key.localeCompare(b.key)
   return { quartizo: quartizo.sort(byActivity), other: other.sort(byActivity) }
@@ -211,6 +214,26 @@ export function sessionFlags(row: SessionRow): string[] {
 /** What changes when a session's transcript changes, so unchanged sessions are not re-read. */
 export function rowFingerprint(row: SessionRow): string {
   return [row.messages, row.lastActivityAt, row.running, row.stopping, row.turn, row.turnGen].join('|')
+}
+
+/** The cached state of one session's transcript read, as far as the re-read decision goes. */
+export interface DetailState {
+  fp: string
+  failure: unknown
+  /** Epoch ms of the latest failed read, and consecutive failures so far. */
+  failedAt: number | null
+  failures: number
+}
+
+/**
+ * Read a session's transcript again? A key whose last read failed waits out
+ * its backoff first (60 s, doubling to 5 min). Otherwise: never read, changed
+ * fingerprint, or still `running` (activity can outpace the fingerprint).
+ */
+export function shouldReadDetail(before: DetailState | undefined, row: SessionRow, now: number): boolean {
+  if (!before) return true
+  if (before.failure) return before.failedAt === null || now - before.failedAt >= detailBackoff(before.failures)
+  return before.fp !== rowFingerprint(row) || row.running
 }
 
 /** The Quartizo sessions whose transcripts a poll reads: the selected one, then the most recent. */
@@ -444,7 +467,7 @@ export function childSessions(rows: SessionRow[], key: string): SessionRow[] {
 // ------------------------------------------------------------ visibility note
 
 export const VISIBILITY_CAN = [
-  'every session GET /api/chat/slots lists for the dashboard owner (this page calls as the owner); only sessions Quartizo named (quartizo-…) get details',
+  'every session GET /api/chat/slots lists for the dashboard owner (this page calls as the owner); only sessions Quartizo recorded creating get details',
   `the newest ${DETAIL_ROWS} transcript rows of a Quartizo session: tool call names and whether they ended or were refused, errors, timestamps`,
   'subagents that finished: their completion rows in that transcript page (id, name, outcome, task)',
   'whether a session has subagents running, and how many are queued (flags on the session list)',

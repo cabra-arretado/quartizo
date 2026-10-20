@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AppApi } from '@kirocrew/app-sdk'
 import {
+  CREATED_SLOTS_PATH,
   SEND_PATH,
   SLOTS_PATH,
   STORAGE_KEY,
@@ -8,11 +9,13 @@ import {
   classifyError,
   createSender,
   isSlotName,
+  listCreatedSlots,
   loadSlot,
   loadWorkspaceSlot,
   newSlotName,
   newWorkspaceSlotName,
   openSlot,
+  recordSlot,
   saveSlot,
   saveWorkspaceSlot,
   slotDetailPath,
@@ -50,6 +53,27 @@ describe('openSlot', () => {
     expect(api.post).toHaveBeenCalledWith(SLOTS_PATH, { name: NAME })
   })
 
+  it('records the key with the backend after the gateway created it', async () => {
+    const api = mockApi({ post: vi.fn().mockResolvedValue({ key: NAME }) })
+    await openSlot(api, NAME)
+    expect(api.post).toHaveBeenNthCalledWith(2, CREATED_SLOTS_PATH, { key: NAME })
+    expect(CREATED_SLOTS_PATH).toBe('/apps/quartizo/api/slots')
+  })
+
+  it('records nothing when the gateway refused or answered with a foreign key', async () => {
+    const refused = mockApi({ post: vi.fn().mockRejectedValue(apiError(404, SLOT_NOT_FOUND)) })
+    await expect(openSlot(refused, NAME)).rejects.toBeTruthy()
+    const foreign = mockApi({ post: vi.fn().mockResolvedValue({ key: 'dashboard:chat-1' }) })
+    await expect(openSlot(foreign, NAME)).rejects.toThrow(/not named by Quartizo/)
+    expect(refused.post).toHaveBeenCalledTimes(1)
+    expect(foreign.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('fails (and the stored name stays reopenable) when recording fails', async () => {
+    const post = vi.fn().mockResolvedValueOnce({ key: NAME }).mockRejectedValueOnce(apiError(503, 'busy'))
+    await expect(openSlot(mockApi({ post }), NAME)).rejects.toMatchObject({ status: 503 })
+  })
+
   it('passes the agent only when given', async () => {
     const api = mockApi({ post: vi.fn().mockResolvedValue({ key: NAME }) })
     await openSlot(api, NAME, 'reviewer')
@@ -82,6 +106,24 @@ describe('openSlot', () => {
     const api = mockApi({ post: vi.fn().mockRejectedValue(apiError(404, SLOT_NOT_FOUND)) })
     const err = await openSlot(api, NAME).catch(e => e)
     expect(classifyError(err).kind).toBe('slot_not_found')
+  })
+})
+
+describe('recorded keys', () => {
+  it('recordSlot posts the key; listCreatedSlots keeps only Quartizo-shaped keys', async () => {
+    const api = mockApi({
+      post: vi.fn().mockResolvedValue({}),
+      get: vi.fn().mockResolvedValue({ slots: [{ key: NAME }, { key: 'main' }, { key: 7 }, null] }),
+    })
+    await recordSlot(api, NAME)
+    expect(api.post).toHaveBeenCalledWith(CREATED_SLOTS_PATH, { key: NAME })
+    expect([...(await listCreatedSlots(api))]).toEqual([NAME])
+  })
+
+  it('listCreatedSlots refuses a body that is not a list', async () => {
+    for (const body of [undefined, {}, { slots: 'x' }]) {
+      await expect(listCreatedSlots(mockApi({ get: vi.fn().mockResolvedValue(body) }))).rejects.toThrow(/did not return a list/)
+    }
   })
 })
 
@@ -286,7 +328,9 @@ describe('openStoredSlot', () => {
   it('saves a fresh name before asking the gateway (no orphan on unmount)', async () => {
     const store = memStore()
     let release!: (v: unknown) => void
-    const api = mockApi({ post: vi.fn(() => new Promise(r => (release = r))) })
+    const api = mockApi({
+      post: vi.fn((path: string) => (path === CREATED_SLOTS_PATH ? Promise.resolve({}) : new Promise(r => (release = r)))),
+    })
     const pending = openStoredSlot(api, store)
     // The request is in flight; the name is already remembered.
     expect(store.value).toBe('quartizo-1-000001')
@@ -302,9 +346,13 @@ describe('openStoredSlot', () => {
     const store = memStore('quartizo-old-000000')
     const post = vi.fn()
       .mockRejectedValueOnce(apiError(404, SLOT_NOT_FOUND))
-      .mockResolvedValueOnce({ key: 'quartizo-1-000001' })
+      .mockResolvedValue({ key: 'quartizo-1-000001' })
     await expect(openStoredSlot(mockApi({ post }), store)).resolves.toBe('quartizo-1-000001')
-    expect(post.mock.calls.map(c => c[1])).toEqual([{ name: 'quartizo-old-000000' }, { name: 'quartizo-1-000001' }])
+    expect(post.mock.calls.map(c => c[1])).toEqual([
+      { name: 'quartizo-old-000000' },
+      { name: 'quartizo-1-000001' },
+      { key: 'quartizo-1-000001' },
+    ])
     expect(store.value).toBe('quartizo-1-000001')
   })
 

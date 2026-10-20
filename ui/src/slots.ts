@@ -125,7 +125,29 @@ export function slotWorkspaceUid(name: unknown): string | null {
   return m ? m[1] : null
 }
 
-/** Create (fresh name) or reopen (owned key) a slot; resolves to its key. */
+export const CREATED_SLOTS_PATH = `${BACKEND_BASE}/slots`
+
+/**
+ * Record a key with Quartizo's backend (idempotent). The Agents tab calls a
+ * session Quartizo's only if its key is recorded; a name pattern proves nothing.
+ */
+export async function recordSlot(api: AppApi, key: string): Promise<void> {
+  await api.post(CREATED_SLOTS_PATH, { key })
+}
+
+/** The keys Quartizo has recorded as created by it. */
+export async function listCreatedSlots(api: AppApi): Promise<Set<string>> {
+  const body = await api.get<{ slots?: unknown }>(CREATED_SLOTS_PATH)
+  if (!body || !Array.isArray(body.slots)) throw new Error(`GET ${CREATED_SLOTS_PATH} did not return a list`)
+  const keys = new Set<string>()
+  for (const s of body.slots) {
+    const key = (s as { key?: unknown } | null)?.key
+    if (isSlotName(key)) keys.add(key)
+  }
+  return keys
+}
+
+/** Create (fresh name) or reopen (owned key) a slot; resolves to its key. Every key is recorded with the backend. */
 export async function openSlot(api: AppApi, name: string, agent?: string): Promise<string> {
   // Refuse anything Quartizo did not generate, so a tampered or foreign stored
   // value can never open (or adopt) some other session by name.
@@ -138,6 +160,8 @@ export async function openSlot(api: AppApi, name: string, agent?: string): Promi
   if (!isSlotName(row.key)) {
     throw new Error(`POST /api/chat/slots returned a key not named by Quartizo: ${JSON.stringify(row.key)}`)
   }
+  // Reopening records again (idempotent), which also covers a key stored by an earlier version.
+  await recordSlot(api, row.key)
   return row.key
 }
 

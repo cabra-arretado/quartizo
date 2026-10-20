@@ -16,6 +16,35 @@
  */
 export const POLL_MS = 5000
 export const MAX_BACKOFF_MS = 60000
+/** Each request of a poll gives up after this long; a timeout counts as a failure. */
+export const REQUEST_TIMEOUT_MS = 15000
+/** A transcript read that failed is not retried for this long, doubling per failure up to the cap. */
+export const DETAIL_BACKOFF_MS = 60000
+export const DETAIL_MAX_BACKOFF_MS = 300000
+
+/** Reject if `p` has not settled within `ms`; the late result is ignored. */
+export function withTimeout<T>(p: Promise<T>, ms: number = REQUEST_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`request timed out after ${Math.round(ms / 1000)} s`)), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
+}
+
+/** Wait before re-reading a transcript after its `failures`-th consecutive failure. */
+export function detailBackoff(failures: number): number {
+  if (!Number.isFinite(failures) || failures <= 0) return 0
+  return Math.min(DETAIL_MAX_BACKOFF_MS, DETAIL_BACKOFF_MS * 2 ** Math.min(failures - 1, 30))
+}
+
+/**
+ * When the tab becomes visible again: poll at once if healthy, else only when
+ * the current backoff has run out (`sinceLastStart` = ms since the last poll began).
+ */
+export function resumeDelay(failures: number, sinceLastStart: number): number {
+  if (!Number.isFinite(failures) || failures <= 0) return 0
+  return Math.max(0, nextDelay(failures) - sinceLastStart)
+}
 
 export interface Freshness {
   /** Last successful poll (epoch ms). */
