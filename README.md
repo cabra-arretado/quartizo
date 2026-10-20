@@ -185,7 +185,7 @@ content stays in the files.
 
 | Route | Body / result |
 |---|---|
-| `GET /api/workspaces` | `{workspaces: [{id, name, path}]}` |
+| `GET /api/workspaces` | `{workspaces: [{id, uid, name, path}]}`. `id` is never reused (AUTOINCREMENT); `uid` is 32 random hex chars per registration, used by the UI to key per-workspace state |
 | `POST /api/workspaces` | `{path, name?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`) |
 | `GET /api/workspaces/{id}` | `{workspace}` or 404 `workspace_not_found` |
 | `DELETE /api/workspaces/{id}` | Forgets the root. Files are never touched |

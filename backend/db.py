@@ -9,6 +9,7 @@ an applied entry: append a new one.
 """
 from __future__ import annotations
 
+import secrets
 import sqlite3
 import time
 from pathlib import Path
@@ -24,6 +25,24 @@ MIGRATIONS: tuple[str, ...] = (
         path       TEXT    NOT NULL UNIQUE,
         created_at INTEGER NOT NULL
     );
+    """,
+    # 2: ids are never reused (AUTOINCREMENT), and every workspace gets a random
+    # `uid` (32 hex chars). The UI keys per-workspace state (its chat session)
+    # by `uid`, so a later workspace can never inherit an earlier one's state,
+    # even if an id was reused before this migration. Table rebuild, since
+    # SQLite cannot add AUTOINCREMENT in place.
+    """
+    CREATE TABLE workspaces_v2 (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid        TEXT    NOT NULL UNIQUE,
+        name       TEXT    NOT NULL,
+        path       TEXT    NOT NULL UNIQUE,
+        created_at INTEGER NOT NULL
+    );
+    INSERT INTO workspaces_v2 (id, uid, name, path, created_at)
+        SELECT id, lower(hex(randomblob(16))), name, path, created_at FROM workspaces;
+    DROP TABLE workspaces;
+    ALTER TABLE workspaces_v2 RENAME TO workspaces;
     """,
 )
 
@@ -61,18 +80,23 @@ def migrate(conn: sqlite3.Connection) -> int:
 
 
 def list_workspaces(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT id, name, path, created_at FROM workspaces ORDER BY name, id").fetchall()
+    return conn.execute("SELECT id, uid, name, path, created_at FROM workspaces ORDER BY name, id").fetchall()
 
 
 def get_workspace(conn: sqlite3.Connection, workspace_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT id, name, path, created_at FROM workspaces WHERE id = ?",
+    return conn.execute("SELECT id, uid, name, path, created_at FROM workspaces WHERE id = ?",
                         (workspace_id,)).fetchone()
 
 
-def insert_workspace(conn: sqlite3.Connection, name: str, path: str) -> int:
-    cur = conn.execute("INSERT INTO workspaces (name, path, created_at) VALUES (?, ?, ?)",
-                       (name, path, int(time.time())))
-    return int(cur.lastrowid)
+def new_uid() -> str:
+    return secrets.token_hex(16)
+
+
+def insert_workspace(conn: sqlite3.Connection, name: str, path: str) -> tuple[int, str]:
+    uid = new_uid()
+    cur = conn.execute("INSERT INTO workspaces (uid, name, path, created_at) VALUES (?, ?, ?, ?)",
+                       (uid, name, path, int(time.time())))
+    return int(cur.lastrowid), uid
 
 
 def delete_workspace(conn: sqlite3.Connection, workspace_id: int) -> bool:

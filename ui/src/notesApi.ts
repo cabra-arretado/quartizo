@@ -8,6 +8,8 @@ import { BACKEND_BASE } from './slots'
 
 export interface Workspace {
   id: number
+  /** 32 random hex chars, unique per registration (ids are never reused either). */
+  uid: string
   name: string
   path: string
 }

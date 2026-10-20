@@ -7,10 +7,21 @@ import {
   SLOT_NAME_RE,
   classifyError,
   createSender,
+  isSlotName,
   loadSlot,
+  loadWorkspaceSlot,
   newSlotName,
+  newWorkspaceSlotName,
   openSlot,
   saveSlot,
+  saveWorkspaceSlot,
+  slotDetailPath,
+  slotStatus,
+  slotWorkspaceUid,
+  isWorkspaceUid,
+  openStoredSlot,
+  transcriptPath,
+  workspaceStorageKey,
 } from '../src/slots'
 
 /** Same shape the SDK's scoped client throws for a non-2xx. */
@@ -40,9 +51,16 @@ describe('openSlot', () => {
   })
 
   it('passes the agent only when given', async () => {
-    const api = mockApi({ post: vi.fn().mockResolvedValue({ key: 'k' }) })
+    const api = mockApi({ post: vi.fn().mockResolvedValue({ key: NAME }) })
     await openSlot(api, NAME, 'reviewer')
     expect(api.post).toHaveBeenCalledWith(SLOTS_PATH, { name: NAME, agent: 'reviewer' })
+  })
+
+  it('rejects a returned key that Quartizo did not name', async () => {
+    for (const key of ['dashboard:chat-1', 'chat-2-1787502679', `${NAME} `]) {
+      const api = mockApi({ post: vi.fn().mockResolvedValue({ key }) })
+      await expect(openSlot(api, NAME)).rejects.toThrow(/not named by Quartizo/)
+    }
   })
 
   it('rejects a response without a key', async () => {
@@ -77,6 +95,13 @@ describe('classifyError', () => {
     const bare = apiError(404, { error: 'not found' })
     expect(classifyError(bare).kind).toBe('unknown')
     expect(classifyError(bare, { missingIsSlotNotFound: true }).kind).toBe('slot_not_found')
+  })
+
+  it('recognises an expired or missing dashboard login', () => {
+    expect(classifyError(apiError(401, { error: 'unauthorized' }))).toMatchObject({ kind: 'unauthorized', status: 401 })
+    expect(classifyError(apiError(401, '')).kind).toBe('unauthorized')
+    expect(classifyError(apiError(403, { code: 'unauthorized' })).kind).toBe('unauthorized')
+    expect(classifyError(apiError(401, '')).message).toMatch(/sign in/)
   })
 
   it('maps the client-side permission fence', () => {
@@ -148,15 +173,169 @@ describe('slot persistence', () => {
     expect(map.has(STORAGE_KEY)).toBe(false)
   })
 
+  it('does not let the Chat tab adopt a workspace slot or store a foreign key', () => {
+    const s = memStorage([[STORAGE_KEY, newWorkspaceSlotName(UID_A)]])
+    expect(loadSlot(s)).toBeNull()
+    for (const bad of ['dashboard:chat-1', newWorkspaceSlotName(UID_A), '']) {
+      expect(() => saveSlot(s, bad)).toThrow(/refusing to store/)
+    }
+    expect(s.map.size).toBe(0)
+  })
+
   it('tolerates unavailable storage', () => {
     const throwing = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => {} }
     expect(loadSlot(throwing)).toBeNull()
-    expect(() => saveSlot(throwing, 'k')).not.toThrow()
+    expect(() => saveSlot(throwing, NAME)).not.toThrow()
     expect(loadSlot(undefined)).toBeNull()
   })
 
   it('makes fresh, app-prefixed names', () => {
     expect(newSlotName(0, () => 0)).toBe('quartizo-0-000000')
     expect(newSlotName()).toMatch(SLOT_NAME_RE)
+  })
+})
+
+function memStorage(entries: [string, string][] = []) {
+  const map = new Map<string, string>(entries)
+  return {
+    map,
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, v),
+    removeItem: (k: string) => void map.delete(k),
+  }
+}
+
+const UID_A = '0123456789abcdef0123456789abcdef'
+const UID_B = 'fedcba9876543210fedcba9876543210'
+
+describe('per-workspace slots', () => {
+  it('names a workspace slot after its uid, inside the validated pattern', () => {
+    expect(newWorkspaceSlotName(UID_A, 0, () => 0)).toBe(`quartizo-w${UID_A}-0-000000`)
+    const name = newWorkspaceSlotName(UID_B)
+    expect(name).toMatch(SLOT_NAME_RE)
+    expect(isSlotName(name)).toBe(true)
+    expect(slotWorkspaceUid(name)).toBe(UID_B)
+  })
+
+  it('refuses invalid uids', () => {
+    for (const bad of ['', '1', UID_A.toUpperCase(), `${UID_A}0`, UID_A.slice(1), 3 as unknown as string, `${UID_A.slice(0, 31)}g`]) {
+      expect(isWorkspaceUid(bad)).toBe(false)
+      expect(() => newWorkspaceSlotName(bad)).toThrow(/invalid workspace uid/)
+      expect(() => workspaceStorageKey(bad)).toThrow(/invalid workspace uid/)
+    }
+  })
+
+  it('tells workspace names from Chat-tab names and foreign ones', () => {
+    expect(slotWorkspaceUid('quartizo-lx2k9a-0a1b2c')).toBeNull()
+    for (const bad of ['quartizo-w12-a-000000', `quartizo-w${UID_A}0-a-000000`, `quartizo-w${UID_A}-a-00000`,
+      `other-w${UID_A}-a-000000`, `quartizo-w${UID_A}-a-000000\n`, `quartizo-w${UID_A}-w${UID_B}-a-000000`]) {
+      expect(slotWorkspaceUid(bad)).toBeNull()
+    }
+  })
+
+  it('keeps one slot per workspace uid, so a re-used id cannot inherit a chat', () => {
+    const s = memStorage()
+    const a = newWorkspaceSlotName(UID_A, 1, () => 0.1)
+    saveWorkspaceSlot(s, UID_A, a)
+    expect(s.map.get(`quartizo:slot:ws:${UID_A}`)).toBe(a)
+    expect(loadWorkspaceSlot(s, UID_A)).toBe(a)
+    // Another registration (even one that got the same numeric id) has another uid.
+    expect(loadWorkspaceSlot(s, UID_B)).toBeNull()
+    // The Chat tab's own slot is separate.
+    expect(loadSlot(s)).toBeNull()
+    saveWorkspaceSlot(s, UID_A, null)
+    expect(loadWorkspaceSlot(s, UID_A)).toBeNull()
+  })
+
+  it('drops a stored value that names another workspace or is not Quartizo\'s', () => {
+    for (const stored of [newWorkspaceSlotName(UID_B), 'quartizo-lx2k9a-0a1b2c', 'dashboard:chat-1']) {
+      const s = memStorage([[`quartizo:slot:ws:${UID_A}`, stored]])
+      expect(loadWorkspaceSlot(s, UID_A)).toBeNull()
+      expect(s.map.size).toBe(0)
+    }
+  })
+
+  it('refuses to store another workspace\'s slot', () => {
+    const s = memStorage()
+    expect(() => saveWorkspaceSlot(s, UID_A, newWorkspaceSlotName(UID_B))).toThrow(/another workspace/)
+    expect(() => saveWorkspaceSlot(s, UID_A, 'quartizo-lx2k9a-0a1b2c')).toThrow(/another workspace/)
+    expect(s.map.size).toBe(0)
+  })
+
+  it('tolerates unavailable storage', () => {
+    const throwing = { getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') }, removeItem: () => {} }
+    expect(loadWorkspaceSlot(throwing, UID_A)).toBeNull()
+    expect(() => saveWorkspaceSlot(throwing, UID_A, newWorkspaceSlotName(UID_A))).not.toThrow()
+  })
+})
+
+function memStore(initial: string | null = null) {
+  let value = initial
+  let n = 0
+  const saves: (string | null)[] = []
+  return {
+    saves,
+    get value() { return value },
+    load: () => value,
+    save: (k: string | null) => { saves.push(k); value = k },
+    fresh: () => `quartizo-${(++n).toString(36)}-00000${n}`,
+  }
+}
+
+describe('openStoredSlot', () => {
+  it('saves a fresh name before asking the gateway (no orphan on unmount)', async () => {
+    const store = memStore()
+    let release!: (v: unknown) => void
+    const api = mockApi({ post: vi.fn(() => new Promise(r => (release = r))) })
+    const pending = openStoredSlot(api, store)
+    // The request is in flight; the name is already remembered.
+    expect(store.value).toBe('quartizo-1-000001')
+    // A second run (remount) reuses it instead of minting another.
+    const api2 = mockApi({ post: vi.fn().mockResolvedValue({ key: 'quartizo-1-000001' }) })
+    await expect(openStoredSlot(api2, store)).resolves.toBe('quartizo-1-000001')
+    expect(api2.post).toHaveBeenCalledWith(SLOTS_PATH, { name: 'quartizo-1-000001' })
+    release({ key: 'quartizo-1-000001' })
+    await expect(pending).resolves.toBe('quartizo-1-000001')
+  })
+
+  it('replaces a remembered name the gateway answers slot_not_found for, once', async () => {
+    const store = memStore('quartizo-old-000000')
+    const post = vi.fn()
+      .mockRejectedValueOnce(apiError(404, SLOT_NOT_FOUND))
+      .mockResolvedValueOnce({ key: 'quartizo-1-000001' })
+    await expect(openStoredSlot(mockApi({ post }), store)).resolves.toBe('quartizo-1-000001')
+    expect(post.mock.calls.map(c => c[1])).toEqual([{ name: 'quartizo-old-000000' }, { name: 'quartizo-1-000001' }])
+    expect(store.value).toBe('quartizo-1-000001')
+  })
+
+  it('does not retry other failures, or a fresh name', async () => {
+    const other = memStore('quartizo-old-000000')
+    const post = vi.fn().mockRejectedValue(apiError(500, 'x'))
+    await expect(openStoredSlot(mockApi({ post }), other)).rejects.toMatchObject({ status: 500 })
+    expect(post).toHaveBeenCalledTimes(1)
+    expect(other.value).toBe('quartizo-old-000000')
+
+    const fresh = memStore()
+    const post2 = vi.fn().mockRejectedValue(apiError(404, SLOT_NOT_FOUND))
+    await expect(openStoredSlot(mockApi({ post: post2 }), fresh)).rejects.toMatchObject({ status: 404 })
+    expect(post2).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('slot status and transcript link', () => {
+  it('derives the status from what the slot detail exposes', () => {
+    expect(slotStatus({ running: false, messages: [{ role: 'user' }, { role: 'assistant' }] }).status).toBe('idle')
+    expect(slotStatus({ running: true, messages: [] }).status).toBe('running')
+    expect(slotStatus({ running: true, stopping: true }).status).toBe('stopping')
+    expect(slotStatus({ running: false, messages: [{ role: 'user' }, { role: 'error' }] }).status).toBe('error')
+    expect(slotStatus({ title: 'T' })).toEqual({ status: 'idle', title: 'T' })
+    expect(slotStatus(undefined).status).toBe('idle')
+    expect(slotStatus({ running: 'yes' }).status).toBe('idle')
+  })
+
+  it('builds encoded paths', () => {
+    expect(slotDetailPath('a b')).toBe('/api/chat/slots/a%20b?limit=1')
+    expect(transcriptPath('quartizo-w1-a-000000')).toBe('/chat?sid=quartizo-w1-a-000000')
+    expect(transcriptPath('a&b=c')).toBe('/chat?sid=a%26b%3Dc')
   })
 })

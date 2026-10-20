@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -65,6 +66,37 @@ class MigrationTests(unittest.TestCase):
             conn.close()
             db.connect(path).close()  # reopen: nothing re-applied, no error
 
+    def test_v1_database_gains_uids_and_keeps_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / db.DB_FILENAME
+            conn = sqlite3.connect(path, isolation_level=None)
+            conn.execute("CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)")
+            conn.execute(db.MIGRATIONS[0])
+            conn.execute("INSERT INTO schema_migrations VALUES (1, 0)")
+            conn.execute("INSERT INTO workspaces (id, name, path, created_at) VALUES (1, 'a', '/x/a', 5), (3, 'b', '/x/b', 6)")
+            conn.close()
+            conn = db.connect(path)
+            rows = [dict(r) for r in db.list_workspaces(conn)]
+            self.assertEqual([(r["id"], r["name"], r["path"], r["created_at"]) for r in rows],
+                             [(1, "a", "/x/a", 5), (3, "b", "/x/b", 6)])
+            uids = [r["uid"] for r in rows]
+            for uid in uids:
+                self.assertRegex(uid, r"^[0-9a-f]{32}$")
+            self.assertEqual(len(set(uids)), 2)
+            new_id, _ = db.insert_workspace(conn, "c", "/x/c")
+            self.assertEqual(new_id, 4)
+            conn.close()
+
+    def test_ids_are_never_reused(self):
+        with tempfile.TemporaryDirectory() as d:
+            conn = db.connect(Path(d) / db.DB_FILENAME)
+            first, uid1 = db.insert_workspace(conn, "a", "/x/a")
+            self.assertTrue(db.delete_workspace(conn, first))
+            second, uid2 = db.insert_workspace(conn, "a", "/x/a")
+            self.assertGreater(second, first)
+            self.assertNotEqual(uid1, uid2)
+            conn.close()
+
 
 class RegistrationTests(TmpTree):
     def test_register_list_get_unregister(self):
@@ -77,6 +109,16 @@ class RegistrationTests(TmpTree):
         self.assertTrue((self.a / "notes" / "n.md").exists(), "unregister must not touch files")
         self.refused(self.registry.get, ws.id, status=404, code="workspace_not_found")
         self.refused(self.registry.unregister, ws.id, status=404)
+
+    def test_workspace_has_a_fresh_uid_and_ids_are_not_reused(self):
+        ws = self.registry.register(str(self.a / "notes"))
+        self.assertRegex(ws.uid, r"^[0-9a-f]{32}$")
+        self.assertEqual(ws.to_json(), {"id": ws.id, "uid": ws.uid, "name": ws.name, "path": ws.path})
+        self.registry.unregister(ws.id)
+        again = self.registry.register(str(self.a / "notes"))
+        self.assertGreater(again.id, ws.id)
+        self.assertNotEqual(again.uid, ws.uid)
+        self.assertEqual(self.registry.get(again.id).uid, again.uid)
 
     def test_registration_persists_across_instances(self):
         ws = self.registry.register(str(self.a / "notes"), "My vault")

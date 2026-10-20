@@ -9,6 +9,18 @@
  *   website/src/app-sdk/ChatEmbed.tsx  (ChatEmbedProps, ChatEmbedSendMeta)
  *   website/public/vendor/kirocrew-ui.mjs + website/src/components/AppHost.tsx
  *                                      (PageHeader, Card, CardTitle, Btn usage)
+ * M2 (QTZ-007), read from the kirocrew 0.10.0rc4 wheel's bundled host
+ * (static/dist/assets/App-DMz0r7P1.js; static/dist/vendor/kirocrew-app-sdk.mjs
+ * re-exports both from window.__kirocrew_modules):
+ *   ChatEmbed: destructures exactly the ChatEmbedProps below. There is NO
+ *     draft/initial-text prop; the composer draft is internal state.
+ *   useChatLauncher(): { openChat(opts = {}) } -> sets window.__mc_chat_launch
+ *     {agent, message, slotKey, autoSend, ts} and navigates to
+ *     `/chat?sid=<slotKey>` (or `/chat?new=1` / `/chat`). Returns nothing. The
+ *     chat page honours the record for 10 s; with slotKey + autoSend:false it
+ *     activates that session and APPENDS message to its unsent draft (no send).
+ *     If activation fails, the text is shown as an "unsent" notice.
+ *   useNavigate(): the AppHost's `e => navigate(e)` (react-router); path string.
  * Only the members Quartizo uses are declared. UI component props are inferred
  * from upstream call sites, not from a published type: UNVERIFIED.
  */
@@ -51,6 +63,19 @@ declare module '@kirocrew/app-sdk' {
   }
 
   export function ChatEmbed(props: ChatEmbedProps): ReactElement | null
+
+  export interface ChatLaunchOptions {
+    message?: string
+    /** Omitted = send automatically. Quartizo always passes `false`. */
+    autoSend?: boolean
+    slotKey?: string
+    /** Only used for a new session (no slotKey). */
+    agent?: string
+  }
+
+  export function useChatLauncher(): { openChat(opts?: ChatLaunchOptions): void }
+
+  export function useNavigate(): (path: string) => void
 }
 
 declare module '@kirocrew/app-sdk/ui' {

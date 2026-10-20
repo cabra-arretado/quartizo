@@ -61,11 +61,12 @@ class ApiError(Exception):
 @dataclass(frozen=True)
 class Workspace:
     id: int
+    uid: str
     name: str
     path: str
 
     def to_json(self) -> dict:
-        return {"id": self.id, "name": self.name, "path": self.path}
+        return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path}
 
 
 def validate_relpath(rel: object) -> list[str]:
@@ -283,14 +284,14 @@ class Registry:
 
     def list(self) -> list[Workspace]:
         with self._conn() as conn:
-            return [Workspace(r["id"], r["name"], r["path"]) for r in db.list_workspaces(conn)]
+            return [Workspace(r["id"], r["uid"], r["name"], r["path"]) for r in db.list_workspaces(conn)]
 
     def get(self, workspace_id: int) -> Workspace:
         with self._conn() as conn:
             row = db.get_workspace(conn, workspace_id)
         if row is None:
             raise ApiError(404, "workspace_not_found", "no such workspace")
-        return Workspace(row["id"], row["name"], row["path"])
+        return Workspace(row["id"], row["uid"], row["name"], row["path"])
 
     def canonical_root(self, raw: object) -> str:
         """Validate a candidate root and return its realpath, or raise."""
@@ -340,8 +341,8 @@ class Registry:
                 if _overlaps(real, ws["path"]):
                     raise ApiError(409, "root_overlaps",
                                    f"overlaps the registered workspace {ws['name']!r}", workspaceId=ws["id"])
-            new_id = db.insert_workspace(conn, label, real)
-        return Workspace(new_id, label, real)
+            new_id, uid = db.insert_workspace(conn, label, real)
+        return Workspace(new_id, uid, label, real)
 
     def unregister(self, workspace_id: int) -> None:
         """Forget a root. Files are never touched."""

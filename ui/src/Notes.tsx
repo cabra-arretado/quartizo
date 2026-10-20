@@ -13,8 +13,18 @@ import {
   openDoc,
   saved,
 } from './editorDoc'
+import {
+  contextFromLines,
+  contextFromRange,
+  type ContextResult,
+  type ContextSource,
+  type NoteContext,
+  wholeNoteContext,
+} from './context'
 import { nextIndex } from './listNav'
-import { renderMarkdown } from './markdown'
+import { parseSourceLines, renderMarkdown } from './markdown'
+import NoteChat from './NoteChat'
+import { isWorkspaceUid, saveWorkspaceSlot } from './slots'
 import {
   type ApiFailure,
   createNote,
@@ -34,11 +44,12 @@ import {
 } from './notesApi'
 
 const WS_KEY = 'quartizo:workspace'
+const CHAT_OPEN_KEY = 'quartizo:notesChatOpen'
 type ViewMode = 'edit' | 'split' | 'preview'
 type Load<T> = { status: 'loading' } | { status: 'ready'; value: T } | { status: 'error'; failure: ApiFailure }
 
 const S = {
-  layout: { display: 'grid', gridTemplateColumns: 'minmax(220px, 300px) 1fr', gap: 12, minHeight: 0, flex: 1 },
+  layout: { display: 'grid', gap: 12, minHeight: 0, flex: 1 },
   column: { display: 'flex', flexDirection: 'column' as const, gap: 8, minHeight: 0, minWidth: 0 },
   row: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const },
   input: { flex: 1, minWidth: 0, padding: '4px 6px', border: '1px solid rgba(128,128,128,.4)', borderRadius: 4, background: 'transparent', color: 'inherit' },
@@ -74,6 +85,33 @@ function saveWsId(id: number | null): void {
     /* not remembered */
   }
 }
+
+function loadChatOpen(): boolean {
+  try {
+    return storage()?.getItem(CHAT_OPEN_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function saveChatOpen(open: boolean): void {
+  try {
+    storage()?.setItem(CHAT_OPEN_KEY, open ? '1' : '0')
+  } catch {
+    /* not remembered */
+  }
+}
+
+/** Innermost `data-qz-lines` range at or above `node`, inside `root`. */
+function sourceLinesAt(node: Node, root: HTMLElement): [number, number] | null {
+  for (let el = node instanceof HTMLElement ? node : node.parentElement; el && el !== root; el = el.parentElement) {
+    const lines = parseSourceLines(el.getAttribute('data-qz-lines'))
+    if (lines) return lines
+  }
+  return null
+}
+
+const toggleStyle = { background: 'transparent', color: 'inherit', border: 'none', cursor: 'pointer', padding: '2px 4px' }
 
 function ErrorLine({ failure }: { failure: ApiFailure | null }) {
   if (!failure) return null
@@ -124,7 +162,7 @@ export default function Notes({ api }: { api: AppApi }) {
         }}
       />
       {current ? (
-        <WorkspaceView key={current.id} api={api} workspace={current} dirtyRef={dirtyRef} />
+        <WorkspaceView key={current.id} api={api} workspace={current} dirtyRef={dirtyRef} confirmLeave={confirmLeave} />
       ) : (
         workspaces.status === 'ready' && (
           <p className="text-sm text-muted">
@@ -174,6 +212,8 @@ function WorkspaceBar(props: {
     setFailure(null)
     try {
       await unregisterWorkspace(api, current.id)
+      // Forget its chat session too (uids are never reused, so this is tidiness, not safety).
+      if (isWorkspaceUid(current.uid)) saveWorkspaceSlot(storage(), current.uid, null)
       setConfirmRemove(false)
       props.onChanged(null)
     } catch (err) {
@@ -262,7 +302,12 @@ function WorkspaceBar(props: {
   )
 }
 
-function WorkspaceView(props: { api: AppApi; workspace: Workspace; dirtyRef: { current: boolean } }) {
+function WorkspaceView(props: {
+  api: AppApi
+  workspace: Workspace
+  dirtyRef: { current: boolean }
+  confirmLeave: () => boolean
+}) {
   const { api, workspace, dirtyRef } = props
   const wsId = workspace.id
   const [q, setQ] = useState('')
@@ -277,6 +322,56 @@ function WorkspaceView(props: { api: AppApi; workspace: Workspace; dirtyRef: { c
   const listRef = useRef<HTMLUListElement>(null)
   const openSeq = useRef(0)
   const dirty = doc !== null && isDirty(doc)
+  // Chat beside the note. Mounted on first open, then kept (hidden) so the
+  // draft survives collapsing. Context lives here, so it can never outlive
+  // this workspace (the view is keyed by workspace id).
+  const [chatOpen, setChatOpen] = useState(loadChatOpen)
+  const [chatMounted, setChatMounted] = useState(chatOpen)
+  const [candidate, setCandidate] = useState<NoteContext | null>(null)
+  const [contextError, setContextError] = useState<string | null>(null)
+  const [attached, setAttachedState] = useState<NoteContext | null>(null)
+  const holder = useRef<NoteContext | null>(null)
+  const setAttached = useCallback((ctx: NoteContext | null) => {
+    holder.current = ctx
+    setAttachedState(ctx)
+  }, [])
+  const detach = useCallback(() => setAttached(null), [setAttached])
+  const showChat = (open: boolean) => {
+    setChatOpen(open)
+    saveChatOpen(open)
+    if (open) setChatMounted(true)
+  }
+  // The note text a picked context was taken from. Editing the note afterwards
+  // makes the context stale, so it is dropped (with a notice) and must be picked again.
+  const contextBase = useRef<{ path: string; text: string } | null>(null)
+  const onContext = (result: ContextResult) => {
+    showChat(true)
+    contextBase.current = doc ? { path: doc.path, text: doc.text } : null
+    if ('error' in result) {
+      setCandidate(null)
+      setContextError(result.error)
+    } else {
+      setCandidate(result)
+      setContextError(null)
+    }
+  }
+  // Context from one note only: opening another note (or renaming) drops it.
+  useEffect(() => {
+    contextBase.current = null
+    setCandidate(null)
+    setContextError(null)
+    setAttached(null)
+  }, [doc?.path, setAttached])
+  // ...and so does editing the note after the context was picked.
+  useEffect(() => {
+    const base = contextBase.current
+    if (!base || !doc || doc.path !== base.path || doc.text === base.text) return
+    contextBase.current = null
+    const hadContext = holder.current !== null || candidate !== null
+    setCandidate(null)
+    setAttached(null)
+    setContextError(hadContext ? 'The note was edited after the context was picked, so it was removed. Pick it again.' : null)
+  }, [doc?.text]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     dirtyRef.current = dirty
@@ -367,7 +462,12 @@ function WorkspaceView(props: { api: AppApi; workspace: Workspace; dirtyRef: { c
   const openPath = doc?.path ?? docLoad?.path
 
   return (
-    <div style={S.layout}>
+    <div
+      style={{
+        ...S.layout,
+        gridTemplateColumns: `minmax(200px, 260px) minmax(0, 1fr) ${chatOpen ? 'minmax(320px, 40%)' : 'auto'}`,
+      }}
+    >
       <div style={S.column}>
         <input
           type="search"
@@ -463,6 +563,8 @@ function WorkspaceView(props: { api: AppApi; workspace: Workspace; dirtyRef: { c
             key={doc.path}
             api={api}
             wsId={wsId}
+            workspaceName={workspace.name}
+            onContext={onContext}
             doc={doc}
             setDoc={setDoc}
             onReload={() => void open(doc.path, { force: true })}
@@ -483,6 +585,41 @@ function WorkspaceView(props: { api: AppApi; workspace: Workspace; dirtyRef: { c
           <p className="text-sm text-muted">Select a note, or create one. Use ↑/↓ and Enter in the list.</p>
         )}
       </div>
+      <div style={S.column}>
+        <div style={S.row}>
+          <button
+            type="button"
+            aria-expanded={chatOpen}
+            aria-controls="qz-note-chat"
+            onClick={() => showChat(!chatOpen)}
+            style={{ ...toggleStyle, fontWeight: 600 }}
+            title={chatOpen ? 'Collapse chat' : 'Chat about this workspace'}
+          >
+            {chatOpen ? 'Chat ›' : '‹ Chat'}
+          </button>
+          {!chatOpen && attached && <span className="text-sm text-muted">context attached</span>}
+        </div>
+        <div id="qz-note-chat" style={{ ...S.column, display: chatOpen ? 'flex' : 'none', flex: 1 }}>
+          {chatMounted && (
+            <NoteChat
+              api={api}
+              workspace={workspace}
+              active={chatOpen}
+              candidate={candidate}
+              contextError={contextError}
+              onDiscardCandidate={() => setCandidate(null)}
+              attached={attached}
+              holder={holder}
+              onAttach={ctx => {
+                setAttached(ctx)
+                setCandidate(null)
+              }}
+              onDetach={detach}
+              confirmLeave={props.confirmLeave}
+            />
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -490,6 +627,8 @@ function WorkspaceView(props: { api: AppApi; workspace: Workspace; dirtyRef: { c
 function NoteEditor(props: {
   api: AppApi
   wsId: number
+  workspaceName: string
+  onContext: (result: ContextResult) => void
   doc: EditorDoc
   setDoc: (fn: (d: EditorDoc | null) => EditorDoc | null) => void
   onReload: () => void
@@ -506,6 +645,41 @@ function NoteEditor(props: {
   const dirty = isDirty(doc)
   const editable = canEdit(doc)
   const html = useMemo(() => (mode === 'edit' ? '' : renderMarkdown(doc.text)), [doc.text, mode])
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const previewRef = useRef<HTMLDivElement>(null)
+
+  const contextSource = (): ContextSource => ({
+    workspaceId: wsId,
+    workspaceName: props.workspaceName,
+    notePath: doc.path,
+    noteText: doc.text,
+    unsaved: dirty,
+  })
+
+  /** A preview selection maps to whole source lines; an editor selection is sent as selected. */
+  // The pane the user last selected in; its selection wins when both have one.
+  const lastPane = useRef<'editor' | 'preview' | null>(null)
+  const pickSelection = () => {
+    const fromPreview = (): ContextResult | null => {
+      const sel = window.getSelection()
+      const preview = previewRef.current
+      if (!preview || !sel || sel.isCollapsed || !sel.anchorNode || !sel.focusNode ||
+          !preview.contains(sel.anchorNode) || !preview.contains(sel.focusNode)) return null
+      const a = sourceLinesAt(sel.anchorNode, preview)
+      const b = sourceLinesAt(sel.focusNode, preview)
+      return a && b
+        ? contextFromLines(contextSource(), Math.min(a[0], b[0]), Math.max(a[1], b[1]))
+        : { error: 'The preview selection could not be mapped to lines of this note.' }
+    }
+    const fromEditor = (): ContextResult | null => {
+      const ta = textareaRef.current
+      if (!ta || mode === 'preview' || ta.selectionStart === ta.selectionEnd) return null
+      return contextFromRange(contextSource(), ta.selectionStart, ta.selectionEnd)
+    }
+    const editorFirst = document.activeElement === textareaRef.current || lastPane.current === 'editor'
+    const result = editorFirst ? (fromEditor() ?? fromPreview()) : (fromPreview() ?? fromEditor())
+    props.onContext(result ?? { error: 'Select some text in the editor or preview first.' })
+  }
 
   const save = async () => {
     if (busy || !editable || doc.conflict) return
@@ -602,6 +776,20 @@ function NoteEditor(props: {
             </button>
           ))}
         </div>
+        <div role="group" aria-label="Chat context" style={S.row}>
+          {/* mousedown default would move focus and can drop the selection */}
+          <button type="button" onMouseDown={e => e.preventDefault()} onClick={pickSelection} style={toggleStyle}>
+            Selection → chat
+          </button>
+          <button
+            type="button"
+            onMouseDown={e => e.preventDefault()}
+            onClick={() => props.onContext(wholeNoteContext(contextSource()))}
+            style={toggleStyle}
+          >
+            Whole note → chat
+          </button>
+        </div>
         <Btn onClick={save} disabled={busy || !dirty || !editable || !!doc.conflict}>
           Save
         </Btn>
@@ -696,6 +884,9 @@ function NoteEditor(props: {
       <div style={{ ...S.row, flex: 1, alignItems: 'stretch', flexWrap: 'nowrap', minHeight: 0 }}>
         {mode !== 'preview' && (
           <textarea
+            ref={textareaRef}
+            onSelect={() => (lastPane.current = 'editor')}
+            onFocus={() => (lastPane.current = 'editor')}
             aria-label={`Edit ${doc.path}`}
             value={doc.text}
             readOnly={!editable}
@@ -710,7 +901,13 @@ function NoteEditor(props: {
         )}
         {mode !== 'edit' && (
           // Sanitized: markdown-it with html disabled and a URL allowlist (src/markdown.ts).
-          <div className="qz-preview" aria-label="Preview" style={S.preview} dangerouslySetInnerHTML={{ __html: html }} />
+          <div
+            ref={previewRef}
+            onMouseUp={() => (lastPane.current = 'preview')}
+            onKeyUp={() => (lastPane.current = 'preview')}
+            className="qz-preview"
+            aria-label="Preview"
+            style={S.preview} dangerouslySetInnerHTML={{ __html: html }} />
         )}
       </div>
     </>

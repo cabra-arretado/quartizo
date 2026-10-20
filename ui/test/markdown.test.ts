@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { isSafeUrl, renderMarkdown } from '../src/markdown'
+import { isSafeUrl, parseSourceLines, renderMarkdown } from '../src/markdown'
 
 const ALLOWED_TAGS = new Set([
   'a', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'hr', 'li', 'ol', 'p',
   'pre', 's', 'span', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
 ])
-const ALLOWED_ATTRS = new Set(['href', 'title', 'target', 'rel', 'class', 'start', 'style'])
+const ALLOWED_ATTRS = new Set(['href', 'title', 'target', 'rel', 'class', 'start', 'style', 'data-qz-lines'])
 
 /** Every tag and attribute in the output must be on the allowlist; no URL may carry a script scheme. */
 function assertSafe(html: string): void {
@@ -17,6 +17,7 @@ function assertSafe(html: string): void {
       expect(ALLOWED_ATTRS, `attribute ${name} in ${m[0]}`).toContain(name.toLowerCase())
       if (name === 'href') expect(value).toMatch(/^(https?:\/\/|mailto:)/i)
       if (name === 'style') expect(value).toMatch(/^text-align:(left|right|center)$/)
+      if (name === 'data-qz-lines') expect(value).toMatch(/^[0-9]+-[0-9]+$/)
     }
     // Anything left after removing well-formed attributes must be whitespace.
     expect(attrs.replace(/([^\s=]+)\s*=\s*"([^"]*)"/g, '').trim(), m[0]).toBe('')
@@ -88,15 +89,34 @@ describe('renderMarkdown (untrusted input)', () => {
 
   it('renders ordinary Markdown', () => {
     const html = renderMarkdown('# Title\n\n- **bold** and *em*\n- `code`\n\n1. one\n\n| a | b |\n|---|--:|\n| 1 | 2 |')
-    expect(html).toContain('<h1>Title</h1>')
+    expect(html).toMatch(/<h1 data-qz-lines="1-1">Title<\/h1>/)
     expect(html).toContain('<strong>bold</strong>')
     expect(html).toContain('<code>code</code>')
-    expect(html).toContain('<table>')
+    expect(html).toMatch(/<table data-qz-lines="8-10">/)
     assertSafe(html)
   })
 
   it('allows only http(s) and mailto URLs', () => {
     for (const ok of ['https://a.example', 'http://a.example', 'HTTPS://A.EXAMPLE', 'mailto:x@y.z']) expect(isSafeUrl(ok)).toBe(true)
     for (const bad of ['javascript:x', ' https://a', '//a.example', '/x', 'x.md', 'data:,x', 'ftp://a', '']) expect(isSafeUrl(bad)).toBe(false)
+  })
+})
+
+describe('source line ranges', () => {
+  it('tags blocks with their 1-based source lines', () => {
+    const html = renderMarkdown('# T\n\npara one\npara two\n\n```js\nx\n```\n\n- a\n- b\n')
+    expect(html).toContain('<h1 data-qz-lines="1-1">')
+    expect(html).toContain('<p data-qz-lines="3-4">')
+    expect(html).toMatch(/<code data-qz-lines="6-8" class="language-js">|<code class="language-js" data-qz-lines="6-8">/)
+    expect(html).toContain('<ul data-qz-lines="10-11">')
+    assertSafe(html)
+  })
+
+  it('parses only well-formed ranges', () => {
+    expect(parseSourceLines('3-4')).toEqual([3, 4])
+    expect(parseSourceLines('5-5')).toEqual([5, 5])
+    for (const bad of [null, undefined, '', '0-1', '4-3', '1-', '-1', '1-2-3', ' 1-2', '1e3-2000', '01-2']) {
+      expect(parseSourceLines(bad as string)).toBeNull()
+    }
   })
 })
