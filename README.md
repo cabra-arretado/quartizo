@@ -15,7 +15,9 @@ Scope so far: workspaces and notes (M1), note context to the workspace chat
 board (M3, QTZ-008/009; see [Tasks](#tasks-projects) below), and a
 **read-only** Git view of registered repositories (M4, QTZ-010/011; see
 [Git](#git-read-only) below). Quartizo never stages, commits or writes to a
-repository.
+repository. M5 (QTZ-012, [docs/m5.md](docs/m5.md)) adds a read-only
+**Agents** tab that monitors Quartizo's sessions, their tool calls, errors
+and subagents.
 
 Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
 (after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
@@ -38,6 +40,7 @@ backend/tasks.py      task CRUD, ordered moves, JSON import/export (M3)
 backend/gitrepo.py    repo registry + hardened read-only git: status, diff (M4)
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
                       (src/*.ts: tested logic; src/*.tsx: components)
+                      (agents.ts / freshness.ts + Agents.tsx: M5 monitoring)
 tests/backend/        backend auth unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
 docs/                 App Kit notes, compatibility, architecture, threat model
@@ -75,7 +78,8 @@ python3 -m unittest discover -s tests -t . -v
 # frontend: notes, tasks and git clients, editor/conflict state, line endings,
 # Markdown XSS, list navigation, board ordering and keyboard moves, note and
 # task context formatting, diff line classification, changed-files keys,
-# slot logic with the SDK mocked, plus a
+# slot logic with the SDK mocked, agent monitoring (transcript summary,
+# status, visibility, polling freshness/backoff), plus a
 # bundle-imports check (that one skips until `npm run build` has run)
 cd ui && npm test
 ```
@@ -149,6 +153,7 @@ rebuild, then press **Update** in the App Store, then refresh.
 | `permissions.api: "/apps/quartizo/api"` | The page calls its own backend through the gateway proxy (`/apps/quartizo/api/status`, `/workspaces/...`). The notes feature needs no other grant. The SDK client refuses any path not declared; builtin apps declare their own proxy prefix the same way. |
 | `backend.signedPrincipal: true` | Not a permission, but security-relevant: the backend receives a signed claim naming the caller kind and refuses requests without one. |
 | *M3: no change* | The task routes sit under the already granted `/apps/quartizo/api`. The board's transcript link, status poll and `openChat` draft use the same `/api/chat` grant and host hooks as M2. `app.json` is unchanged |
+| *M5: no change* | The Agents tab reads `GET /api/chat/slots` and `GET /api/chat/slots/{key}?limit=50`, both under `/api/chat`. Subagent detail routes (`/api/tasks`, `/api/sessions/{id}/agents`) and WS events were **not** added: each grant is far wider than the need, and the 0.10.0rc4 host relays no chat/subagent events to pages ([docs/m5.md](docs/m5.md) §2). `app.json` is unchanged, so no re-approval |
 | *M4: no change* | The Git routes sit under the already granted `/apps/quartizo/api`; `app.json` is unchanged. The backend runs the host's `git` binary itself (no App Kit permission covers or restricts that) |
 | *not granted:* `permissions.sessionApproval` | It lets an app act on **any** local user session, far beyond the sessions Quartizo creates. Per the gateway source, page requests made with `useAppApi()` carry the dashboard owner's session cookie, not an app token, so Approve/Reject in the embed are decided as the owner and do not need this grant. If a host ever runs the page under an app token, those decisions return 403 `session_approval_not_granted`, which the page reports. Adding the grant later disables the app until the user re-enables it. |
 | *not granted:* `/api/upload/file` | Attachments are **unsupported**: without this grant the embed hides its attach control and uploads are refused. |
@@ -186,6 +191,34 @@ project per workspace). Columns: Backlog, Ready, In Progress, Review, Done.
 
 Removing a workspace that has tasks asks again and deletes its tasks too.
 Export first to keep them.
+
+## Using Agents (Agents tab)
+
+Read only: nothing here sends, stops or changes a session.
+
+1. The **Visibility** box says what the tab can and cannot see. The page
+   calls as the dashboard owner, so the gateway lists every session; only
+   sessions Quartizo named (`quartizo-…`) get details. The rest are under
+   **Other sessions (read-only)**: name, owner, status, last activity, and a
+   link to KiroCrew's chat. Quartizo never reads them or attaches context.
+2. The table shows each Quartizo session: Chat tab or workspace, linked
+   task(s), status (`running` / `stopping` / `idle` / `error`), last activity,
+   tool calls and errors in its newest 50 transcript rows, and subagents
+   (running flag and queued count from the gateway, finished ones from their
+   completion rows).
+3. Select a session for its details and the last 20 transcript rows (time,
+   tool name and state, errors, tool input cut to one line). A tool shows
+   `ended` when the gateway recorded it as finished; whether it succeeded is
+   not recorded. Select a finished subagent for its outcome and task.
+4. Links: **Open task** (Tasks tab, switching workspace if needed), **Open
+   repository … in Git** (when a registered repo contains the session's
+   working directory), **Open transcript in KiroCrew chat**. From a task's
+   details, **Show in Agents** goes the other way. After a jump, **← Back to …**
+   returns.
+5. It polls every 5 s only while the tab is shown and the page is visible.
+   If a poll fails it backs off (up to 60 s), shows **Stale since …** and
+   marks every status "(stale)"; nothing is assumed finished. A gateway
+   restart is reported and the transcripts are read again.
 
 ## Using Git (Git tab)
 

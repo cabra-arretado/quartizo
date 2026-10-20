@@ -25,7 +25,7 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | `X-KiroCrew-Principal` claim, kinds, domain tag, replay rules | `apps/proxy_auth.py`, `routes.py::_proxy_principal` | Same |
 | Manifest: `ui.entry`, `ui.pages[]`, `backend.{entryPoint,port,healthCheck,signedPrincipal}`, `permissions.api` | `apps/manifest.py` | Same; `kirocrew app install` accepted `app.json` |
 | Host import map (`HOST_MODULES`) | `static/dist/index.html` importmap | Identical 8 specifiers |
-| SDK exports used (`useAppApi`, `ChatEmbed`, `PageHeader`, `Card`, `CardTitle`, `Btn`) | `static/dist/vendor/kirocrew-app-sdk.mjs`, `kirocrew-ui.mjs` | All exported |
+| SDK exports used (`useAppApi`, `ChatEmbed`, `PageHeader`, `Card`, `CardTitle`, `Btn`; M5: `useAppEvents`, which the vendor stub re-exports) | `static/dist/vendor/kirocrew-app-sdk.mjs`, `kirocrew-ui.mjs` | All exported |
 | `ChatEmbed` props | bundled `App-*.js` | Same prop list (`slotKey, agent, placeholder, frameless, startAtBottom, onSend, aboveComposer, composerMaxHeight, onFileOpen, onArtifactOpen`) |
 | `useAppApi()` is a same-origin `fetch` plus `X-Session-Key`; errors are `AppApiError {status, body}` / `AppApiPermissionError`; `permissions.api` prefix matcher | bundled `App-*.js`, `apiError-*.js` | Same |
 | Slot create ownership from `request["app"]`; approve 403 body | `dashboard/chat_api/slot_create.py`, `slot_approval.py` | Same |
@@ -46,6 +46,7 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | QTZ-009 Kanban board and linkage | Met as code. Vitest covers board ordering, keyboard moves, drop index, task context formatting and capping, and the tasks client (a move calls only the move route). **Not rendered in a real host**: DnD, focus handling, the cross-tab note/chat requests, the transcript link and the `openChat` draft are checked by `tsc` and reading only. No manifest or permission change |
 | QTZ-010 read-only Git status and diff API | Met, by unit and real HTTP tests against real git 2.53.0 in temp dirs (`tests/backend/test_git.py`). Not exercised against the live gateway: in particular, whether the gateway sandbox (`wrap_argv(mode="standard")`) lets the backend run `git` and read a repo, and whether `RLIMIT_NPROC` behaves the same inside it, is **unverified** |
 | QTZ-011 navigating multiple repositories | Met as code: repo picker, registration form, remove, changed-files list with keyboard navigation, virtualized diff viewer. Vitest covers diff line classification, the virtual window, entry badges/modes, the list keys and the git client. Rendered once in a throwaway browser harness (stub SDK, real backend behind a local signing proxy, not committed): picker, list, arrow keys + Enter, staged rename, a 512 KiB truncated diff (47 rows in the DOM for 33 000 lines), `<script>` in a diff shown as text. **Not rendered in the real host.** No manifest or permission change |
+| QTZ-012 agent and subagent monitoring | Met as code: Agents tab with Quartizo / other-session classification, visibility note, status, transcript summary, finished subagents, task/repo navigation with Back, bounded polling with stale marker and restart detection. Vitest covers the logic modules; read-only gateway shape tests passed live (app token). Rendered once in a throwaway harness (stub SDK, fake API). **Not rendered in the real host; no real turn (kiro-cli missing), so tool and subagent rows were never observed live.** No manifest or permission change ([m5.md](m5.md)) |
 | QTZ-003 slot ownership | **accepted: owner-session default (user decision)**. Page-created slots are owner sessions, accepted for the MVP. Facts (read at f62ab4fd, rechecked unchanged in 0.10.0rc4): the page's `useAppApi()` client is a plain same-origin `fetch` that adds only `X-Session-Key`, so the gateway authenticates it by the owner's `mc_token_<port>` cookie and sets `request["app"] = ""` (`dashboard/token_auth.py`). `POST /api/chat/slots` records app ownership only from `request["app"]` (`dashboard/chat_api/slot_create.py`). So the session the page creates is an owner session with `app == ""`, called a "Quartizo-created session" here. App ownership would need a backend-mediated app-token path, which is not built. Measured on 0.10.0rc4: an app-token create returns a row with `app: "quartizo"`, `origin: "app"`. |
 
 ## Verified by tests
@@ -80,6 +81,8 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | Not mutated: whole-root snapshot (`.git` included) before/after every endpoint; also checked to fail when optional locks are turned back on | Real git | `tests/backend/test_git.py` |
 | Git routes over HTTP: round trip, 404s, 401 unsigned and 403 for every non-owner principal on every route | Real HTTP | `tests/backend/test_git.py` |
 | Git UI (QTZ-011): diff classification (headers inside hunks, several files/hunks, binary, rename, submodule, combined diffs, hostile text), 512 KiB parse time, virtual window, badges, diff modes, reselection, list keys, client routes and encoding, path rules, HEAD description | Vitest | `ui/test/diffView.test.ts`, `gitList.test.ts`, `gitApi.test.ts` |
+| Agents (QTZ-012): text clipping, slot-row parsing on the measured shape, visibility classification, status derivation (never "done"), flags, detail targets and fingerprints, transcript summary (dedupe, refusals, no-result, errors, bounds, hostile text), subagent completions, links; poll cadence, backoff cap, stale-since, recovery, restart detection | Vitest | `ui/test/agents.test.ts`, `freshness.test.ts` |
+| Slot list / detail shapes the Agents tab reads; owner session detail is 404 for the app token; `/api/tasks` and `/api/sessions/{id}/agents` refused (403) without a grant | Live, read-only GETs with an app token (2026-10-20: 4 passed) | `tests/integration/test_gateway.py` `AgentsReadShapeTests` |
 | Built bundle imports only host import-map specifiers and has a default export | Vitest over `ui/dist/index.mjs` (skips before a build) | `ui/test/bundle.test.ts` |
 | `tsc --noEmit` and `vite build` pass | `npm run typecheck`, `npm run build` | — |
 
@@ -213,7 +216,13 @@ Run by the operator after M1, with `quartizo` trusted
   files over 8 MiB not diffed; 5000 status entries; 10 s per git call;
   submodule contents and ignored files not shown; repos with partial-clone
   missing objects show errors instead of fetching; POSIX only.
-- **Unsupported / not built**: Git writes, agents,
+- **Agents limits (M5)**: read only; polls every 5 s (no streaming); the
+  newest 50 transcript rows per session, read for at most 12 sessions per
+  poll; running subagents are not listed individually (only a flag and a
+  queued count); tool success/failure is not recorded on transcript rows;
+  sessions not named by Quartizo are listed read-only. `useAppEvents` is
+  used only for the host's `slots` hint.
+- **Unsupported / not built**: Git writes, agent control (stop/cancel from Agents),
   skills, crons, panel tabs, session controls.
 
 ## App Kit gaps (from `docs/appkit-notes.md` §10)

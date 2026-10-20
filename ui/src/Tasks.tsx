@@ -80,19 +80,31 @@ export interface TasksProps {
   onShowChat: (wsId: number) => void
   /** Asks before leaving the page when the Notes tab has unsaved edits. */
   confirmLeave: () => boolean
+  /** Shows a linked session in the Agents tab (M5). */
+  onShowAgents?: (slotKey: string) => void
+  /** One-shot request (by seq) to open a task's details, e.g. from the Agents tab. */
+  focus?: TaskFocus | null
+}
+
+export interface TaskFocus {
+  seq: number
+  wsId: number
+  taskUid: string
 }
 
 /** The Kanban board of the current workspace's project (QTZ-009). */
 export default function Tasks(props: TasksProps) {
+  // Survives the per-workspace remount, so a focus request is applied once.
+  const focusHandled = useRef(0)
   if (!props.workspace) {
     return <p className="text-sm text-muted">Select or register a workspace in the Notes tab. Each workspace has its own board.</p>
   }
-  return <BoardView key={props.workspace.id} {...props} workspace={props.workspace} />
+  return <BoardView key={props.workspace.id} {...props} workspace={props.workspace} focusHandled={focusHandled} />
 }
 
 type ImportAsk = { data: unknown; kind: 'replace'; count: number } | { data: unknown; kind: 'copies'; replace: boolean }
 
-function BoardView(props: TasksProps & { workspace: Workspace }) {
+function BoardView(props: TasksProps & { workspace: Workspace; focusHandled: { current: number } }) {
   const { api, workspace } = props
   const wsId = workspace.id
   const [tasks, setTasks] = useState<Task[] | null>(null)
@@ -126,6 +138,15 @@ function BoardView(props: TasksProps & { workspace: Workspace }) {
     }
   }, [api, wsId, refresh])
   const reload = useCallback(() => setRefresh(n => n + 1), [])
+
+  // A focus request for this workspace opens that task once the board has loaded.
+  useEffect(() => {
+    const f = props.focus
+    if (!f || f.wsId !== wsId || !tasks || f.seq <= props.focusHandled.current) return
+    props.focusHandled.current = f.seq
+    if (tasks.some(t => t.uid === f.taskUid)) setSelected(f.taskUid)
+    else setNotice('That task is no longer on this board.')
+  }, [props.focus, tasks, wsId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const cols: Columns = useMemo(() => groupColumns(tasks ?? []), [tasks])
   const selectedTask = tasks?.find(t => t.uid === selected) ?? null
@@ -734,6 +755,7 @@ function TaskDetail(props: TasksProps & {
               </a>
             )}
             {linkedSlot && linkedSlot === workspaceSlot && <Btn onClick={() => props.onShowChat(wsId)}>Show in Notes chat column</Btn>}
+            {linkedSlot && props.onShowAgents && <Btn onClick={() => props.onShowAgents?.(linkedSlot)}>Show in Agents</Btn>}
             <Btn onClick={() => void link({ slot_id: null })} disabled={busy}>
               Unlink
             </Btn>

@@ -156,6 +156,61 @@ class ToolApprovalTests(unittest.TestCase):
         self.assertEqual(status, 200, body)
 
 
+#: Fields of a GET /api/chat/slots row that the Agents tab reads (ui/src/agents.ts, M5).
+AGENTS_ROW_FIELDS = (
+    "key", "title", "app", "origin", "running", "stopping", "compacting", "pending_approval",
+    "needs_input", "interrupted", "last_activity_ts", "last_ts", "created", "workspace", "project",
+    "messages", "turn", "turn_gen", "queue_depth", "subagents_running", "subagents_queued", "parent",
+)
+
+
+@unittest.skipUnless(GATEWAY and TOKEN, NO_GATEWAY)
+class AgentsReadShapeTests(unittest.TestCase):
+    """M5: read-only GETs that pin the shapes the Agents tab relies on. Nothing is written."""
+
+    def test_slot_list_rows_carry_the_fields_the_agents_tab_reads(self):
+        status, rows = call("GET", "/api/chat/slots")
+        self.assertEqual(status, 200, rows)
+        self.assertIsInstance(rows, list)
+        if not rows:
+            self.skipTest("the gateway lists no sessions")
+        for row in rows:
+            missing = [f for f in AGENTS_ROW_FIELDS if f not in row]
+            self.assertEqual(missing, [], row.get("key"))
+            self.assertIsInstance(row["running"], bool)
+            self.assertIsInstance(row["subagents_running"], bool)
+            self.assertIsInstance(row["subagents_queued"], int)
+
+    def test_detail_of_an_app_owned_slot(self):
+        status, rows = call("GET", "/api/chat/slots")
+        self.assertEqual(status, 200, rows)
+        owned = [r["key"] for r in rows if r.get("app") == "quartizo"]
+        if not owned:
+            self.skipTest("no app-owned slot to read")
+        key = urllib.parse.quote(owned[0])
+        status, body = call("GET", f"/api/chat/slots/{key}?limit=50")
+        self.assertEqual(status, 200, body)
+        for field in ("key", "running", "stopping", "messages", "total", "has_more"):
+            self.assertIn(field, body)
+        self.assertIsInstance(body["messages"], list)
+
+    def test_owner_session_detail_is_slot_not_found_for_the_app_token(self):
+        status, rows = call("GET", "/api/chat/slots")
+        self.assertEqual(status, 200, rows)
+        owner = [r["key"] for r in rows if r.get("app") == ""]
+        if not owner:
+            self.skipTest("no owner session listed")
+        status, body = call("GET", f"/api/chat/slots/{urllib.parse.quote(owner[0])}?limit=1")
+        self.assertEqual((status, body.get("code")), (404, "slot_not_found"))
+
+    def test_undeclared_subagent_and_task_routes_are_refused(self):
+        # Not in permissions.api, so the gateway refuses the app token (token_auth.app_token_path_allowed).
+        for path in ("/api/sessions/dashboard:quartizo-it-probe/agents", "/api/tasks?limit=1"):
+            with self.subTest(path=path):
+                status, body = call("GET", path)
+                self.assertEqual((status, body.get("code")), (403, "forbidden"), body)
+
+
 @unittest.skipUnless(GATEWAY and OWNER_TOKEN, NO_OWNER)
 class OwnerCookieTests(unittest.TestCase):
     """What the shipped page gets: it calls with the owner's cookie."""

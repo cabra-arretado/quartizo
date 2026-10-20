@@ -76,6 +76,15 @@ declare module '@kirocrew/app-sdk' {
   export function useChatLauncher(): { openChat(opts?: ChatLaunchOptions): void }
 
   export function useNavigate(): (path: string) => void
+
+  /**
+   * M5 (QTZ-012), read from the 0.10.0rc4 bundle (App-DMz0r7P1.js `function sV`):
+   * subscribes through the AppHost's `subscribeFn`, which listens to window
+   * events `mc:app:<event>`. The host dispatches only `mc:app:slots` (detail
+   * null, useWebSocket-*.js `Lr()`), after each slots frame on its own WS.
+   * The SDK's own check (`aV`) admits `slots` with no permissions.events entry.
+   */
+  export function useAppEvents(event: string, callback: (detail: unknown) => void): void
 }
 
 declare module '@kirocrew/app-sdk/ui' {

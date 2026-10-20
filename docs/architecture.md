@@ -1,13 +1,16 @@
-# Architecture (M1-M4)
+# Architecture (M1-M5)
 
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
-  App.tsx        PageHeader + in-page tabs: Notes | Tasks | Git | Chat
+  App.tsx        PageHeader + in-page tabs: Notes | Tasks | Agents | Git | Chat; cross-tab links + Back trail
   Notes.tsx      workspace picker/registration, note list + search, editor, preview
   Tasks.tsx      Kanban board of the selected workspace, task details, links (M3)
   tasksApi.ts    typed client for .../workspaces/{id}/tasks
   board.ts       column grouping, move/reindex mirror, keyboard moves, drop index
   taskContext.ts bounded task context block for an agent prompt
+  Agents.tsx     read-only session / tool / subagent monitor, bounded polling (M5)
+  agents.ts      slot rows, visibility classification, status, transcript summary, links
+  freshness.ts   poll cadence, backoff, stale-since, restart detection
   Git.tsx        repo picker/registration, changed-files list, virtualized diff viewer (M4)
   gitApi.ts      typed client for .../repos (ids, a path and a mode only)
   gitList.ts     entry badges, diff modes, changed-files keyboard handling
@@ -224,3 +227,24 @@ milliseconds (tested under 500 ms in Node). Long lines scroll sideways
 **No stage, commit or task-branch link** in M4. `branch_ref` on tasks was
 not added: the task schema, import format and board UI would all need it,
 which is more than "cheap"; the repo `uid` is ready to key it later.
+
+## Agents, read only (M5)
+
+See [m5.md](m5.md) for the gateway routes and the permission decision.
+
+- **Source of truth is the gateway's own list and transcript.** The tab
+  derives nothing the gateway does not say: `running` / `stopping` are its
+  flags, `error` is a trailing error row, a tool is `ended` only when the
+  row says so, and a silent session is `idle`, never "done".
+- **Polling, not events.** The 0.10.0rc4 host relays only `mc:app:slots` to
+  pages, so that hint just triggers an earlier poll. One `GET /api/chat/slots`
+  every 5 s while visible; transcript reads (`limit=50`) only for the
+  selected and the 12 most recent Quartizo sessions whose list fingerprint
+  changed. Backoff and staleness rules live in `freshness.ts` (tested).
+- **Visibility classes.** Quartizo-created sessions are the names the page
+  generates; anything else the owner's list returns is shown read-only and
+  never read in detail.
+- **Cross-tab navigation.** App keeps one-shot requests (`AgentsRequest`,
+  `TaskFocus`, `GitRequest`, by `seq`) and a short trail of tabs for "Back".
+  Notes still owns the workspace selection; opening a task in another
+  workspace asks Notes to switch first.

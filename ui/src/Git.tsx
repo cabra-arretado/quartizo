@@ -80,7 +80,12 @@ function ErrorLine({ failure }: { failure: ApiFailure | null }) {
  * files, read one file's diff. Read only: nothing here stages, commits or
  * changes anything, and switching repos only changes this tab's own view.
  */
-export default function Git(props: { api: AppApi; active: boolean }) {
+export interface GitRequest {
+  seq: number
+  repoId: number
+}
+
+export default function Git(props: { api: AppApi; active: boolean; request?: GitRequest | null }) {
   const { api } = props
   const [repos, setRepos] = useState<Load<Repo[]>>({ status: 'loading' })
   const [repoId, setRepoId] = useState<number | null>(loadRepoId)
@@ -112,6 +117,15 @@ export default function Git(props: { api: AppApi; active: boolean }) {
     setRepoId(id)
     saveRepoId(id)
   }
+
+  // A one-shot request (Agents tab, M5) to show one registered repo. Only this tab's selection changes.
+  const handled = useRef(0)
+  useEffect(() => {
+    const r = props.request
+    if (!r || r.seq <= handled.current || repos.status !== 'ready') return
+    handled.current = r.seq
+    if (repos.value.some(x => x.id === r.repoId)) select(r.repoId)
+  }, [props.request, repos]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ ...S.column, flex: 1 }}>
