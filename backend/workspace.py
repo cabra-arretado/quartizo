@@ -344,8 +344,20 @@ class Registry:
             new_id, uid = db.insert_workspace(conn, label, real)
         return Workspace(new_id, uid, label, real)
 
-    def unregister(self, workspace_id: int) -> None:
-        """Forget a root. Files are never touched."""
-        with self._lock, self._conn() as conn:
-            if not db.delete_workspace(conn, workspace_id):
+    def unregister(self, workspace_id: int, *, delete_tasks: bool = False) -> None:
+        """Forget a root. Files are never touched.
+
+        The workspace is also a task project (QTZ-008), and its tasks go with
+        it (FK cascade). So a workspace that still has tasks is refused with
+        409 ``project_has_tasks`` unless the caller explicitly passed
+        *delete_tasks*. Count and delete happen in one transaction.
+        """
+        with self._lock, self._conn() as conn, db.transaction(conn):
+            if db.get_workspace(conn, workspace_id) is None:
                 raise ApiError(404, "workspace_not_found", "no such workspace")
+            count = db.count_tasks(conn, workspace_id)
+            if count and delete_tasks is not True:
+                raise ApiError(409, "project_has_tasks",
+                               f"this workspace has {count} task(s); removing it deletes them",
+                               taskCount=count)
+            db.delete_workspace(conn, workspace_id)

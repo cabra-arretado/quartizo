@@ -1,8 +1,8 @@
 # Threat model (M1: Markdown workspaces)
 
-Scope: the M1 sections only. These are workspace confinement (§1), symlinks
-and TOCTOU (§2), and untrusted Markdown (§3). Kanban, Git and chat-context
-features (M2+) are out of scope.
+Scope: workspace confinement (§1), symlinks and TOCTOU (§2), untrusted
+Markdown (§3) and task metadata (§4, M3). Chat context is covered in
+[m2.md](m2.md). Git is not built yet.
 
 ## Assets and actors
 
@@ -186,3 +186,47 @@ renderer rules. No second, DOM-based pass (DOMPurify) runs. A markdown-it
 bug that emits raw markup would reach `dangerouslySetInnerHTML`. The pinned
 version and the structural test reduce the risk, but they cannot rule it out.
 Note *names* are rendered as React text, never as HTML.
+
+## 4. Task metadata (M3)
+
+Tasks are rows in the app's SQLite DB, behind the same signed, owner-only
+routes as everything else. The threats are a task becoming a way to reach
+files or sessions, an import that corrupts or silently replaces data, and
+lost updates.
+
+- **`note_ref` grants nothing.** It is validated with the note path rules
+  (`notes.note_segments`: relative, no `..`, no hidden segments, no
+  backslash or control characters, `.md`), stored as a string and never
+  opened by `tasks.py` (a test patches `os.open` to fail during task
+  writes). The UI opens it only through `GET .../note?path=`, so the M1
+  confinement (§1-2) applies in full. A dangling `note_ref` is just a 404
+  when opened.
+- **`slot_id` grants nothing.** It must match Quartizo's own session-name
+  pattern, and a workspace session must be this workspace's. The backend has
+  no chat client, and `tasks.py` imports no network module (a test checks
+  the source and patches `socket` during moves). The UI uses `slot_id` only
+  for a transcript link and a read-only status poll, and re-checks it with
+  `isSlotName` first.
+- **Moves never launch anything.** A move only rewrites `status` and order.
+  Agent prompts are built only after an explicit click, previewed, and handed
+  over with `autoSend: false` (see the UI notes in the compatibility doc).
+- **Size limits.** Title 200 characters, description 64 KiB, 2000 tasks per
+  project, 1 MiB request body for task routes and 4 MiB for an import (only
+  with a fresh proxy timestamp, like note writes).
+- **Import.** Strict schema (unknown keys refused), every field validated
+  before the transaction starts, one transaction, all or nothing. It never
+  replaces existing tasks unless `replace` and `confirm` are both true, and
+  never reuses a uid owned by another project.
+- **Lost updates.** Update, move and delete need the version last read; a
+  stale one is refused (409 `stale`) and the UI shows the conflict.
+- **Workspace removal** with tasks needs an explicit `deleteTasks=1`.
+- **Rendering.** Titles render as React text. Descriptions go through
+  `ui/src/markdown.ts` (§3), the same sanitizer as notes.
+- **Errors.** A SQLite error answers 503 `db_busy` (lock timeout) or 500
+  `db_error`, never with SQL or a path.
+
+**Residual risks.** Task data is plain SQLite in the app data dir, readable
+by anything running as the owner (like the notes themselves). A move's
+`index` is relative to the server's current column, so a move based on a
+stale view of the *other* cards lands at that index, not next to a
+particular neighbour; only the moved task's own version is checked.

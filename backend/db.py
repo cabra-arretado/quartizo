@@ -1,7 +1,10 @@
 """Quartizo's registry database (stdlib ``sqlite3``).
 
-It holds registry/index data only: which workspace roots the owner opted in.
-Note content always lives in the Markdown files themselves.
+It holds the workspace registry (which roots the owner opted in) and, since
+migration 3, the Kanban task metadata of each project (QTZ-008). One project is
+one registered workspace, keyed by the workspace ``uid``. Note content always
+lives in the Markdown files themselves; a task only stores a workspace-relative
+``note_ref`` string, never file content and never an absolute path.
 
 Schema changes are numbered entries in ``MIGRATIONS``; each is applied once, in
 order, inside one transaction, and recorded in ``schema_migrations``. Never edit
@@ -12,6 +15,8 @@ from __future__ import annotations
 import secrets
 import sqlite3
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 DB_FILENAME = "quartizo.sqlite3"
@@ -43,6 +48,32 @@ MIGRATIONS: tuple[str, ...] = (
         SELECT id, lower(hex(randomblob(16))), name, path, created_at FROM workspaces;
     DROP TABLE workspaces;
     ALTER TABLE workspaces_v2 RENAME TO workspaces;
+    """,
+    # 3: Kanban tasks (QTZ-008). `project_id` is the owning workspace's `uid`;
+    # deleting the workspace row cascades to its tasks (Registry.unregister
+    # refuses that unless the caller explicitly asked to delete them). A later
+    # migration that rebuilds `workspaces` must therefore turn foreign keys off
+    # first, or the DROP TABLE would cascade. `sort_order` is a dense 0..n-1
+    # index inside one (project, status) column, rewritten in the same
+    # transaction as every move. `version` starts at 1 and is bumped by every
+    # write to that task (the optimistic-concurrency token for update/move).
+    """
+    CREATE TABLE tasks (
+        id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid                  TEXT    NOT NULL UNIQUE,
+        project_id           TEXT    NOT NULL REFERENCES workspaces(uid) ON DELETE CASCADE,
+        title                TEXT    NOT NULL,
+        description_markdown TEXT    NOT NULL DEFAULT '',
+        status               TEXT    NOT NULL
+            CHECK (status IN ('backlog', 'ready', 'in_progress', 'review', 'done')),
+        sort_order           INTEGER NOT NULL,
+        version              INTEGER NOT NULL DEFAULT 1,
+        note_ref             TEXT,
+        slot_id              TEXT,
+        created_at           INTEGER NOT NULL,
+        updated_at           INTEGER NOT NULL
+    );
+    CREATE INDEX tasks_board ON tasks (project_id, status, sort_order);
     """,
 )
 
@@ -101,3 +132,26 @@ def insert_workspace(conn: sqlite3.Connection, name: str, path: str) -> tuple[in
 
 def delete_workspace(conn: sqlite3.Connection, workspace_id: int) -> bool:
     return conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,)).rowcount > 0
+
+
+def count_tasks(conn: sqlite3.Connection, workspace_id: int) -> int:
+    return conn.execute(
+        "SELECT COUNT(*) FROM tasks JOIN workspaces w ON w.uid = tasks.project_id WHERE w.id = ?",
+        (workspace_id,),
+    ).fetchone()[0]
+
+
+@contextmanager
+def transaction(conn: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """``BEGIN IMMEDIATE`` .. ``COMMIT``; rolls back on any exception.
+
+    IMMEDIATE takes the write lock up front, so a read-check-write sequence
+    inside (version check, reindex) cannot interleave with another writer.
+    """
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise

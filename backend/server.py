@@ -32,6 +32,7 @@ import hmac
 import json
 import os
 import re
+import sqlite3
 import sys
 import threading
 import time
@@ -45,6 +46,7 @@ from urllib.parse import parse_qs, urlsplit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import notes  # noqa: E402
+import tasks  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
 
 APP_NAME = "quartizo"
@@ -60,6 +62,8 @@ MAX_BODY_BYTES = 1 << 20
 MAX_NOTE_BODY_BYTES = 6 * (2 << 20) + (64 << 10)
 MAX_IN_FLIGHT = 16
 _NOTE_WRITE_RE = re.compile(r"/api/workspaces/[0-9]{1,12}/note")
+# Task import only (QTZ-008): up to tasks.MAX_IMPORT_BODY_BYTES, same freshness rule.
+_TASK_IMPORT_RE = re.compile(r"/api/workspaces/[0-9]{1,12}/tasks/import")
 MAX_PRINCIPAL_HEADER_BYTES = 4096
 
 _TS_RE = re.compile(r"[0-9]{1,12}")
@@ -267,6 +271,15 @@ class Handler(BaseHTTPRequestHandler):
             refusal = os_error(err)
             self._json(refusal.status, refusal.body())
             return
+        except sqlite3.OperationalError as err:
+            # Typically "database is locked" past the 10 s busy timeout. Never echo SQL.
+            busy = "locked" in str(err) or "busy" in str(err)
+            self._json(503 if busy else 500, {"error": "database busy" if busy else "database error",
+                                              "code": "db_busy" if busy else "db_error"})
+            return
+        except sqlite3.Error:
+            self._json(500, {"error": "database error", "code": "db_error"})
+            return
         if result is None:
             self._json(404, {"error": "not found"})
         else:
@@ -296,11 +309,44 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "GET":
                     return 200, {"workspace": registry.get(ws_id).to_json()}
                 if method == "DELETE":
-                    registry.unregister(ws_id)
+                    # A workspace is also a task project: its tasks go with it,
+                    # so that needs ?deleteTasks=1 (409 project_has_tasks otherwise).
+                    registry.unregister(ws_id, delete_tasks=_q(query, "deleteTasks") == "1")
                     return 200, {"ok": True}
                 return None
+            if parts[3] == "tasks":
+                return self._handle_tasks(ws_id, parts[4:])
             if len(parts) == 4:
                 return self._handle_notes(registry, ws_id, parts[3], query)
+        return None
+
+    def _handle_tasks(self, ws_id: int, rest: list[str]) -> tuple[int, dict] | None:
+        """/api/workspaces/{id}/tasks[...]: the Kanban board of that workspace's project."""
+        method = self.command
+        store: tasks.TaskStore = self.server.tasks  # type: ignore[attr-defined]
+        if rest == []:
+            if method == "GET":
+                return 200, store.list(ws_id)
+            if method == "POST":
+                return 201, store.create(ws_id, self._json_body())
+            return None
+        if rest == ["export"] and method == "GET":
+            return 200, store.export(ws_id)
+        if rest == ["import"] and method == "POST":
+            return 200, store.import_(ws_id, self._json_body())
+        task_id = _parse_id(rest[0])
+        if task_id is None or len(rest) > 2:
+            return None
+        if len(rest) == 1:
+            if method == "GET":
+                return 200, store.get(ws_id, task_id)
+            if method == "PATCH":
+                return 200, store.update(ws_id, task_id, self._json_body())
+            return None
+        if rest[1] == "move" and method == "POST":
+            return 200, store.move(ws_id, task_id, self._json_body())
+        if rest[1] == "delete" and method == "POST":
+            return 200, store.delete(ws_id, task_id, self._json_body())
         return None
 
     def _handle_notes(self, registry: Registry, ws_id: int, action: str, query: dict) -> tuple[int, dict] | None:
@@ -334,15 +380,20 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def _body_limit(self) -> int:
-        """1 MiB, or the note limit for a note write with a fresh proxy timestamp.
+        """1 MiB, or the note / task-import limit for those writes with a fresh proxy timestamp.
 
         The full HMAC needs the body, so only the timestamp can be checked
         before reading; the signature is still verified afterwards.
         """
         if self.command in ("POST", "PUT") and _NOTE_WRITE_RE.fullmatch(self.path):
-            ts = (self.headers.get(PROXY_HEADER) or "").partition(":")[0]
-            if _TS_RE.fullmatch(ts) and abs(time.time() - int(ts)) <= MAX_SKEW_SECONDS:
-                return MAX_NOTE_BODY_BYTES
+            larger = MAX_NOTE_BODY_BYTES
+        elif self.command == "POST" and _TASK_IMPORT_RE.fullmatch(self.path):
+            larger = tasks.MAX_IMPORT_BODY_BYTES
+        else:
+            return MAX_BODY_BYTES
+        ts = (self.headers.get(PROXY_HEADER) or "").partition(":")[0]
+        if _TS_RE.fullmatch(ts) and abs(time.time() - int(ts)) <= MAX_SKEW_SECONDS:
+            return larger
         return MAX_BODY_BYTES
 
     def _read_body(self) -> bytes | None:
@@ -439,6 +490,7 @@ def make_server(port: int, secret: str, registry: Registry) -> Server:
     server.proxy_secret = secret  # type: ignore[attr-defined]
     server.replay_cache = ReplayCache()  # type: ignore[attr-defined]
     server.registry = registry  # type: ignore[attr-defined]
+    server.tasks = tasks.TaskStore(registry)  # type: ignore[attr-defined]
     return server
 
 

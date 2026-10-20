@@ -10,8 +10,10 @@ not by the app, see [compatibility](docs/compatibility.md)). A stdlib Python
 backend verifies the gateway's signed proxy requests and does all file
 access, confined to the registered folders.
 
-M1 scope: workspaces and notes only. Kanban, Git and chat context are not
-built yet.
+Scope so far: workspaces and notes (M1), note context to the workspace chat
+(M2, [docs/m2.md](docs/m2.md)), and per-workspace task metadata with a Kanban
+board (M3, QTZ-008/009; see [Tasks](#tasks-projects) below). Git is not built
+yet.
 
 Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
 (after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
@@ -28,8 +30,9 @@ app.json              manifest (name, ui page, backend, permissions)
 assets/icon.png       512x512 opaque placeholder (same as `kirocrew app init`)
 backend/server.py     stdlib-only HTTP backend: auth, routing
 backend/workspace.py  workspace root registry + fd-based path confinement
-backend/db.py         sqlite3 registry DB with a migrations table
+backend/db.py         sqlite3 DB (registry + tasks) with a migrations table
 backend/notes.py      .md list/search/read/create/update/rename/delete
+backend/tasks.py      task CRUD, ordered moves, JSON import/export (M3)
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
                       (src/*.ts: tested logic; src/*.tsx: components)
 tests/backend/        backend auth unit tests + real HTTP round-trips
@@ -180,15 +183,15 @@ choice.
 A workspace is a folder of plain `.md` files that the owner explicitly
 registers. Registry data lives in `quartizo.sqlite3` in the app data dir,
 `$KIROCREW_HOME/apps/quartizo/data/` (default `~/.kiro/crew/apps/quartizo/data/`;
-installs keep `data/` across updates). The DB holds only the registry. Note
-content stays in the files.
+installs keep `data/` across updates). The DB holds the registry and task
+metadata (M3). Note content stays in the files.
 
 | Route | Body / result |
 |---|---|
 | `GET /api/workspaces` | `{workspaces: [{id, uid, name, path}]}`. `id` is never reused (AUTOINCREMENT); `uid` is 32 random hex chars per registration, used by the UI to key per-workspace state |
 | `POST /api/workspaces` | `{path, name?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`) |
 | `GET /api/workspaces/{id}` | `{workspace}` or 404 `workspace_not_found` |
-| `DELETE /api/workspaces/{id}` | Forgets the root. Files are never touched |
+| `DELETE /api/workspaces/{id}[?deleteTasks=1]` | Forgets the root. Files are never touched. A workspace that still has tasks is refused with 409 `project_has_tasks` (`taskCount`) unless `deleteTasks=1`, which deletes its tasks in the same transaction |
 
 See [docs/threat-model.md](docs/threat-model.md) for path confinement
 (no `..`, no hidden segments, no symlinks followed, fd-relative opens).
@@ -229,3 +232,51 @@ A residual window of microseconds between that check and `os.replace` remains
 (see the threat model).
 - Binds `127.0.0.1:$PORT` only and never logs headers, the query string or the
   secret.
+
+### Tasks (projects)
+
+**One project is one registered workspace**, identified by the workspace
+`uid`; see [architecture](docs/architecture.md#projects-and-tasks-m3) for why.
+Tasks live in the same SQLite DB (migration 3). Nothing about a task is
+written to the workspace folder.
+
+A task is `{id, uid, project_id, title, description_markdown, status, order,
+version, note_ref, slot_id, created_at, updated_at}`:
+
+| Field | Rules |
+|---|---|
+| `id` / `uid` | integer, never reused / 32 random hex chars |
+| `project_id` | the workspace `uid` |
+| `title` | 1..200 characters after trimming, one line, no control characters |
+| `description_markdown` | at most 64 KiB of UTF-8 (413 `description_too_large`), no NUL. Rendered with the same sanitizer as notes |
+| `status` | `backlog`, `ready`, `in_progress`, `review` or `done`. Human-assigned only; changed only through `/move` |
+| `order` | dense 0..n-1 inside one column, rewritten by moves in the same transaction |
+| `version` | starts at 1, bumped by every write to the task: the concurrency token |
+| `note_ref` | optional workspace-relative `.md` path, validated with the notes path rules. Never opened by the task code; the UI opens it through `GET .../note` |
+| `slot_id` | optional Quartizo chat session name (`isSlotName` rules). A workspace session must be this workspace's. A label only: the backend never calls the chat API |
+| `created_at` / `updated_at` | Unix milliseconds |
+
+| Route (under `/api/workspaces/{id}`) | Body / result |
+|---|---|
+| `GET /tasks` | `{project: {id, workspaceId, name}, statuses, tasks}`, ordered by column then `order` |
+| `POST /tasks` | `{title, description_markdown?, status?, note_ref?, slot_id?}` -> 201 `{task}`, appended to its column. At most 2000 tasks per project (409 `too_many_tasks`) |
+| `GET /tasks/{taskId}` | `{task}` or 404 `task_not_found` (also for a task of another project) |
+| `PATCH /tasks/{taskId}` | `{expectedVersion, title?, description_markdown?, note_ref?, slot_id?}` -> `{task}`. `status`, `order` and any other key: 400 `bad_field` |
+| `POST /tasks/{taskId}/move` | `{expectedVersion, status, index}` -> `{task, moved, tasks}`. `index` is the position in the target column (clamped). Only the moved task's `version` / `updated_at` change |
+| `POST /tasks/{taskId}/delete` | `{expectedVersion, confirm: true}` -> `{ok}`. Without `confirm: true`: 400 `confirm_required` |
+| `GET /tasks/export` | `{format: "quartizo.tasks", version: 1, exported_at, project: {id, name}, tasks: [...]}` |
+| `POST /tasks/import` | `{data: <export>, replace?, confirm?, newUids?}` -> `{imported, replaced, tasks}` |
+
+**Stale writes.** Update, move and delete need the `version` last read. If
+the task changed since, the answer is 409 `stale` with `currentVersion` and
+the current `task`, and nothing is written.
+
+**Import** is validated completely before anything is written, then applied
+in one transaction (all or nothing). Every field and every key is checked
+(unknown keys are refused). Limits: 4 MiB request body, 2000 tasks. A
+project that already has tasks is refused with 409 `project_not_empty`
+unless `replace: true` **and** `confirm: true`; then its tasks are replaced
+in the same transaction. A `uid` used by a task of another project is
+refused with 409 `uid_conflict` unless `newUids: true` (import as copies).
+A `slot_id` naming another workspace's session is refused, so a copy into
+another workspace needs those links removed from the file first.

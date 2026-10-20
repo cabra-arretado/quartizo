@@ -1,4 +1,4 @@
-# Architecture (M1)
+# Architecture (M1-M3)
 
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
@@ -17,7 +17,8 @@ backend (python3 -I backend/server.py, stdlib only)
   server.py      HMAC + signed principal (owner-session only), routing
   workspace.py   root registry, path validation, fd-based no-follow opens
   notes.py       list/search, read, atomic create/update/rename, trash-delete
-  db.py          sqlite3 registry + migrations ($KIROCREW_HOME/apps/quartizo/data)
+  tasks.py       task CRUD, ordered moves, version checks, JSON import/export (M3)
+  db.py          sqlite3 registry + tasks + migrations ($KIROCREW_HOME/apps/quartizo/data)
         |
         v
 plain .md files in the registered folders (readable by Obsidian or any editor)
@@ -81,3 +82,45 @@ editor keeps the user's text and shows a notice with three choices:
 Nothing is ever overwritten automatically (`editorDoc.ts`, tested).
 Delete asks for confirmation inline, and a rename onto an existing note asks
 again before sending `overwrite` + `confirm`.
+
+## Projects and tasks (M3)
+
+**Decision: one project is one registered workspace**, keyed by the
+workspace `uid` (`tasks.project_id = workspaces.uid`, a foreign key).
+
+- It is the simplest model that matches what already exists. A workspace is
+  already the unit of confinement (note paths are relative to it), of the
+  chat session (`quartizo-w<uid>-…`, M2) and of the UI selection. A task's
+  `note_ref` and `slot_id` only make sense inside one workspace, and with
+  this model they can be validated against it.
+- The `uid`, not the numeric id, is the key for the same reason as the M2
+  chat: it is random and never reused, so a later registration can never
+  inherit the tasks of an earlier one.
+- No extra registry, no project CRUD and no project picker. Several projects
+  per workspace, or a project that spans folders, can be added later as a
+  `projects` table whose default row per workspace keeps today's ids.
+- Removing a workspace would orphan its tasks, so the FK cascades and the
+  backend refuses the removal (409 `project_has_tasks`) unless the caller
+  asks to delete the tasks too. The UI says how many and offers an export
+  first.
+
+**Storage.** `db.py` migration 3 adds `tasks` with a `CHECK` on `status` and
+an index on `(project_id, status, sort_order)`. Every write is one `BEGIN
+IMMEDIATE` transaction (`db.transaction`), so the version check, the write
+and any reindex happen under the write lock. `sort_order` is an integer
+index, rewritten densely (0..n-1) for the source and target columns in the
+move's transaction. Fractional keys would avoid touching siblings, but a
+column holds at most a few hundred cards, a dense reindex is a handful of
+`UPDATE`s, and integers never run out of precision. Siblings that are only
+reindexed keep their `version`, so an open edit of a neighbour does not
+conflict.
+
+**Concurrency.** `version` (an integer bumped by each write), not
+`updated_at`: a millisecond clock can repeat, and the client never has to
+compare times. A stale update, move or delete gets 409 `stale` with the
+current task.
+
+**Status vs runtime state.** `status` is set only by the user, through
+`/move`. The backend has no chat client at all, so it cannot infer or store
+a runtime state; the UI shows a linked session's state read-only next to
+the human status.
