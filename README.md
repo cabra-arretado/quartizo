@@ -20,11 +20,13 @@ measured and what is not verified.
 ```
 app.json              manifest (name, ui page, backend, permissions)
 assets/icon.png       512x512 opaque placeholder (same as `kirocrew app init`)
-backend/server.py     stdlib-only HTTP backend (GET /health, GET /api/status)
+backend/server.py     stdlib-only HTTP backend: auth, routing
+backend/workspace.py  workspace root registry + fd-based path confinement
+backend/db.py         sqlite3 registry DB with a migrations table
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
 tests/backend/        backend auth unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
-docs/                 App Kit notes and compatibility matrix
+docs/                 App Kit notes, compatibility matrix, threat model
 ```
 
 ## Requirements
@@ -139,7 +141,28 @@ rebuild, then press **Update** in the App Store, then refresh.
 - Every other request must carry a valid `X-KiroCrew-Proxy` HMAC **and** a
   valid `X-KiroCrew-Principal` claim. Otherwise: 401. No secret in the
   environment: 503 for everything except `/health`.
+- **Every route is dashboard-owner only**: a principal other than
+  `owner-session` gets 403 `owner_session_required`.
 - `GET /api/status` (reached as `/apps/quartizo/api/status`) -> app, version and
   the verified caller `{kind, ownerId}`.
+- Errors are JSON `{"error": "<message>", "code": "<stable code>", ...}`.
+
+### Workspaces
+
+A workspace is a folder of plain `.md` files that the owner explicitly
+registers. Registry data lives in `quartizo.sqlite3` in the app data dir,
+`$KIROCREW_HOME/apps/quartizo/data/` (default `~/.kiro/crew/apps/quartizo/data/`;
+installs keep `data/` across updates). The DB holds only the registry. Note
+content stays in the files.
+
+| Route | Body / result |
+|---|---|
+| `GET /api/workspaces` | `{workspaces: [{id, name, path}]}` |
+| `POST /api/workspaces` | `{path, name?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`) |
+| `GET /api/workspaces/{id}` | `{workspace}` or 404 `workspace_not_found` |
+| `DELETE /api/workspaces/{id}` | Forgets the root. Files are never touched |
+
+See [docs/threat-model.md](docs/threat-model.md) for path confinement
+(no `..`, no hidden segments, no symlinks followed, fd-relative opens).
 - Binds `127.0.0.1:$PORT` only and never logs headers, the query string or the
   secret.

@@ -39,6 +39,7 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | QTZ-001 manifest, routed page, Vite build with host externals | Met (build, typecheck, bundle-import test) |
 | QTZ-002 signed backend | Met (unit + real HTTP tests) |
 | QTZ-003 page creates a slot and mounts `ChatEmbed` with `onSend`; error states for `slot_not_found` / `session_approval_not_granted` | Met as code; the page has not been rendered in a real host (app not yet trusted/enabled) |
+| QTZ-004 workspace registry and confinement | Met, by unit and real HTTP tests (`tests/backend/test_workspace.py`). Not run inside the gateway sandbox (app not enabled) |
 | QTZ-003 slot ownership | **accepted: owner-session default (user decision)**. Page-created slots are owner sessions, accepted for the MVP. Facts (read at f62ab4fd, rechecked unchanged in 0.10.0rc4): the page's `useAppApi()` client is a plain same-origin `fetch` that adds only `X-Session-Key`, so the gateway authenticates it by the owner's `mc_token_<port>` cookie and sets `request["app"] = ""` (`dashboard/token_auth.py`). `POST /api/chat/slots` records app ownership only from `request["app"]` (`dashboard/chat_api/slot_create.py`). So the session the page creates is an owner session with `app == ""`, called a "Quartizo-created session" here. App ownership would need a backend-mediated app-token path, which is not built. Measured on 0.10.0rc4: an app-token create returns a row with `app: "quartizo"`, `origin: "app"`. |
 
 ## Verified by tests
@@ -49,6 +50,11 @@ assumption Quartizo makes. **No drift found; no code change was needed.**
 | `X-KiroCrew-Principal` verification: canonical claim shape, kinds, owner rules, ±60 s, binding to method/target/body, replay refusal, full-cache refusal | Same, including an upstream-signed vector | `tests/backend/test_proxy_auth.py` |
 | The real server process: unsigned `/health`, signed `/api/status` round-trip, 401 for unsigned/tampered/replayed/expired, 404 only after auth, 503 without a secret, binds `127.0.0.1` only, secret never written to logs | `backend/server.py` as a subprocess over real HTTP | `tests/backend/test_http.py` |
 | Slot logic: create/reopen body and key extraction, stale-send refusal, send body, `slot_not_found` / `session_approval_not_granted` / permission-fence classification | Vitest with a mocked `AppApi` | `ui/test/slots.test.ts` |
+| Registry DB: migrations applied once and recorded; registrations persist across restarts | Unit tests on a temp `KIROCREW_HOME` | `tests/backend/test_workspace.py` |
+| Root refusals: relative/NUL/missing/non-dir, `/` (also via `//`, `/tmp/..`, a symlink), the home dir itself, `$KIROCREW_HOME` and the data dir, overlaps both ways, and an inode-only alias (simulating case-insensitive `realpath`); a shared-prefix sibling (`/a/notes` vs `/a/notes-private`) is allowed | Unit tests | `tests/backend/test_workspace.py` |
+| Relative-path refusals: `..`, `.`, empty segments, absolute, backslash, control chars, hidden segments, length; percent-encoding not re-decoded; no Unicode normalization | Unit tests | `tests/backend/test_workspace.py` |
+| fd-based confinement: symlinks out of / inside the root and dangling ones refused; root or its parent swapped for a symlink -> `root_changed`; FIFO and directory are not files | Unit tests on real temp trees | `tests/backend/test_workspace.py` |
+| Workspace routes: signed round trip, 401 unsigned, 403 for every non-owner principal | Real HTTP | `tests/backend/test_workspace.py` |
 | Built bundle imports only host import-map specifiers and has a default export | Vitest over `ui/dist/index.mjs` (skips before a build) | `ui/test/bundle.test.ts` |
 | `tsc --noEmit` and `vite build` pass | `npm run typecheck`, `npm run build` | — |
 
@@ -104,6 +110,17 @@ Observed upstream behaviour, recorded as findings:
 
 ## Not verified
 
+- **Backend file access inside the gateway sandbox.** 0.10.0rc4 spawns
+  backends through `wrap_argv(mode="standard")`. Which host paths a registered
+  root may use under that sandbox, and whether `data/` is writable, was read
+  from source only and not measured (the app is not enabled). The data dir
+  path follows `manager.py::app_data_dir` and the injected `KIROCREW_HOME` /
+  `KIROCREW_APP_NAME`.
+- **`python -I` start-up.** The gateway runs `.py` entry points isolated
+  (`isolated_python_argv(force_isolation=True)`), which drops the script's
+  directory from `sys.path`. `server.py` puts it back explicitly. Tested with
+  `python3 -I backend/server.py` locally, not under the gateway.
+
 - **Signed proxy end to end, backend health, and the direct-hit refusal** in a
   real gateway: blocked on trust and enable. Covered locally by
   `tests/backend/test_http.py` and the cross-check with the installed signer.
@@ -153,7 +170,7 @@ Observed upstream behaviour, recorded as findings:
 - **Stored slot keys are validated**: only names matching
   `^quartizo-[0-9a-z]+-[0-9a-z]{6}$` (the pattern Quartizo generates) are
   reopened. Anything else in localStorage is discarded.
-- **Unsupported / not built**: Markdown notes, Kanban, Git review, agents,
+- **Unsupported / not built**: Kanban, Git review, agents,
   skills, crons, panel tabs, session controls.
 
 ## App Kit gaps (from `docs/appkit-notes.md` §10)

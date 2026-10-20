@@ -18,7 +18,11 @@ where ``lines`` = "\\n".join(["kirocrew-proxy-principal-v1", issuedAt, METHOD,
 target, sha256(body), encoded_claim]).
 
 Only ``GET /health`` is unsigned (the gateway probes it directly). Every other
-request must carry both valid headers, or it is refused before routing.
+request must carry both valid headers, or it is refused before routing, and
+every route is dashboard-owner only (``owner-session`` principal).
+
+Workspace registry state lives in ``<KIROCREW_HOME>/apps/<KIROCREW_APP_NAME>/data``
+(the gateway injects both; ``manager.py::app_data_dir`` in 0.10.0rc4).
 """
 from __future__ import annotations
 
@@ -33,6 +37,14 @@ import threading
 import time
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+# The gateway runs this file with `python -I`, which leaves the script's own
+# directory off sys.path; put it back (first) so the sibling modules load.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from workspace import ApiError, Registry  # noqa: E402
 
 APP_NAME = "quartizo"
 APP_VERSION = "0.1.0"
@@ -202,6 +214,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_body()
         if body is None:
             return
+        self._body = body
         if not self._secret:
             # Fail closed: without a secret no request can be authenticated.
             self._json(503, {"error": "proxy secret not configured", "code": "proxy_secret_missing"})
@@ -224,20 +237,66 @@ class Handler(BaseHTTPRequestHandler):
         self._route(principal)
 
     def _route(self, principal: Principal) -> None:
-        path = self.path.split("?", 1)[0]
-        if self.command == "GET" and path == "/api/status":
-            # Dashboard-owner only: agents, app tokens and unclassified callers
-            # get nothing from this route.
-            if principal.kind != "owner-session":
-                self._json(403, {"error": "owner session required", "code": "owner_session_required"})
-                return
-            self._json(200, {
+        # Dashboard-owner only: agents, app tokens and unclassified callers get
+        # nothing from any route.
+        if principal.kind != "owner-session":
+            self._json(403, {"error": "owner session required", "code": "owner_session_required"})
+            return
+        split = urlsplit(self.path)
+        parts = split.path.split("/")[1:]  # ["api", ...]
+        try:
+            query = parse_qs(split.query, keep_blank_values=True, strict_parsing=False,
+                             max_num_fields=20)
+        except ValueError:
+            self._json(400, {"error": "bad query string", "code": "bad_query"})
+            return
+        try:
+            result = self._handle(principal, parts, query)
+        except ApiError as err:
+            self._json(err.status, err.body())
+            return
+        if result is None:
+            self._json(404, {"error": "not found"})
+        else:
+            self._json(*result)
+
+    def _handle(self, principal: Principal, parts: list[str], query: dict) -> tuple[int, dict] | None:
+        method = self.command
+        registry: Registry = self.server.registry  # type: ignore[attr-defined]
+        if parts == ["api", "status"] and method == "GET":
+            return 200, {
                 "app": APP_NAME,
                 "version": APP_VERSION,
                 "principal": {"kind": principal.kind, "ownerId": principal.owner_id},
-            })
-            return
-        self._json(404, {"error": "not found"})
+            }
+        if parts == ["api", "workspaces"]:
+            if method == "GET":
+                return 200, {"workspaces": [w.to_json() for w in registry.list()]}
+            if method == "POST":
+                body = self._json_body()
+                return 201, {"workspace": registry.register(body.get("path"), body.get("name")).to_json()}
+            return None
+        if len(parts) >= 3 and parts[:2] == ["api", "workspaces"]:
+            ws_id = _parse_id(parts[2])
+            if ws_id is None:
+                return None
+            if len(parts) == 3:
+                if method == "GET":
+                    return 200, {"workspace": registry.get(ws_id).to_json()}
+                if method == "DELETE":
+                    registry.unregister(ws_id)
+                    return 200, {"ok": True}
+            return None
+        return None
+
+    def _json_body(self) -> dict:
+        try:
+            data = json.loads(self._body or b"{}")
+        except (ValueError, UnicodeDecodeError):
+            raise ApiError(400, "bad_json", "request body must be JSON") from None
+        if not isinstance(data, dict):
+            raise ApiError(400, "bad_json", "request body must be a JSON object")
+        return data
 
     def _read_body(self) -> bytes | None:
         if self.headers.get("Transfer-Encoding"):
@@ -274,6 +333,10 @@ class Handler(BaseHTTPRequestHandler):
         sys.stderr.write(f"{APP_NAME}: {command} {path} {status}\n")
 
 
+def _parse_id(raw: str) -> int | None:
+    return int(raw) if raw.isascii() and raw.isdigit() and len(raw) <= 12 else None
+
+
 class Server(ThreadingHTTPServer):
     # Upstream scaffold note: on Windows SO_REUSEADDR would let a second copy
     # bind a live port; the gateway detects collisions by a failed bind.
@@ -281,10 +344,21 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
-def make_server(port: int, secret: str) -> Server:
+def kirocrew_home() -> Path:
+    return Path(os.environ.get("KIROCREW_HOME") or os.path.expanduser("~/.kiro/crew"))
+
+
+def data_dir() -> Path:
+    """``<KIROCREW_HOME>/apps/<app>/data``, the dir installs preserve across updates."""
+    name = os.environ.get("KIROCREW_APP_NAME") or APP_NAME
+    return kirocrew_home() / "apps" / name / "data"
+
+
+def make_server(port: int, secret: str, registry: Registry) -> Server:
     server = Server(("127.0.0.1", port), Handler)
     server.proxy_secret = secret  # type: ignore[attr-defined]
     server.replay_cache = ReplayCache()  # type: ignore[attr-defined]
+    server.registry = registry  # type: ignore[attr-defined]
     return server
 
 
@@ -293,7 +367,8 @@ def main() -> None:
     secret = os.environ.get(SECRET_ENV, "")
     if not secret:
         sys.stderr.write(f"{APP_NAME}: {SECRET_ENV} not set; all /api routes will refuse (503)\n")
-    server = make_server(port, secret)
+    registry = Registry(data_dir(), protected=(str(kirocrew_home()),))
+    server = make_server(port, secret, registry)
     sys.stderr.write(f"{APP_NAME} backend on 127.0.0.1:{server.server_address[1]}\n")
     server.serve_forever()
 

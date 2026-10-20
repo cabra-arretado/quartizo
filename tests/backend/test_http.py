@@ -7,6 +7,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 
@@ -21,15 +22,20 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _start(secret: str | None):
+def _start(secret: str | None, home: str | None = None):
+    """Start the backend; its KIROCREW_HOME is *home* or a fresh temp dir, never the real one."""
     port = _free_port()
     env = {k: v for k, v in os.environ.items() if k != "KIROCREW_PROXY_SECRET"}
     env["PORT"] = str(port)
+    tmp = None if home else tempfile.TemporaryDirectory(prefix="quartizo-home-")
+    env["KIROCREW_HOME"] = home or tmp.name
+    env["KIROCREW_APP_NAME"] = "quartizo"
     if secret is not None:
         env["KIROCREW_PROXY_SECRET"] = secret
     proc = subprocess.Popen([sys.executable, "-I", str(SERVER_PY)], env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     deadline = time.time() + 10
+    proc.tmp_home = tmp  # removed when the process object is collected
     while time.time() < deadline:
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.2):
