@@ -31,6 +31,16 @@ stays at version 0.1.0. License: TBD.
   consolidated threat model, compatibility matrix, install docs and
   dependency audit.
 
+### Fixed during M6 (found by macOS CI)
+
+- `ui/src/agents.ts` renamed `agentsModel.ts`: it clashed with `Agents.tsx` on
+  case-insensitive filesystems.
+- Backend start no longer stalls on a reverse-DNS lookup in
+  `HTTPServer.server_bind`.
+- Git runner on macOS: `RLIMIT_DATA` is applied on Linux only (macOS rejects
+  it), and the real git behind the `/usr/bin/git` Xcode shim is found with
+  `xcrun --find git` (the shim cannot run under `RLIMIT_NPROC=0`).
+
 ### Migration notes
 
 - The backend keeps its data in `quartizo.sqlite3` under

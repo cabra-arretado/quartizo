@@ -11,7 +11,7 @@ kirocrew gateway; "tests" means unit/HTTP tests with no gateway.
 |---|---|---|
 | **KiroCrew** | **0.10.0rc4** | Verified live (installed wheel, gateway on `127.0.0.1:5476`, app trusted and enabled). No other version has been run; `app.json` sets no `minKiroCrewVersion`. Source pin: `f62ab4fd` (after v0.9.0) |
 | **OS** | Ubuntu 26.04.1 LTS, x86_64 (Linux 7.0) | Verified live and in tests. |
-| | macOS | CI matrix (`macos-latest`), tests only; the `renameat2` fallback path is what runs there. Not run live. Results are in the CI history, not recorded here |
+| | macOS | CI only (`macos-latest`, Apple Silicon, Python 3.12 and 3.13, Node 22): full suite and the `ui/dist` drift check pass (run 39473401789, 12 tests skipped for Linux-only behaviour, e.g. `renameat2`, the `RLIMIT_DATA` bombs, non-UTF-8 file names). The `renameat2` fallback path is what runs there. Not run live against a gateway |
 | | Windows | Unsupported (POSIX `dir_fd`/`openat` backend); not in CI |
 | **Python** | 3.12.13 | The gateway's own venv ran the backend live. 3.12 and 3.13 are in the CI matrix. 3.14.4 ran the suite locally. The backend is stdlib-only; `pyproject.toml` targets 3.10+ for lint, but 3.10/3.11 are not tested |
 | **Node** | 22 | CI (`npm ci`, typecheck, tests, build, `ui/dist` drift check). Package needs 22.12+ |
