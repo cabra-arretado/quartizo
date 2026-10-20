@@ -13,7 +13,7 @@ from unittest import mock
 
 from tests.backend.signing import load_server
 from tests.backend.signing import principal_header, proxy_header
-from tests.backend.test_http import SECRET, _request, _start
+from tests.backend.test_http import SECRET, _request, _start, _stop
 from tests.backend.test_workspace import signed_json
 
 srv = load_server()
@@ -407,6 +407,7 @@ class TaskHttpTests(unittest.TestCase):
         cls.vault2.mkdir()
         cls.vault2.chmod(0o755)
         cls.proc, cls.port = _start(SECRET, home=str(root / "crew"))
+        cls.addClassCleanup(_stop, cls.proc)
         status, body = signed_json(cls.port, "POST", "/api/workspaces", {"path": str(cls.vault)})
         assert status == 201, body
         cls.ws = body["workspace"]
@@ -414,8 +415,6 @@ class TaskHttpTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate()
-        cls.proc.communicate(timeout=5)
         cls.tmp.cleanup()
 
     def call(self, method, target, payload=None, **kw):

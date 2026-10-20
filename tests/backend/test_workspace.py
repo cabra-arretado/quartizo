@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.backend.signing import load_server, principal_header, proxy_header
-from tests.backend.test_http import SECRET, _request, _start
+from tests.backend.test_http import SECRET, _request, _start, _stop
 
 srv = load_server()
 import db  # noqa: E402  (importable once server.py has put backend/ on sys.path)
@@ -342,11 +342,10 @@ class RegistryHttpTests(unittest.TestCase):
         cls.vault = root / "vault"
         cls.vault.mkdir()
         cls.proc, cls.port = _start(SECRET, home=str(root / "crew"))
+        cls.addClassCleanup(_stop, cls.proc)
 
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate()
-        cls.proc.communicate(timeout=5)
         cls.tmp.cleanup()
 
     def test_register_list_unregister_round_trip(self):

@@ -24,6 +24,7 @@ Residual risks are documented in docs/threat-model.md. POSIX only (needs
 from __future__ import annotations
 
 import errno
+import grp
 import os
 import pwd
 import sqlite3
@@ -265,13 +266,33 @@ def _overlaps(a: str, b: str) -> bool:
     return (ia is not None and ia in _ancestor_idents(b)) or (ib is not None and ib in _ancestor_idents(a))
 
 
+def _private_group(gid: int) -> bool:
+    """Whether *gid* is this user's own user-private group (Ubuntu: umask 002,
+    group named like the user, nobody else in it)."""
+    if gid != os.getgid():
+        return False
+    try:
+        user = pwd.getpwuid(os.getuid()).pw_name
+        group = grp.getgrgid(gid)
+    except KeyError:
+        return False
+    return group.gr_name == user and all(m == user for m in group.gr_mem)
+
+
+def writable_by_others(st: os.stat_result) -> bool:
+    """World-writable, or group-writable by a group other than a private one."""
+    if st.st_mode & 0o002:
+        return True
+    return bool(st.st_mode & 0o020) and not _private_group(st.st_gid)
+
+
 def canonical_root(raw: object, protected: tuple[str, ...], noun: str = "workspace") -> str:
     """The root policy shared by workspaces and Git repos: realpath, or raise 400.
 
     Refused: non-absolute, NUL, missing, not a directory, ``/``, the home
     directory itself, ``/proc`` ``/sys`` ``/dev``, anything overlapping a
     *protected* directory (KiroCrew home, the app data dir), not owned by this
-    uid, or group/world-writable.
+    uid, world-writable, or group-writable by a shared (non user-private) group.
     """
     if not isinstance(raw, str) or not raw.strip():
         raise ApiError(400, "bad_root", "path must be a non-empty string")
@@ -302,9 +323,9 @@ def canonical_root(raw: object, protected: tuple[str, ...], noun: str = "workspa
             raise ApiError(400, "root_refused", f"{noun} overlaps KiroCrew or Quartizo data")
     if st.st_uid != os.getuid():
         raise ApiError(400, "root_not_owned", "the folder must belong to you")
-    if st.st_mode & 0o022:
+    if writable_by_others(st):
         raise ApiError(400, "root_writable_by_others",
-                       "the folder is group- or world-writable; run `chmod go-w` on it first")
+                       "the folder is world-writable or writable by a shared group; run `chmod go-w` on it first")
     return real
 
 

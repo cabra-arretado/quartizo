@@ -3,6 +3,7 @@ root ownership/mode, read-only notes, hard-link aliases, body limits,
 connection cap and bounded directory scans."""
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import socket
@@ -11,10 +12,11 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from tests.backend.signing import load_server, proxy_header
-from tests.backend.test_http import SECRET, _start
+from tests.backend.test_http import SECRET, _start, _stop
 from tests.backend.test_notes import sha
 from tests.backend.test_workspace import signed_json
 
@@ -166,12 +168,37 @@ class RootPolicyTests(Tree):
         self.registry = Registry(self.tmp / "crew" / "apps" / "quartizo" / "data", protected=(str(self.tmp / "crew"),))
 
     def test_group_or_world_writable_root_refused(self):
-        for mode in (0o775, 0o757, 0o777, 0o1777):
+        for mode in (0o757, 0o777, 0o1777):
             with self.subTest(mode=oct(mode)):
                 os.chmod(self.root, mode)
                 self.refused(self.registry.register, self.r, code="root_writable_by_others")
         os.chmod(self.root, 0o750)
         self.assertEqual(self.registry.register(self.r).path, self.r)
+
+    def _with_groups(self, name, members, *, gid=None):
+        gid = os.stat(self.root).st_gid if gid is None else gid
+        stack = contextlib.ExitStack()
+        for p in (mock.patch.object(wsmod.os, "getgid", return_value=gid),
+                  mock.patch.object(wsmod.pwd, "getpwuid", return_value=SimpleNamespace(pw_name="felipe", pw_dir=os.path.expanduser("~"))),
+                  mock.patch.object(wsmod.grp, "getgrgid",
+                                    return_value=SimpleNamespace(gr_name=name, gr_mem=members))):
+            stack.enter_context(p)
+        return stack
+
+    def test_group_writable_root_allowed_only_for_a_private_group(self):
+        os.chmod(self.root, 0o775)
+        with self._with_groups("devs", []):
+            self.refused(self.registry.register, self.r, code="root_writable_by_others")
+        with self._with_groups("felipe", ["mallory"]):
+            self.refused(self.registry.register, self.r, code="root_writable_by_others")
+        with self._with_groups("felipe", [], gid=os.stat(self.root).st_gid + 1):
+            self.refused(self.registry.register, self.r, code="root_writable_by_others")
+        os.chmod(self.root, 0o777)
+        with self._with_groups("felipe", []):
+            self.refused(self.registry.register, self.r, code="root_writable_by_others")
+        os.chmod(self.root, 0o775)
+        with self._with_groups("felipe", []):
+            self.assertEqual(self.registry.register(self.r).path, self.r)
 
     def test_root_owned_by_someone_else_refused(self):
         with mock.patch.object(wsmod.os, "getuid", return_value=os.getuid() + 1):
@@ -237,14 +264,13 @@ class HttpHardeningTests(unittest.TestCase):
         cls.vault = base / "vault"
         cls.vault.mkdir()
         cls.proc, cls.port = _start(SECRET, home=str(base / "crew"))
+        cls.addClassCleanup(_stop, cls.proc)
         status, body = signed_json(cls.port, "POST", "/api/workspaces", {"path": str(cls.vault)})
         assert status == 201, body
         cls.base = f"/api/workspaces/{body['workspace']['id']}"
 
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate()
-        cls.proc.communicate(timeout=5)
         for p in cls.vault.rglob("*"):
             if p.is_dir():
                 os.chmod(p, 0o755)

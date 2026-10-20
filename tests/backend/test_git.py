@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import hashlib
 import os
+import pwd
 import shutil
+import signal
 import stat
 import subprocess
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from tests.backend.signing import load_server
@@ -61,8 +64,15 @@ class GitTree(unittest.TestCase):
                     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.invalid",
                     "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.invalid",
                     **(env or {})}
-        res = subprocess.run([GIT, *args], cwd=cwd, env=full_env, capture_output=True,
-                             stdin=subprocess.DEVNULL, timeout=30)
+        proc = subprocess.Popen([GIT, *args], cwd=cwd, env=full_env, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, start_new_session=True)
+        try:
+            out, err = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
+            raise
+        res = subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
         if check and res.returncode != 0:
             raise AssertionError(f"git {args} failed: {res.stderr.decode()}")
         return res
@@ -193,11 +203,48 @@ class RegistryPolicyTests(GitTree):
 
     def test_not_owned_and_writable_by_others_refused(self):
         root = self.make_repo()
-        root.chmod(0o775)
+        root.chmod(0o757)
         self.refused(self.register, root, status=400, code="root_writable_by_others")
         root.chmod(0o755)
         with mock.patch.object(workspace.os, "getuid", return_value=os.getuid() + 1):
             self.refused(self.register, root, status=400, code="root_not_owned")
+
+    def _group(self, name, members):
+        return mock.patch.object(workspace.grp, "getgrgid",
+                                 return_value=SimpleNamespace(gr_name=name, gr_members=None, gr_mem=members))
+
+    def test_private_group_writable_root_allowed_shared_group_refused(self):
+        root = self.make_repo()
+        root.chmod(0o775)
+        gid = root.stat().st_gid
+        me = SimpleNamespace(pw_name="felipe", pw_dir=pwd.getpwuid(os.getuid()).pw_dir)
+        with mock.patch.object(workspace.os, "getgid", return_value=gid), \
+                mock.patch.object(workspace.pwd, "getpwuid", return_value=me):
+            with self._group("felipe", []):
+                self.assertEqual(self.register(root).path, str(root))
+                self.store.status(self.store.list()[0].id)  # the per-call check allows it too
+                self.store.unregister(self.store.list()[0].id)
+            with self._group("felipe", ["felipe"]):
+                self.register(root)
+                self.store.unregister(self.store.list()[0].id)
+            # Shared group: other members, or a name that is not the user's.
+            with self._group("felipe", ["mallory"]):
+                self.refused(self.register, root, status=400, code="root_writable_by_others")
+            with self._group("devs", []):
+                self.refused(self.register, root, status=400, code="root_writable_by_others")
+            # Not the process's own group (a group the user is merely a member of).
+            with self._group("felipe", []), mock.patch.object(workspace.os, "getgid", return_value=gid + 1):
+                self.refused(self.register, root, status=400, code="root_writable_by_others")
+            # World-writable stays refused, private group or not.
+            root.chmod(0o777)
+            with self._group("felipe", []):
+                self.refused(self.register, root, status=400, code="root_writable_by_others")
+            # Registered while private, then the group gains a member: the per-call check refuses.
+            root.chmod(0o775)
+            with self._group("felipe", []):
+                repo = self.register(root)
+            with self._group("felipe", ["mallory"]):
+                self.refused(self.store.status, repo.id, status=409, code="root_writable_by_others")
 
     def test_must_be_the_work_tree_top_level(self):
         plain = self.tmp / "plain"
@@ -523,6 +570,24 @@ class InjectionTests(GitTree):
         # `.github` is a directory: the exact-path index lookup finds nothing, so no diff of its files.
         self.refused(self.store.diff, self.repo.id, ".github", "worktree", status=404, code="not_changed")
 
+    def test_colon_in_parent_path_does_not_allow_discovery_above_root(self):
+        outer = self.tmp / "a:b"
+        outer.mkdir()
+        outer.chmod(0o755)
+        self.git(outer, "init", "-q", "-b", "main")
+        inner = outer / "plain"
+        inner.mkdir()
+        inner.chmod(0o755)
+        # Plain `git rev-parse` in a non-repo child finds the parent repo...
+        self.assertEqual(self.git(inner, "rev-parse", "--show-toplevel").stdout.strip(), str(outer).encode())
+        # ...but a work-tree call with the explicit git dir does not.
+        res = self.runner.run(str(inner), ["rev-parse", "--show-toplevel"])
+        self.assertNotEqual(res.returncode, 0)
+        self.assertIn(f"--git-dir={inner}/.git", self.runner.argv(str(inner), ["status"], work_tree=True))
+        # A repository whose own path has ':' is refused at registration.
+        repo = self.make_repo("c:d")
+        self.refused(self.register, repo, status=400, code="root_refused")
+
     def test_argv_shape(self):
         argv = self.runner.argv(str(self.root), ["status"], work_tree=True)
         i = argv.index(GIT)
@@ -644,6 +709,45 @@ class CapsTests(GitTree):
         self.assertIn("+/etc/passwd", res["diff"])
         self.assertNotIn("root:", res["diff"])  # the link target is shown, never followed
 
+    def _bomb_repo(self):
+        root = self.make_repo()
+        (root / "a.txt").write_text("two\n")
+        return root, self.register(root)
+
+    def assert_fails_fast(self, repo, *, limit=3.0):
+        for call in (lambda: self.store.status(repo.id), lambda: self.store.diff(repo.id, "a.txt", "worktree")):
+            t0 = time.monotonic()
+            with self.assertRaises(ApiError) as ctx:
+                call()
+            self.assertLess(time.monotonic() - t0, limit)
+            self.assertIn(ctx.exception.code, ("git_failed", "git_out_of_memory"))
+
+    def test_attributes_file_bomb_via_config(self):
+        root, repo = self._bomb_repo()
+        self.git(root, "config", "core.attributesFile", "/dev/zero")
+        self.assert_fails_fast(repo)
+
+    def test_attributes_file_bomb_via_info_symlink(self):
+        root, repo = self._bomb_repo()
+        info = root / ".git" / "info"
+        info.mkdir(exist_ok=True)
+        (info / "attributes").unlink(missing_ok=True)
+        (info / "attributes").symlink_to("/dev/zero")
+        self.assert_fails_fast(repo)
+
+    def test_sandbox_unavailable_fails_closed(self):
+        # Simulates root / CAP_SYS_RESOURCE: the wrapper without the RLIMIT_NPROC line, so the
+        # probe fork succeeds and git must not run.
+        root, repo = self._bomb_repo()
+        weak = gitrepo._NO_SPAWN.replace("resource.setrlimit(resource.RLIMIT_NPROC,(0,0))\n", "")
+        self.assertNotEqual(weak, gitrepo._NO_SPAWN)
+        with mock.patch.object(gitrepo, "_NO_SPAWN", weak):
+            self.runner._version = None  # the version probe goes through the wrapper too
+            err = self.refused(self.store.status, repo.id, status=500, code="git_sandbox_unavailable")
+            self.assertNotIn(str(root), err.message)
+            self.refused(self.register, self.make_repo("other"), status=500, code="git_sandbox_unavailable")
+        self.assertIn("+two", self.store.diff(repo.id, "a.txt", "worktree")["diff"])  # intact otherwise
+
     def test_git_missing_or_too_old(self):
         root = self.make_repo()
         runner = gitrepo.GitRunner(home=self.runner.home, git=str(self.tmp / "no-such-git"))
@@ -736,6 +840,18 @@ class LayoutTests(GitTree):
         self.assertEqual((info["gitDir"], info["head"]["branch"]), ("linked-worktree", "feature"))
         self.assertIn("+feature edit", self.store.diff(repo.id, "a.txt", "worktree")["diff"])
         self.assertEqual(self.store.info(self.register(main).id)["gitDir"], "directory")
+
+    def test_submodule_checkout_as_a_registered_root(self):
+        sub = self.make_repo("subsrc2", files={"s.txt": "s\n"})
+        sup = self.make_repo("super2", files={"top.txt": "t\n"})
+        self.git(sup, "-c", "protocol.file.allow=always", "submodule", "-q", "add", str(sub), "sm")
+        sm = sup / "sm"
+        sm.chmod(0o755)
+        self.assertTrue((sm / ".git").is_file())
+        (sm / "s.txt").write_text("changed\n")
+        repo = self.register(sm)
+        self.assertEqual(self.store.info(repo.id)["gitDir"], "gitfile")
+        self.assertIn("+changed", self.store.diff(repo.id, "s.txt", "worktree")["diff"])
 
     def test_submodule_shown_not_descended(self):
         sub = self.make_repo("subsrc", files={"s.txt": "s\n"})

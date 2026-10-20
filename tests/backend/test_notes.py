@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from tests.backend.signing import load_server
-from tests.backend.test_http import SECRET, _start
+from tests.backend.test_http import SECRET, _start, _stop
 from tests.backend.test_workspace import signed_json
 
 srv = load_server()
@@ -318,14 +318,13 @@ class NotesHttpTests(unittest.TestCase):
         cls.vault = base / "vault"
         cls.vault.mkdir()
         cls.proc, cls.port = _start(SECRET, home=str(base / "crew"))
+        cls.addClassCleanup(_stop, cls.proc)
         status, body = signed_json(cls.port, "POST", "/api/workspaces", {"path": str(cls.vault)})
         assert status == 201, body
         cls.base = f"/api/workspaces/{body['workspace']['id']}"
 
     @classmethod
     def tearDownClass(cls):
-        cls.proc.terminate()
-        cls.proc.communicate(timeout=5)
         cls.tmp.cleanup()
 
     def call(self, method, action, payload=None, query=""):

@@ -18,7 +18,8 @@ repo can write them):
    ``cwd=<root>``, a timeout, an output cap (read through pipes, then the
    process group is killed), and a minimal environment: no inherited ``GIT_*``,
    no system or global config, ``HOME`` an empty app-owned directory,
-   ``GIT_CEILING_DIRECTORIES`` so discovery never walks above the root.
+   ``GIT_CEILING_DIRECTORIES`` and, on every work-tree call, an explicit
+   ``--git-dir=<root>/.git`` so discovery never walks above the root.
 2. Hardening ``-c`` options on every call (``HARDENING``), ``--no-pager``,
    ``--no-optional-locks`` and ``GIT_OPTIONAL_LOCKS=0`` (nothing is written:
    no index refresh), ``--work-tree=<root>`` (a hostile ``core.worktree``
@@ -34,7 +35,10 @@ repo can write them):
    thread, git attempts fails. This closes what the layers above cannot: the
    race where a driver is added to the config between the enumeration in (3)
    and the real call, and any command-running config not known here. Threaded
-   index preload/reading is turned off so git does not need threads.
+   index preload/reading is turned off so git does not need threads. The same
+   trampoline caps git's heap (``RLIMIT_DATA``, 512 MiB) and fails closed: if
+   it can still fork (root, ``CAP_SYS_RESOURCE``) git is not run
+   (``git_sandbox_unavailable``).
 
 Diffs use plumbing (``diff-files``, ``diff-index``), which reads no diff UI
 config (no textconv, no external diff, no color), plus ``--no-ext-diff
@@ -67,6 +71,7 @@ from workspace import (
     open_file_at,
     open_parent,
     open_root,
+    writable_by_others,
     validate_relpath,
 )
 
@@ -109,9 +114,26 @@ EMPTY_TREE = {
 }
 
 # Runs as `python -I -S -c <this> <git> <args...>`: no site, no env, no cwd on
-# sys.path. The limit is inherited by git, which then cannot fork or spawn threads.
-_NO_SPAWN = ("import os,resource,sys;"
-             "resource.setrlimit(resource.RLIMIT_NPROC,(0,0));"
+# sys.path. The limits are inherited by git: it cannot fork or spawn threads,
+# and its heap (brk and anonymous mmap; file mmaps such as packs are not
+# counted) is capped. RLIMIT_NPROC does not bind root or CAP_SYS_RESOURCE, so
+# the wrapper then probes with a fork and, if one succeeds, does not run git.
+GIT_DATA_LIMIT = 512 << 20
+SANDBOX_EXIT = 97
+SANDBOX_MARK = b"quartizo-git-sandbox-unavailable"
+_LIMITS = ("import os,resource,sys\n"
+           "resource.setrlimit(resource.RLIMIT_NPROC,(0,0))\n"
+           f"resource.setrlimit(resource.RLIMIT_DATA,({GIT_DATA_LIMIT},{GIT_DATA_LIMIT}))\n")
+_NO_SPAWN = (_LIMITS +
+             "try:\n"
+             " pid=os.fork()\n"
+             "except OSError:\n"
+             " pid=-1\n"
+             "if pid==0:os._exit(0)\n"
+             "if pid>0:\n"
+             " os.waitpid(pid,0)\n"
+             f" sys.stderr.write('{SANDBOX_MARK.decode()}\\n')\n"
+             f" os._exit({SANDBOX_EXIT})\n"
              "os.execv(sys.argv[1],sys.argv[1:])")
 
 _OID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
@@ -203,6 +225,9 @@ class GitRunner:
             raise ApiError(503, "git_unavailable", "git is not installed (or not on PATH)")
         cmd = [self.git, *HARDENING]
         if work_tree:
+            # An explicit git dir: no discovery above the root, whatever the
+            # path looks like (GIT_CEILING_DIRECTORIES splits on ':').
+            cmd.append(f"--git-dir={root}/.git")
             cmd.append(f"--work-tree={root}")
         cmd.extend(args)
         if self.no_spawn:
@@ -213,6 +238,8 @@ class GitRunner:
         with self._lock:
             if self._version is None:
                 res = self._exec(root, ["--version"], limit=4096, work_tree=False, config={})
+                if _sandbox_failed(res):
+                    raise _sandbox_error()
                 m = _VERSION_RE.match(res.stdout)
                 if res.returncode != 0 or not m:
                     raise ApiError(503, "git_unavailable", "could not run git --version")
@@ -285,9 +312,22 @@ def _kill(proc: subprocess.Popen) -> None:
         pass
 
 
+def _sandbox_failed(res: GitResult) -> bool:
+    return res.returncode == SANDBOX_EXIT and SANDBOX_MARK in res.stderr
+
+
+def _sandbox_error() -> ApiError:
+    return ApiError(500, "git_sandbox_unavailable",
+                    "the process limit that confines git is not enforced here (running as root?); git is not run")
+
+
 def _failure(res: GitResult, what: str) -> ApiError:
     """Map a failed git call. Never echoes git's stderr (it names paths)."""
+    if _sandbox_failed(res):
+        return _sandbox_error()
     err = res.stderr.lower()
+    if b"out of memory" in err or b"malloc failed" in err or b"cannot allocate memory" in err:
+        return ApiError(500, "git_out_of_memory", f"git {what} hit the memory limit")
     if b"not a git repository" in err or b"must be run in a work tree" in err:
         return ApiError(409, "not_a_repo", "this folder is no longer a Git work tree")
     if b"dubious ownership" in err:
@@ -475,6 +515,9 @@ class RepoStore:
                 raise ApiError(400, "not_repo_toplevel",
                                "the folder is inside a repository; register the repository's top-level folder") from None
             raise ApiError(400, "not_a_repo", "the folder is not a Git work tree (it has no .git)") from None
+        if ":" in real:
+            # Discovery here relies on GIT_CEILING_DIRECTORIES, which splits on ':'.
+            raise ApiError(400, "root_refused", "a repository path cannot contain ':'")
         res = self.runner.run(real, ["rev-parse", "--show-toplevel"], limit=8192, work_tree=False)
         if res.returncode != 0:
             raise ApiError(400, "not_a_repo", "the folder is not a Git work tree (bare repos are not supported)")
@@ -509,9 +552,9 @@ class RepoStore:
             st = os.fstat(fd)
             if st.st_uid != os.getuid():
                 raise ApiError(403, "not_owned", "the repository folder belongs to another user")
-            if st.st_mode & 0o022:
+            if writable_by_others(st):
                 raise ApiError(409, "root_writable_by_others",
-                               "the repository folder is group- or world-writable; run `chmod go-w` on it")
+                               "the repository folder is world-writable or writable by a shared group; run `chmod go-w` on it")
             try:
                 gst = os.stat(".git", dir_fd=fd, follow_symlinks=False)
             except FileNotFoundError:

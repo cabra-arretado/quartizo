@@ -22,6 +22,16 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _stop(proc) -> None:
+    """Terminate a server started by _start (kill it if it ignores SIGTERM)."""
+    proc.terminate()
+    try:
+        proc.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+
+
 def _start(secret: str | None, home: str | None = None):
     """Start the backend; its KIROCREW_HOME is *home* or a fresh temp dir, never the real one."""
     port = _free_port()
@@ -30,6 +40,7 @@ def _start(secret: str | None, home: str | None = None):
     tmp = None if home else tempfile.TemporaryDirectory(prefix="quartizo-home-")
     env["KIROCREW_HOME"] = home or tmp.name
     env["KIROCREW_APP_NAME"] = "quartizo"
+    env["QUARTIZO_EXIT_WITH_PARENT"] = "1"  # never outlive a killed test run
     if secret is not None:
         env["KIROCREW_PROXY_SECRET"] = secret
     proc = subprocess.Popen([sys.executable, "-I", str(SERVER_PY)], env=env,

@@ -36,7 +36,7 @@ registration time. Refused:
 | Overlap with an already registered root, in either direction (409 `root_overlaps`) | One file, one workspace: no aliasing between roots |
 | Anything under `/proc`, `/sys` or `/dev` | Pseudo-filesystems, not notes |
 | A root not owned by the backend's uid (`root_not_owned`) | Another user could swap its contents or plant links under it |
-| A group- or world-writable root (`mode & 0o022`, `root_writable_by_others`) | Same: others could rename entries under us. Fix with `chmod go-w` |
+| A world-writable root (`mode & 0o002`), or a group-writable one unless the group is the user's **private group** (`root_writable_by_others`). Private means: `st_gid == getgid()`, the group's name equals the user's name, and `gr_mem` is empty or only the user. Ubuntu's default umask is 002 with such groups, so real directories are mode 775 | Others could rename entries under us. A private group has no other member, so group write is no wider than owner write. Anything else: `chmod go-w`. The rule is `workspace.writable_by_others`, used at registration and again on every Git call (`open_dir_at` itself checks only ownership, not mode) |
 
 Overlap is decided twice. First on canonical path strings with a separator
 boundary, so `/a/notes-private` is **not** inside `/a/notes`. Then by
@@ -265,13 +265,15 @@ symlink (`root_changed` otherwise), re-checks owner and mode, and re-checks
 | `subprocess.Popen` with an argv list, never a shell; `stdin=DEVNULL`; `cwd=<root>`; own process group | Shell injection; prompts; stray children survive a kill |
 | Fixed subcommands and flags built server-side. The page sends only an id, a path and an enum. Paths go after `--` as `:(literal)<path>` | Option injection (`--output=…`, `-c…`, leading `-`), pathspec magic and globs |
 | 10 s timeout, stdout cap read through the pipe (4 MiB status, 512 KiB diff, 256 KiB other), 16 KiB stderr; on either limit the process group is SIGKILLed | Hangs and memory exhaustion |
-| Environment built from scratch: `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_ATTR_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `GIT_NO_REPLACE_OBJECTS=1`, `LC_ALL=C`, `GIT_CEILING_DIRECTORIES=<parent of root>`, a minimal `PATH`. Nothing is inherited: no `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_PARAMETERS`, `SSH_AUTH_SOCK` | Inherited redirection, the user's global/system config (and its filters, e.g. git-lfs), network, discovery above the root |
+| Environment built from scratch: `GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_SYSTEM`/`GIT_CONFIG_GLOBAL=/dev/null`, `GIT_ATTR_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`, `GIT_ALLOW_PROTOCOL=none`, `GIT_NO_REPLACE_OBJECTS=1`, `LC_ALL=C`, `GIT_CEILING_DIRECTORIES=<parent of root>` (defence in depth: it splits on `:`), a minimal `PATH`. Nothing is inherited: no `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_PARAMETERS`, `SSH_AUTH_SOCK` | Inherited redirection, the user's global/system config (and its filters, e.g. git-lfs), network, discovery above the root |
 | `HOME` and `XDG_CONFIG_HOME` = an empty, app-owned `0700` dir (`<data>/git-home`). **Decision:** not the user's home. Global config is already off by `GIT_CONFIG_GLOBAL`; this also keeps `~`-relative lookups away from the user's dotfiles. Cost: personal settings (e.g. `core.quotePath`, aliases) are ignored, which is fine for fixed plumbing | Global config and attributes |
 | `-c core.fsmonitor=false -c core.hooksPath=/dev/null -c diff.external= -c core.pager=cat -c protocol.allow=never -c credential.helper= -c status.submoduleSummary=false -c submodule.recurse=false --no-pager --no-optional-locks`; diffs add `--no-ext-diff --no-textconv --no-color --ignore-submodules=dirty` | The named config keys. Command-line config wins over the repo's |
-| `--work-tree=<root>` | A hostile `core.worktree` (or `core.bare`) pointing git at another folder |
+| `--git-dir=<root>/.git --work-tree=<root>` on every work-tree call (`.git` may be a `gitdir:` file; git follows it; tested for worktrees and submodule checkouts). Roots whose path contains `:` are also refused at registration (`root_refused`) | A hostile `core.worktree` (or `core.bare`) pointing git at another folder; discovery walking above the root when a `:` in the path breaks `GIT_CEILING_DIRECTORIES` |
 | Plumbing for diffs (`diff-files`, `diff-index`) | Diff UI config: textconv, external diff, color, renames config |
 | Every `filter.<driver>` in the effective config is blanked through `GIT_CONFIG_COUNT` (`clean`, `smudge`, `process` empty; `required=false`). Over 64 drivers: 409 `too_many_filters` | **Clean filters run on read paths.** Measured on git 2.53: `git status` and `git diff-files` run `filter.<d>.clean` on a stat-dirty, same-size file, even with `GIT_OPTIONAL_LOCKS=0` and `--no-optional-locks` (those stop the index *write*, not the content compare). There is no flag that disables all filters, and attributes in `.git/info/attributes` override anything we could set, so the drivers are enumerated (`git config --null --name-only --list`) and neutralized by name. `GIT_CONFIG_COUNT` keeps key and value apart, so a driver name containing `=` cannot break the override |
 | **git may not start any process or thread.** It is exec'd through `python -I -S -c` that sets `RLIMIT_NPROC` to 0 first (soft and hard). Every `fork`/`clone` git attempts then fails with `EAGAIN`; threaded index preload/reading is turned off so git does not need threads | Everything the rows above do not: the **race** where an agent adds a filter driver between the enumeration call and the real call (or flips `includeIf.onbranch`), and any command-running config not known here. Measured: with the drivers *not* blanked, a hostile `required` clean filter makes git fail ("cannot create async thread"), it does not run |
+| **git's heap is capped** by the same trampoline: `RLIMIT_DATA` = 512 MiB (not `RLIMIT_AS`, so pack and index mmaps still work). An allocation past it fails (`git_failed`, or `git_out_of_memory`) | Memory bombs: `.git/info/attributes` symlinked to `/dev/zero`, `core.attributesFile=/dev/zero`, `status --find-renames` over a huge staged blob. Tested: both attribute bombs fail in under 3 s |
+| **Fail closed if the limit does not bind.** After setting the limits the trampoline tries `fork()`. If that succeeds (root, `CAP_SYS_RESOURCE`) the child exits at once and the trampoline exits 97 without running git; the backend answers 500 `git_sandbox_unavailable` | The no-spawn layer silently doing nothing when run as root. Tested by running the trampoline without the `RLIMIT_NPROC` line |
 
 Each layer is tested on its own: the hostile-config tests run every
 endpoint with the no-spawn limit off (flags and blanking alone) and with the
@@ -308,11 +310,13 @@ page (it names paths); failures map to stable codes.
   repository's index and objects against this work tree. Only the owner
   sees it, and git itself checks ownership (`safe.directory`).
 - **`RLIMIT_NPROC` is counted per user** (per user namespace on Linux 5.14+).
-  It does not apply to root or to processes with `CAP_SYS_RESOURCE` /
-  `CAP_SYS_ADMIN`; Quartizo is not meant to run as root. The trampoline adds
+  It does not bind root or processes with `CAP_SYS_RESOURCE` /
+  `CAP_SYS_ADMIN`; there Quartizo refuses to run git (500
+  `git_sandbox_unavailable`) rather than run it unconfined. The trampoline adds
   about 15 ms per git call (4-6 calls per request).
 - **Resource use inside git.** A huge repository can still make status
-  slow (bounded by the 10 s timeout) or use memory up to the 8 MiB file cap
-  per side for a diff; there is no memory rlimit.
+  slow (bounded by the 10 s timeout) or hit the 512 MiB `RLIMIT_DATA` heap cap
+  (git then fails with `git_failed`/`git_out_of_memory`). File mmaps (packs)
+  are not counted by that limit; the 10 s timeout and output caps bound the rest.
 - **Partial clones** show missing objects as 500 `git_failed`: lazy fetch
   is refused, by design.

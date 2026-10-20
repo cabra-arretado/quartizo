@@ -536,7 +536,21 @@ def make_server(port: int, secret: str, registry: Registry) -> Server:
     return server
 
 
+def _exit_with_parent() -> None:
+    """Opt-in (QUARTIZO_EXIT_WITH_PARENT=1, used by tests): exit when reparented."""
+    parent = os.getppid()
+
+    def watch() -> None:
+        while os.getppid() == parent:
+            time.sleep(1)
+        os._exit(0)
+
+    threading.Thread(target=watch, daemon=True).start()
+
+
 def main() -> None:
+    if os.environ.get("QUARTIZO_EXIT_WITH_PARENT") == "1":
+        _exit_with_parent()
     port = int(os.environ.get("PORT", "9100"))
     secret = os.environ.get(SECRET_ENV, "")
     if not secret:
