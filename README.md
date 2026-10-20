@@ -7,9 +7,10 @@ it is owned by the dashboard owner, not by the app, see
 [compatibility](docs/compatibility.md)) and a tiny Python
 backend that verifies the gateway's signed proxy requests.
 
-Built against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
-(after release v0.9.0). See [docs/compatibility.md](docs/compatibility.md) for
-what is verified and what is not.
+Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
+(after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
+gateway. See [docs/compatibility.md](docs/compatibility.md) for what was
+measured and what is not verified.
 
 **License: TBD.** No license has been chosen yet; there is intentionally no
 `LICENSE` file.
@@ -70,12 +71,18 @@ tests are contract tests for a future backend-mediated path and do not reflect
 the shipped UI.
 
 ```bash
-KIROCREW_GATEWAY_URL=http://127.0.0.1:<port> \
-KIROCREW_OWNER_TOKEN=<dashboard owner session token> \
-KIROCREW_APP_TOKEN=<quartizo app token> \
-KIROCREW_FOREIGN_SLOT=<a slot quartizo does not own> \
+KIROCREW_GATEWAY_URL=http://127.0.0.1:5476 \
+KIROCREW_APP_SECRET_FILE=$HOME/.kiro/crew/apps/quartizo/.app_secret \
 python3 -m unittest tests.integration.test_gateway -v
+# optional:
+#   KIROCREW_OWNER_TOKEN=<your dashboard session token>   (owner-cookie tests;
+#       export it yourself, the tests never read it from disk)
+#   KIROCREW_BACKEND_URL=http://127.0.0.1:<backend port>  (direct unsigned hit)
+#   KIROCREW_FOREIGN_SLOT=<a slot quartizo does not own>
 ```
+
+The tests exchange the app's own secret for fresh app tokens
+(`POST /api/apps/quartizo/token`) and never print them.
 
 ## Install into KiroCrew
 
@@ -88,7 +95,9 @@ kirocrew app install /absolute/path/to/quartizo        # copies + registers
 Third-party apps must be **trusted** before they can be enabled or run a
 backend: Dashboard -> Settings -> Security -> Third-party apps, and trust
 `quartizo` (stored as the JSON array `agent.apps_trusted`, e.g. `["quartizo"]`).
-No `kirocrew app trust` command exists at the pinned commit.
+No `kirocrew app trust` command exists (checked on 0.10.0rc4). Until trusted,
+`kirocrew app install` registers the app but warns "registration blocked by
+execution policy", and `kirocrew app enable quartizo` is refused.
 
 ```bash
 kirocrew app enable quartizo

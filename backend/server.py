@@ -3,7 +3,8 @@
 The gateway spawns this file (app.json ``backend.entryPoint``) with ``PORT`` and,
 when the app has a secret, ``KIROCREW_PROXY_SECRET`` in the environment. It
 forwards ``/apps/quartizo/api/<path>`` here as ``/api/<path>`` and signs every
-request. Signature format, pinned to kirodotdev/KiroCrew@f62ab4fd
+request. Signature format, read at kirodotdev/KiroCrew@f62ab4fd and rechecked
+unchanged against the installed kirocrew 0.10.0rc4
 (``src/kiro_crew/apps/proxy_auth.py`` and ``apps/routes.py::handle_app_api_proxy``):
 
     X-KiroCrew-Proxy: <unix-seconds>:<hex hmac_sha256(secret, "<ts>:<METHOD>:<target>:<hex sha256(body)>")>

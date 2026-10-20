@@ -2,7 +2,7 @@
  * Logic for the Quartizo-created chat session, kept free of React and of runtime SDK imports so
  * it can be tested with a mocked AppApi.
  *
- * Wire shapes (kirodotdev/KiroCrew@f62ab4fd):
+ * Wire shapes (kirodotdev/KiroCrew@f62ab4fd; rechecked against kirocrew 0.10.0rc4):
  *   POST /api/chat/slots {name, agent?} -> serialized slot row with `key`
  *     (dashboard/chat_api/slot_create.py; builtin design-critique reads `.key`)
  *   GET  /api/chat/slots/{key}?limit=N  -> 404 when missing (or, for app tokens, not owned)

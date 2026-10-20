@@ -2,13 +2,35 @@
 
 ## Pinned upstream
 
-- Repository: `kirodotdev/KiroCrew`
-- Commit: `f62ab4fdb2bb0e492cd99325c596ec9e738abb70` (`main`, 2026-10-20; newer than release `v0.9.0`)
-- Every upstream fact below was read at that commit. KiroCrew was **not**
-  installed or run while building this; no gateway was available.
-- `app.json` sets no `minKiroCrewVersion`: the upstream docs name no minimum
-  version for any feature used here, and `0.9.0` might predate the pinned
-  `main`. Set it once a release that includes the pinned commit is verified.
+- Written against `kirodotdev/KiroCrew` commit
+  `f62ab4fdb2bb0e492cd99325c596ec9e738abb70` (`main`, 2026-10-20; newer than
+  release `v0.9.0`). Upstream facts below were first read there.
+- **Checked against: `kirocrew 0.10.0rc4`**, installed as a wheel into
+  `~/.kiro/crew-venv` (wheel sha256 `cfc024eccf59c1aa3e9cbf0e403d94d65100795afb69f5958644c642c7c5c1f8`).
+  The wheel carries no git commit. Its bundled website reports
+  `buildId: 1.0.0-e9bfada` (`static/dist/build-id.json`), so the website was
+  probably built from short SHA `e9bfada`; that is not confirmed as the
+  package commit.
+- `app.json` sets no `minKiroCrewVersion`. 0.10.0rc4 is the only version run;
+  set it once a final release is verified.
+
+## Drift check against 0.10.0rc4 (2026-10-20)
+
+Compared the installed package source and bundled host assets with every
+assumption Quartizo makes. **No drift found; no code change was needed.**
+
+| Assumption | 0.10.0rc4 source | Result |
+|---|---|---|
+| `X-KiroCrew-Proxy` format, signed target `/api/<path>[?raw-query]` | `apps/proxy_auth.py`, `apps/routes.py::handle_app_api_proxy` (`raw_path_qs`) | Same. Also cross-checked: headers made by the installed `sign_proxy_principal_claim` and the installed signing formula verify in `backend/server.py` |
+| `X-KiroCrew-Principal` claim, kinds, domain tag, replay rules | `apps/proxy_auth.py`, `routes.py::_proxy_principal` | Same |
+| Manifest: `ui.entry`, `ui.pages[]`, `backend.{entryPoint,port,healthCheck,signedPrincipal}`, `permissions.api` | `apps/manifest.py` | Same; `kirocrew app install` accepted `app.json` |
+| Host import map (`HOST_MODULES`) | `static/dist/index.html` importmap | Identical 8 specifiers |
+| SDK exports used (`useAppApi`, `ChatEmbed`, `PageHeader`, `Card`, `CardTitle`, `Btn`) | `static/dist/vendor/kirocrew-app-sdk.mjs`, `kirocrew-ui.mjs` | All exported |
+| `ChatEmbed` props | bundled `App-*.js` | Same prop list (`slotKey, agent, placeholder, frameless, startAtBottom, onSend, aboveComposer, composerMaxHeight, onFileOpen, onArtifactOpen`) |
+| `useAppApi()` is a same-origin `fetch` plus `X-Session-Key`; errors are `AppApiError {status, body}` / `AppApiPermissionError`; `permissions.api` prefix matcher | bundled `App-*.js`, `apiError-*.js` | Same |
+| Slot create ownership from `request["app"]`; approve 403 body | `dashboard/chat_api/slot_create.py`, `slot_approval.py` | Same |
+| Token exchange `POST /api/apps/<name>/token` + `X-App-Secret` -> `{"token": ...}` | `dashboard/handlers/core.py::api_app_token` | Same (closes the "token-exchange response shape" gap) |
+| Scaffold Vite config | `apps/scaffold.py` | Same lib-mode shape |
 
 ## Issue acceptance status
 
@@ -16,8 +38,8 @@
 |---|---|
 | QTZ-001 manifest, routed page, Vite build with host externals | Met (build, typecheck, bundle-import test) |
 | QTZ-002 signed backend | Met (unit + real HTTP tests) |
-| QTZ-003 page creates a slot and mounts `ChatEmbed` with `onSend`; error states for `slot_not_found` / `session_approval_not_granted` | Met as code; not run in a real host |
-| **QTZ-003 slots stay app-owned** | **BLOCKED / UNMET.** At the pinned SHA, the page's `useAppApi()` client is a plain same-origin `fetch` that adds only `X-Session-Key` (`website/src/app-sdk/scopedApi.ts`). The gateway therefore authenticates it by the owner's `mc_token_<port>` cookie and sets `request["app"] = ""` (`dashboard/token_auth.py`). `POST /api/chat/slots` records app ownership only from `request["app"]` (`dashboard/chat_api/slot_create.py`, `deny_app_slot_session_access`). So the session the page creates is an **owner session with `_app == ""`**, called a "Quartizo-created session" here. Real app ownership would need a backend-mediated path, where the backend exchanges the app secret for an app token (`POST /api/apps/quartizo/token`) and creates and sends on the page's behalf. That path is unverified and not built. |
+| QTZ-003 page creates a slot and mounts `ChatEmbed` with `onSend`; error states for `slot_not_found` / `session_approval_not_granted` | Met as code; the page has not been rendered in a real host (app not yet trusted/enabled) |
+| QTZ-003 slot ownership | **accepted: owner-session default (user decision)**. Page-created slots are owner sessions, accepted for the MVP. Facts (read at f62ab4fd, rechecked unchanged in 0.10.0rc4): the page's `useAppApi()` client is a plain same-origin `fetch` that adds only `X-Session-Key`, so the gateway authenticates it by the owner's `mc_token_<port>` cookie and sets `request["app"] = ""` (`dashboard/token_auth.py`). `POST /api/chat/slots` records app ownership only from `request["app"]` (`dashboard/chat_api/slot_create.py`). So the session the page creates is an owner session with `app == ""`, called a "Quartizo-created session" here. App ownership would need a backend-mediated app-token path, which is not built. Measured on 0.10.0rc4: an app-token create returns a row with `app: "quartizo"`, `origin: "app"`. |
 
 ## Verified by tests
 
@@ -30,30 +52,75 @@
 | Built bundle imports only host import-map specifiers and has a default export | Vitest over `ui/dist/index.mjs` (skips before a build) | `ui/test/bundle.test.ts` |
 | `tsc --noEmit` and `vite build` pass | `npm run typecheck`, `npm run build` | — |
 
-## Not verified (no gateway available)
+## Measured against the real gateway (kirocrew 0.10.0rc4, 2026-10-20)
 
-The integration tests in `tests/integration/test_gateway.py` cover the points
-below. They **skip** unless `KIROCREW_GATEWAY_URL` and `KIROCREW_APP_TOKEN` are
-set, and have never run.
+Gateway started with `kirocrew gateway --no-open --no-tunnel` on
+`http://127.0.0.1:5476`. Trust settings were not changed.
 
-- **Slot ownership (app-token contract only)**: that `POST /api/chat/slots`
-  from an app token creates a slot the app owns, reopens it by key, and returns 404 `slot_not_found` for a
-  transcript it does not own.
-- **Tool approval approve/reject**: that `POST /api/chat/slots/{slot}/approve`
-  returns 403 `session_approval_not_granted` without the grant, and resolves a
-  pending request when it is granted. The resolution test also needs a pending
-  request (`KIROCREW_PENDING_SLOT`, `KIROCREW_PENDING_REQUEST_ID`).
-- **The page in a real host**: module loading, the `ChatEmbed` rendering, and
-  whether the SDK UI component props in `ui/src/kirocrew-sdk.d.ts` match.
-- **Who page requests run as** (see the BLOCKED row above). Read from source,
-  not observed. It follows that for page calls: (a) the session is an owner
-  session, not app-owned; (b) `permissions.api` is enforced only by the SDK's
-  client check; (c) Approve/Reject in the embed works without
-  `sessionApproval`. `OwnerCookieTests` in `tests/integration/test_gateway.py`
-  check (a) and (c) against a real gateway (they skip without
-  `KIROCREW_OWNER_TOKEN`). The other integration tests are **app-token contract
-  tests**. They describe the gateway's behaviour for an app-token caller and do
-  not reflect the shipped UI.
+| Step | Result |
+|---|---|
+| `npm run build`, then `kirocrew app install /home/felipe/Workspace/quartizo` | Installed `quartizo v0.1.0`, with the warning "registration blocked by execution policy: third-party app execution is disabled" (`agent.apps_trusted` is `[]`). `kirocrew app info`: `enabled: false`, approved grants `api: ["/api/chat", "/apps/quartizo/api"]` |
+| `kirocrew app enable quartizo` | **Refused**: "blocked by execution policy ... trust this app alone in Settings (agent.apps_trusted)". The backend therefore never ran |
+| `GET /apps/quartizo/api/status` via gateway (app token) | 403 `app_not_enabled`, refused by the gateway before the backend. **The signed proxy path is unverified** |
+| Backend `/health`, direct unsigned hit on the backend port | **Not run**: no backend process without enable |
+| Token exchange `POST /api/apps/quartizo/token` with the app's own `.app_secret` | 200 `{"token": ...}`, works while the app is installed but untrusted and disabled |
+
+`tests/integration/test_gateway.py`, run with `KIROCREW_GATEWAY_URL` and
+`KIROCREW_APP_SECRET_FILE`: **8 tests, 2 passed, 6 skipped, 0 failed**.
+
+| Test | Result |
+|---|---|
+| `SessionOwnershipTests.test_create_then_reopen_own_slot` | **Pass.** App-token create returns 200 with `key`, `app: "quartizo"`, `origin: "app"`; reopening by key returns the same key; `GET /api/chat/slots/{key}?limit=1` 200 |
+| `ToolApprovalTests.test_approve_and_reject_refused_without_grant` | **Pass.** `approved` and `rejected` both 403 `session_approval_not_granted` |
+| `SignedProxyTests.test_status_reaches_backend_as_app_token_principal` | Skip: app not enabled (403 `app_not_enabled`). Once enabled it expects 403 `owner_session_required` from the backend; a 401 would mean signature drift |
+| `SignedProxyTests.test_direct_unsigned_backend_hit_is_refused` | Skip: needs `KIROCREW_BACKEND_URL` (backend not running) |
+| `SessionOwnershipTests.test_foreign_slot_is_slot_not_found` | Skip: needs `KIROCREW_FOREIGN_SLOT`. Listing owner slots needs the owner token, which this run did not use |
+| `ToolApprovalTests.test_approve_reject_resolves_pending_request` | Skip: needs `sessionApproval` and a pending request |
+| `OwnerCookieTests` (2) | Skip: need `KIROCREW_OWNER_TOKEN`. **The user must export their own dashboard session token**; the tests never read it from disk or cookies |
+
+Headless browser check: **skipped**. Chromium is present, but the page needs
+an owner dashboard login (not used here), and the app is not enabled.
+`/apps/quartizo/ui/dist/index.mjs` is served (200) without auth while disabled.
+
+Observed upstream behaviour, recorded as findings:
+
+- **App-token chat access ignores trust and enable state.** While quartizo was
+  untrusted and disabled, its app token still created and read its own slots
+  under `/api/chat` and got the normal approve refusal. Only the
+  `/apps/quartizo/api` proxy checks `enabled`.
+- **An app token is spent by app-namespaced routes.** After one `?token=` call
+  to `/apps/quartizo/...` or `/api/apps/quartizo/...` (the 403 on the proxy
+  and a 200 on `GET /api/apps/quartizo` both did it), later calls with the
+  same token got 403 `forbidden` (audit: "cookie auth failed: session
+  revoked"). `/api/chat/*` calls do not spend it. The integration tests now
+  take a fresh token for those routes. The root cause in `token_auth.py` was
+  not traced.
+- The gateway log shows `kiro-cli not found` when the gateway starts a
+  runtime for the new slots. No turn was sent, so chat replies are unverified.
+- Test slots left on the gateway, all app-owned (`app: "quartizo"`):
+  `quartizo-it-probe`, `main` (an app-owned slot that the app created when it
+  asked for the name `main`; it is not the owner's session), and
+  `quartizo-it-<ts>` / `quartizo-ap-<ts>` from the test runs. No data was deleted.
+
+## Not verified
+
+- **Signed proxy end to end, backend health, and the direct-hit refusal** in a
+  real gateway: blocked on trust and enable. Covered locally by
+  `tests/backend/test_http.py` and the cross-check with the installed signer.
+- **The page in a real host**: module loading, `ChatEmbed` rendering, UI
+  component props (export names are confirmed; props of `PageHeader`, `Card`,
+  `CardTitle`, `Btn` are not).
+- **Who page requests run as**: read from source (unchanged in 0.10.0rc4),
+  not observed. For page calls this means: (a) the session is an owner
+  session (accepted, see above); (b) `permissions.api` is enforced only by the
+  SDK's client check; (c) Approve/Reject in the embed works without
+  `sessionApproval`. `OwnerCookieTests` check (a) and (c) and need
+  `KIROCREW_OWNER_TOKEN`. The other integration tests are app-token contract
+  tests and do not reflect the shipped UI.
+- **Foreign-slot refusal** for app tokens, and **approval resolution** with
+  the grant.
+- **Sending a message / getting a reply**: no turn was sent (`kiro-cli` is not
+  installed on this host).
 - **Codex** (or any non-default agent runtime): not validated. The slot is
   created with no `agent`, so the gateway default applies.
 
@@ -103,18 +170,17 @@ set, and have never run.
 | 7 (partly) | Trust format | `agent.apps_trusted` is a JSON array of exact app names, and anything malformed fails closed. No `kirocrew app trust` subcommand exists | `src/kiro_crew/apps/execution.py`, `src/kiro_crew/cli_commands_app.py` |
 | 9 (partly) | What `--backend` scaffolds | `backend/server.py` (stdlib `HTTPServer` on `127.0.0.1:$PORT`, unsigned) and manifest `backend: {entryPoint, port: "auto", healthCheck: "/health"}`, with no `routes` | `src/kiro_crew/apps/scaffold.py` |
 | 10 (partly) | Approve body | `POST /api/chat/slots/{slot}/approve` body `{action: "approved"\|"rejected"\|"rejected_once"\|"trust_command"\|..., request_id, pattern?, ttl_seconds?, origin?, request_mid?}`. Without the grant, the 403 body is `{"error":"app cannot manage session approvals","code":"session_approval_not_granted"}` | `dashboard/chat_api/slot_approval.py` |
-| — | Token transport for app tokens | `?token=<app token>` query parameter, or the `mc_token_<port>` cookie. The app token comes from `POST /api/apps/<name>/token` with `X-App-Secret` | `dashboard/token_auth.py` |
+| — | Token transport for app tokens | `?token=<app token>` query parameter, or the `mc_token_<port>` cookie. The app token comes from `POST /api/apps/<name>/token` with `X-App-Secret`, response `{"token": "..."}` (measured on 0.10.0rc4) | `dashboard/token_auth.py`, `dashboard/handlers/core.py` |
 
 ### Still open
 
 | # | Gap | Where the choice is isolated |
 |---|---|---|
 | 3 | `useChatLauncher` formal signature | Not used |
-| 7 | Whether `kirocrew config set agent.apps_trusted` is allowed from a shell; README points to the Settings UI | README |
+| 7 | Whether `kirocrew config set agent.apps_trusted` is allowed from a shell; README points to the Settings UI. 0.10.0rc4's own refusal message says "trust this app alone in Settings (agent.apps_trusted)" | README |
 | 8 | Minimum gateway version per feature (ChatEmbed `onSend`, `signedPrincipal`, body-bound HMAC) | `app.json` has no `minKiroCrewVersion` |
 | 9 | Other `kirocrew app init` flags | — |
 | 10 | `/api/approvals/{id}/{action}` and `POST /api/chat/mode` bodies | Not used |
 | — | Published TS types for the SDK and the `@kirocrew/app-sdk/ui` component props (`PageHeader`, `Card`, `CardTitle`, `Btn`) | `ui/src/kirocrew-sdk.d.ts`, the only adapter for SDK shapes |
-| — | Whether page `useAppApi()` calls are ever made under an app token (see "Who page requests run as") | `ui/src/slots.ts` (`classifyError` handles both outcomes) |
-| — | Token-exchange response shape (`POST /api/apps/<name>/token`); integration tests take a ready token | `tests/integration/test_gateway.py` |
+| — | Whether page `useAppApi()` calls are ever made under an app token (not in 0.10.0rc4 per source) | `ui/src/slots.ts` (`classifyError` handles both outcomes) |
 | — | Whether dev mode restarts the backend on change | README |

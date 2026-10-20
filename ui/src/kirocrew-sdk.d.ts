@@ -3,7 +3,8 @@
  * (`@kirocrew/app-sdk` 404s on the registry; the host serves it via its import
  * map), so this is the ONE place Quartizo asserts the SDK's shape.
  *
- * Transcribed from kirodotdev/KiroCrew@f62ab4fd:
+ * Transcribed from kirodotdev/KiroCrew@f62ab4fd (export names and ChatEmbed
+ * props rechecked against the kirocrew 0.10.0rc4 bundled host assets):
  *   website/src/app-sdk/scopedApi.ts   (AppApi, AppApiError)
  *   website/src/app-sdk/ChatEmbed.tsx  (ChatEmbedProps, ChatEmbedSendMeta)
  *   website/public/vendor/kirocrew-ui.mjs + website/src/components/AppHost.tsx
