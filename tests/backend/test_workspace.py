@@ -256,11 +256,19 @@ class ConfinedOpenTests(TmpTree):
         self.root = str(self.a / "notes")
 
     def read(self, rel):
+        """Walk *rel* the way the index scan does: from the root fd, one segment at a time."""
         segments = wsmod.validate_relpath(rel)
-        with wsmod.open_parent(self.root, segments) as parent:
-            fd, _ = wsmod.open_file_at(parent, segments[-1])
-            with os.fdopen(fd, "rb") as fh:
-                return fh.read()
+        fd = wsmod.open_root(self.root)
+        try:
+            for seg in segments[:-1]:
+                nxt = wsmod.open_dir_at(fd, seg)
+                os.close(fd)
+                fd = nxt
+            file_fd, _ = wsmod.open_file_at(fd, segments[-1])
+        finally:
+            os.close(fd)
+        with os.fdopen(file_fd, "rb") as fh:
+            return fh.read()
 
     def test_reads_inside_root(self):
         self.assertEqual(self.read("n.md"), b"in root\n")

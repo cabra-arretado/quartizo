@@ -1,13 +1,13 @@
 """Quartizo's registry database (stdlib ``sqlite3``).
 
-It holds the workspace registry (which roots the owner opted in), since
-migration 3 the Kanban task metadata of each project (QTZ-008), and since
-migration 4 the registered Git repository roots (QTZ-010), since migration 5
-the session keys Quartizo created (M5), and since migration 6 the Kiro Notes
-companion switch plus its derived, rebuildable Markdown index. One project is
-one registered workspace, keyed by the workspace ``uid``. Note content always
-lives in the Markdown files themselves; a task only stores a workspace-relative
-``note_ref`` string, never file content and never an absolute path.
+It holds the workspace registry (which roots the owner opted in) and, since
+migration 6, the Kiro Notes companion switch plus its derived, rebuildable
+Markdown index. Note content always lives in the Markdown files themselves.
+
+Migrations 3-5 created the tables of features Quartizo no longer has (database
+tasks, Git repos, created chat sessions). Nothing reads them any more; they are
+kept rather than dropped so an upgrade never deletes data. A workspace's old
+tasks still go with it when it is removed (FK cascade).
 
 Schema changes are numbered entries in ``MIGRATIONS``; each is applied once, in
 order, inside one transaction, and recorded in ``schema_migrations``. Never edit
@@ -240,42 +240,6 @@ def insert_workspace(conn: sqlite3.Connection, name: str, path: str) -> tuple[in
 
 def delete_workspace(conn: sqlite3.Connection, workspace_id: int) -> bool:
     return conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,)).rowcount > 0
-
-
-def count_tasks(conn: sqlite3.Connection, workspace_id: int) -> int:
-    return conn.execute(
-        "SELECT COUNT(*) FROM tasks JOIN workspaces w ON w.uid = tasks.project_id WHERE w.id = ?",
-        (workspace_id,),
-    ).fetchone()[0]
-
-
-def list_repos(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM repos ORDER BY name, id").fetchall()
-
-
-def get_repo(conn: sqlite3.Connection, repo_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM repos WHERE id = ?", (repo_id,)).fetchone()
-
-
-def insert_repo(conn: sqlite3.Connection, name: str, path: str) -> tuple[int, str]:
-    uid = new_uid()
-    cur = conn.execute("INSERT INTO repos (uid, name, path, created_at) VALUES (?, ?, ?, ?)",
-                       (uid, name, path, int(time.time())))
-    return int(cur.lastrowid), uid
-
-
-def delete_repo(conn: sqlite3.Connection, repo_id: int) -> bool:
-    return conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,)).rowcount > 0
-
-
-def insert_created_slot(conn: sqlite3.Connection, key: str, workspace_uid: str | None) -> None:
-    """Idempotent: an existing key keeps its first created_at."""
-    conn.execute("INSERT OR IGNORE INTO created_slots (key, workspace_uid, created_at) VALUES (?, ?, ?)",
-                 (key, workspace_uid, int(time.time())))
-
-
-def list_created_slots(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT key, workspace_uid, created_at FROM created_slots ORDER BY created_at, key").fetchall()
 
 
 @contextmanager

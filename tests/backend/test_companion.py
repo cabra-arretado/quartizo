@@ -432,37 +432,25 @@ class CompanionHttpTests(unittest.TestCase):
         self.assertEqual((status, body["requested"]), (202, [self.ws_id]))
         self.wait_indexed()
 
-        # The existing note writers refuse a companion folder; reading still works.
-        status, read = self.call("GET", f"{self.base}/note?path=ticket.md")
-        self.assertEqual(status, 200, read)
-        for method, action, payload in (
-            ("POST", "note", {"path": "new.md", "content": "x"}),
-            ("PUT", "note", {"path": "ticket.md", "content": "x", "expectedHash": read["hash"]}),
-            ("POST", "rename", {"from": "ticket.md", "to": "moved.md"}),
-            ("POST", "delete", {"path": "ticket.md", "confirm": True}),
-        ):
-            with self.subTest(method=method, action=action):
-                status, body = self.call(method, f"{self.base}/{action}", payload)
-                self.assertEqual((status, body.get("code")), (409, "companion_read_only"), body)
-        # There is no companion write route at all.
-        for method, target in (("POST", f"{self.base}/board"), ("PATCH", f"{self.base}/board"),
+        # No route writes a note: the old editor routes are gone and the views have none.
+        for method, target in (("POST", f"{self.base}/note"), ("PUT", f"{self.base}/note"),
+                               ("POST", f"{self.base}/rename"), ("POST", f"{self.base}/delete"),
+                               ("POST", f"{self.base}/board"), ("PATCH", f"{self.base}/board"),
                                ("POST", "/api/companion/todos"), ("PUT", "/api/companion/todos")):
             with self.subTest(method=method, target=target):
-                self.assertEqual(self.call(method, target, {})[0], 404)
+                self.assertEqual(self.call(method, target, {"path": "ticket.md", "content": "x"})[0], 404)
         self.assertEqual(snapshot(self.vault), before)
 
-        # Switching off restores the editor and drops only the derived index.
+        # Switching off drops only the derived index.
         body = self.set_mode(False)
         self.assertEqual(body["index"], {"state": "off"})
         status, body = self.call("GET", f"{self.base}/board")
         self.assertEqual((status, body["code"]), (409, "not_companion"))
-        status, body = self.call("POST", f"{self.base}/note", {"path": "allowed.md", "content": "ok\n"})
-        self.assertEqual(status, 201, body)
-        (self.vault / "allowed.md").unlink()
 
-    def test_status_reports_capabilities(self):
+    def test_status_reports_availability(self):
         status, body = self.call("GET", "/api/companion")
-        self.assertEqual((status, body["available"], body["writes"]), (200, True, False))
+        self.assertEqual((status, body["available"]), (200, True))
+        self.assertNotIn("writes", body)
 
     def test_refusals(self):
         for method, target, payload, expect in (

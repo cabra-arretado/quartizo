@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import os
-import tempfile
 import unittest
 from dataclasses import replace
-from pathlib import Path
 
 from .fixtures import TICKET_ID, fixture_files
 from .ranks import between
@@ -193,30 +190,6 @@ class SourceTests(unittest.TestCase):
         raw = self.files["ticket.md"]
         self.refused("bad_status", update_status, raw, "complete", digest(raw))
         self.refused("conflict", update_status, raw, "done", "0" * 64)
-
-    def test_existing_confined_file_writer_accepts_patch_and_refuses_external_change(self):
-        from tests.backend.signing import load_server
-
-        load_server()
-        import notes
-        from workspace import ApiError
-
-        with tempfile.TemporaryDirectory(prefix="quartizo-format-") as tmp:
-            root = os.path.realpath(tmp)  # macOS: /var is a symlink, and roots must be canonical
-            raw = self.files["bom-crlf.md"]
-            notes.create_note(root, "ticket.md", raw.decode())
-            changed = update_status(raw, "done", digest(raw))
-            result = notes.update_note(root, "ticket.md", changed.decode(), digest(raw))
-            self.assertEqual(Path(root, "ticket.md").read_bytes(), changed)
-            target = Source(changed).todos()[0]
-            patched = toggle(changed, target, True, result["hash"])
-            notes.update_note(root, "ticket.md", patched.decode(), result["hash"])
-            self.assertEqual(Path(root, "ticket.md").read_bytes(), patched)
-            Path(root, "ticket.md").write_bytes(patched + b"external\r\n")
-            with self.assertRaises(ApiError) as caught:
-                notes.update_note(root, "ticket.md", changed.decode(), digest(patched))
-            self.assertEqual((caught.exception.status, caught.exception.code), (409, "conflict"))
-            self.assertEqual(Path(root, "ticket.md").read_bytes(), patched + b"external\r\n")
 
 
 if __name__ == "__main__":
