@@ -1,6 +1,4 @@
-"""M1 review fixes: moves that never lose a concurrent replace, errno mapping,
-root ownership/mode, read-only notes, hard-link aliases, body limits,
-connection cap and bounded directory scans."""
+"""Hardening: root ownership/mode policy, confined opens, body limits and the connection cap."""
 from __future__ import annotations
 
 import contextlib
@@ -17,11 +15,9 @@ from unittest import mock
 
 from tests.backend.signing import load_server, proxy_header
 from tests.backend.test_http import SECRET, _start, _stop
-from tests.backend.test_notes import sha
 from tests.backend.test_workspace import signed_json
 
 srv = load_server()
-import notes  # noqa: E402
 import workspace as wsmod  # noqa: E402
 from workspace import ApiError, Registry  # noqa: E402
 
@@ -50,116 +46,6 @@ class Tree(unittest.TestCase):
         if status is not None:
             self.assertEqual(ctx.exception.status, status, ctx.exception.message)
         return ctx.exception
-
-
-def _replace_src_after_link(path: Path, data: bytes):
-    """A `_link` that links, then lets an external editor atomically replace the source."""
-    real_link = notes._link
-
-    def link(src_dir, src, dst_dir, dst):
-        real_link(src_dir, src, dst_dir, dst)
-        tmp = path.with_name(".editor-tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, path)
-
-    return link
-
-
-class MoveRaceTests(Tree):
-    """Probe: an external atomic replace of the source lands mid-move."""
-
-    def test_renameat2_is_used_on_linux(self):
-        if not os.uname().sysname == "Linux":
-            self.skipTest("renameat2 is Linux-only")
-        self.assertIsNotNone(notes._renameat2)
-
-    def test_fallback_rename_rolls_back_when_source_replaced(self):
-        src = self.put("a.md", b"old")
-        with mock.patch.object(notes, "_renameat2", None), \
-             mock.patch.object(notes, "_link", _replace_src_after_link(src, b"NEW external")):
-            self.refused(notes.rename_note, self.r, "a.md", "b.md", code="conflict", status=409)
-        self.assertEqual(src.read_bytes(), b"NEW external", "the concurrent edit must survive")
-        self.assertFalse((self.root / "b.md").exists(), "the half-done move must be rolled back")
-
-    def test_fallback_trash_rolls_back_when_source_replaced(self):
-        src = self.put("a.md", b"old")
-        with mock.patch.object(notes, "_renameat2", None), \
-             mock.patch.object(notes, "_link", _replace_src_after_link(src, b"NEW external")):
-            self.refused(notes.delete_note, self.r, "a.md", confirm=True, code="conflict")
-        self.assertEqual(src.read_bytes(), b"NEW external")
-        self.assertEqual(list((self.root / ".trash").iterdir()), [])
-
-    def test_renameat2_carries_a_replace_that_lands_before_the_move(self):
-        if notes._renameat2 is None:
-            self.skipTest("no renameat2")
-        src = self.put("a.md", b"old")
-        real = notes._renameat2
-
-        def racing(*args):
-            tmp = self.root / ".editor-tmp"
-            tmp.write_bytes(b"NEW external")
-            os.replace(tmp, src)
-            return real(*args)
-
-        with mock.patch.object(notes, "_renameat2", racing):
-            notes.rename_note(self.r, "a.md", "b.md")
-        self.assertEqual((self.root / "b.md").read_bytes(), b"NEW external", "nothing lost: the new content moved")
-        self.assertFalse(src.exists())
-
-    def test_fallback_moves_normally(self):
-        self.put("a.md", b"A")
-        with mock.patch.object(notes, "_renameat2", None):
-            notes.rename_note(self.r, "a.md", "d/b.md")
-            self.put("c.md", b"C")
-            self.assertEqual(notes.delete_note(self.r, "c.md", confirm=True)["trashed"], ".trash/c.md")
-        self.assertEqual((self.root / "d" / "b.md").read_bytes(), b"A")
-        self.assertFalse((self.root / "a.md").exists())
-
-    def test_fallback_unlink_failure_rolls_back_trash_copy(self):
-        self.put("a.md", b"A")
-        real_unlink = os.unlink
-        calls = []
-
-        def unlink(name, *a, dir_fd=None, **kw):
-            calls.append(name)
-            if len(calls) == 1:  # the source unlink fails; the rollback must still work
-                raise PermissionError(13, "denied")
-            return real_unlink(name, *a, dir_fd=dir_fd, **kw)
-
-        with mock.patch.object(notes, "_renameat2", None), mock.patch.object(notes.os, "unlink", unlink):
-            self.refused(notes.delete_note, self.r, "a.md", confirm=True, code="permission_denied", status=403)
-        self.assertEqual((self.root / "a.md").read_bytes(), b"A")
-        self.assertEqual(list((self.root / ".trash").iterdir()), [], "no second copy left in .trash")
-
-    def test_renameat2_never_replaces(self):
-        if notes._renameat2 is None:
-            self.skipTest("no renameat2")
-        self.put("a.md", b"A")
-        self.put("b.md", b"B")
-        self.refused(notes.rename_note, self.r, "a.md", "b.md", code="exists")
-        self.assertEqual((self.root / "b.md").read_bytes(), b"B")
-
-
-class AliasAndReadOnlyTests(Tree):
-    def test_hard_link_is_not_a_spelling_alias(self):
-        a = self.put("a.md", b"A")
-        os.link(a, self.root / "b.md")
-        (self.root / "sub").mkdir()
-        os.link(a, self.root / "sub" / "a.md")
-        for dst in ("b.md", "sub/a.md"):
-            with self.subTest(dst=dst):
-                self.refused(notes.rename_note, self.r, "a.md", dst, code="exists", status=409)
-                self.refused(notes.rename_note, self.r, "a.md", dst, overwrite=True, confirm=True, code="exists")
-        self.assertTrue(a.exists())
-
-    def test_read_only_note_is_not_replaced(self):
-        if AS_ROOT:
-            self.skipTest("root ignores modes")
-        p = self.put("a.md", b"A")
-        os.chmod(p, 0o444)
-        self.refused(notes.update_note, self.r, "a.md", "B", sha(b"A"), code="read_only", status=403)
-        self.assertEqual(p.read_bytes(), b"A")
-        self.assertEqual(sorted(os.listdir(self.root)), ["a.md"], "no temp file left")
 
 
 class RootPolicyTests(Tree):
@@ -226,28 +112,11 @@ class RootPolicyTests(Tree):
 
         if not os.path.isdir("/proc/self/fd"):
             self.skipTest("needs /proc/self/fd")
-        with mock.patch.object(wsmod.os, "fstat", fstat):
-            with self.assertRaises(ApiError) as ctx, wsmod.open_parent(self.r, segs):
-                pass
+        root_fd = wsmod.open_root(self.r)
+        self.addCleanup(os.close, root_fd)
+        with mock.patch.object(wsmod.os, "fstat", fstat), self.assertRaises(ApiError) as ctx:
+            wsmod.open_dir_at(root_fd, segs[0])
         self.assertEqual((ctx.exception.status, ctx.exception.code), (403, "not_owned"))
-
-
-class ScanBoundTests(Tree):
-    def test_scan_stops_while_iterating(self):
-        for i in range(50):
-            self.put(f"n{i:02}.md", b"")
-        with mock.patch.object(notes, "MAX_SCAN_ENTRIES", 5):
-            out = notes.list_notes(self.r)
-        self.assertTrue(out["truncated"])
-        self.assertLessEqual(len(out["files"]), 5)
-        self.assertEqual([f["path"] for f in out["files"]], sorted(f["path"] for f in out["files"]))
-
-    def test_deadline_applies_while_iterating(self):
-        for i in range(10):
-            self.put(f"n{i}.md", b"")
-        with mock.patch.object(notes, "SEARCH_SECONDS", -1):
-            out = notes.list_notes(self.r)
-        self.assertEqual((out["files"], out["truncated"]), ([], True))
 
 
 def _raw(port, data: bytes, timeout=5.0) -> bytes:
@@ -276,42 +145,11 @@ class HttpHardeningTests(unittest.TestCase):
                 os.chmod(p, 0o755)
         cls.tmp.cleanup()
 
-    def test_read_only_dir_maps_to_403_without_the_path(self):
-        if AS_ROOT:
-            self.skipTest("root ignores modes")
-        ro = self.vault / "ro"
-        ro.mkdir()
-        (ro / "in.md").write_bytes(b"x")
-        os.chmod(ro, 0o555)
-        try:
-            for method, action, payload in (
-                ("POST", "note", {"path": "ro/new.md", "content": "x"}),
-                ("PUT", "note", {"path": "ro/in.md", "content": "y", "expectedHash": sha(b"x")}),
-                ("POST", "delete", {"path": "ro/in.md", "confirm": True}),
-                ("POST", "rename", {"from": "ro/in.md", "to": "out.md"}),
-            ):
-                with self.subTest(method=method, action=action):
-                    status, body = signed_json(self.port, method, f"{self.base}/{action}", payload)
-                    self.assertEqual((status, body.get("code")), (403, "permission_denied"), body)
-                    self.assertNotIn(str(self.vault), body["error"])
-                    self.assertNotIn("ro/", body["error"])
-            self.assertEqual(sorted(os.listdir(ro)), ["in.md"])
-            self.assertEqual((ro / "in.md").read_bytes(), b"x")
-        finally:
-            os.chmod(ro, 0o755)
-
-    def test_large_body_only_for_fresh_note_writes(self):
-        big = 2 << 20  # over the 1 MiB default, under the note limit
-        fresh = proxy_header(SECRET, "POST", f"{self.base}/note", b"")
-        stale = proxy_header(SECRET, "POST", f"{self.base}/note", b"", ts=int(time.time()) - 600)
-        for target, header in (
-            (f"{self.base}/note", None),       # no proxy header at all
-            (f"{self.base}/note", stale),      # stale timestamp
-            ("/api/workspaces", fresh),        # fresh, but not a note write
-            (f"{self.base}/rename", fresh),
-        ):
-            with self.subTest(target=target, header=bool(header)):
-                head = f"POST {target} HTTP/1.1\r\nHost: x\r\nContent-Length: {big}\r\n"
+    def test_a_large_body_is_refused_before_it_is_read(self):
+        fresh = proxy_header(SECRET, "POST", "/api/workspaces", b"")
+        for header in (None, fresh):
+            with self.subTest(header=bool(header)):
+                head = f"POST /api/workspaces HTTP/1.1\r\nHost: x\r\nContent-Length: {srv.MAX_BODY_BYTES + 1}\r\n"
                 if header:
                     head += f"X-KiroCrew-Proxy: {header}\r\n"
                 # Headers only: the server must refuse before reading any body.

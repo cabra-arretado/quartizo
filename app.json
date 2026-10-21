@@ -24,7 +24,6 @@
   },
   "permissions": {
     "api": [
-      "/api/chat",
       "/apps/quartizo/api"
     ]
   }

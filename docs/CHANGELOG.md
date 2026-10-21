@@ -1,5 +1,79 @@
 # Changelog
 
+## Unreleased
+
+### Changed: Quartizo is now only a read-only Kiro Notes companion
+
+- **Three tabs:** Tasks (the board of ticket notes), TODOs and Settings.
+  Clicking a card or TODO opens Kiro Notes; each has a **Copy name** button.
+  Settings adds a folder already shared with Kiro Notes (one request), can
+  unshare it, rebuild its index or remove it.
+- **TODOs follow native Kiro Notes' rules** line for line (its frontmatter
+  regex, `\n` splitting, ``` fences, tables, `- [ ]`/`- [x]` only), so both
+  list the same checkboxes. `*`/`+`/numbered items, `[X]`, `~~~` fences, table
+  rows and CRLF lines are no longer TODOs; an indented `- [ ]` line now is.
+  Index version 4 re-parses existing indexes.
+- **Removed:** the notes editor and preview, database task board, Chat tab,
+  Git view and Agents monitor, with their backend routes (`/note`, `/rename`,
+  `/delete`, `/notes`, `/tasks*`, `/repos*`, `/slots`). The database keeps the
+  old tables (nothing is dropped). Removing a folder that still has old
+  database tasks shows their count and deletes them only once confirmed
+  (`DELETE ...?deleteOldTasks=1`, otherwise 409 `has_old_tasks`).
+- **Permissions:** `app.json` no longer requests `/api/chat`.
+- **Dependencies:** markdown-it-py and mdurl are no longer vendored (only
+  ruamel.yaml); the UI no longer depends on markdown-it, and its bundle has no
+  third-party code.
+- Request bodies are capped at 64 KiB.
+
+### Fixed
+
+- The companion scan worker no longer dies when recording a failed scan also
+  fails (views stayed "scanning" forever).
+- Adding a shared folder is one insert, so it can no longer end up registered
+  but unshared; a non-boolean `companion` is refused.
+- Removing a folder stops its running scan; unexpected backend errors answer a
+  JSON 500 instead of dropping the connection.
+- macOS CI: a spike test used a non-canonical temp path (`/var` is a symlink).
+- Settings clears a stale load error after a successful reload; cards show the
+  file name when their title differs from it.
+
+### Added
+
+- **Kiro Notes companion, read only** (release 1's first delivery,
+  [plan](markdown-tickets-plan.md#update--2026-10-20-read-only-companion-first-with-clickable-sources)).
+  A workspace can be switched to companion mode for a folder also attached in
+  native Kiro Notes. Quartizo then only reads it: the Tasks tab shows its
+  ticket notes (frontmatter `type: ticket`) by status and rank with a Needs
+  repair lane, and a new TODOs tab lists the Markdown checkboxes of every
+  companion folder. Both come from a rebuildable index that is reconciled by
+  content hash (so timestamp-preserving edits are seen), swapped in by
+  generation, and keeps last-known rows instead of inferring deletions from
+  incomplete scans. Selecting an item shows its path, line and heading, with
+  **Open Kiro Notes** (app-level navigation only: exact note targeting is not
+  supported by Kiro Notes).
+- The backend now vendors three pure-Python, MIT-licensed parsers from
+  hash-pinned wheels (`backend/_vendor/`): ruamel.yaml 0.19.1, markdown-it-py
+  4.0.0, mdurl 0.1.2. Nothing is installed; `backend/vendored.py` refuses
+  copies loaded from anywhere else (the 0.10.0rc4 gateway venv has
+  markdown-it-py 4.2.0) and `tests/backend/test_vendor.py` checks the tree
+  against its manifest. Re-create with `scripts/vendor_parsers.py`.
+
+### Changed
+
+- Every note write route (`POST`/`PUT /note`, `/rename`, `/delete`) refuses a
+  companion workspace with 409 `companion_read_only`; its notes open read-only.
+- `GET /api/workspaces` items gain `companion`.
+
+### Migration notes
+
+- **Migration 6** (forward-only) adds `workspaces.companion` (default off) and
+  the derived `companion_generations`, `companion_index`, `companion_notes`
+  and `companion_todos` tables. Existing workspaces, tasks and notes are
+  unchanged; nothing is converted.
+- An older backend still starts against a migrated DB (it ignores the new
+  column and tables), but it no longer refuses note writes in companion
+  folders. Restore the pre-upgrade backup to go back, as below.
+
 ## 0.0.1 - 2026-10-20
 
 First release. Written against KiroCrew `f62ab4fd`, verified against

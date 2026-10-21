@@ -1,16 +1,8 @@
 """Gateway integration checks. They need a real, running KiroCrew gateway with
 quartizo installed, trusted and enabled, so they SKIP unless configured.
 
-Two groups:
-
-* App-token CONTRACT tests (SessionOwnershipTests, ToolApprovalTests). They
-  pin what the gateway does for a caller holding a quartizo APP TOKEN. They do
-  NOT reflect the shipped UI: the page's useAppApi() calls carry the dashboard
-  owner's cookie, not an app token (website/src/app-sdk/scopedApi.ts,
-  dashboard/token_auth.py at the pinned SHA). They matter only if a
-  backend-mediated app-token path is ever built.
-* Owner-cookie tests (OwnerCookieTests). They assert what the page actually
-  gets: an owner session (no app owner) and Approve not refused for the grant.
+They check the signed proxy: the gateway signs /apps/quartizo/api/* and the
+backend verifies it, and the backend refuses a direct, unsigned hit.
 
   KIROCREW_GATEWAY_URL   e.g. http://127.0.0.1:7777
   KIROCREW_APP_SECRET_FILE  path to quartizo's generated .app_secret; tests
@@ -18,25 +10,15 @@ Two groups:
                          (X-App-Secret) for fresh app tokens. Preferred.
   KIROCREW_APP_TOKEN     alternatively, one ready app token (single use for
                          app-namespaced routes; see app_token())
-  KIROCREW_OWNER_TOKEN   (owner-cookie tests) the dashboard owner's session
-                         token, sent as the mc_token_<port> cookie
-  KIROCREW_FOREIGN_SLOT  (ownership test) a slot key quartizo does NOT own
-  KIROCREW_PENDING_SLOT / KIROCREW_PENDING_REQUEST_ID
-                         (resolution test) a pending tool approval on a slot
-                         the app token owns, with sessionApproval granted
-
   KIROCREW_BACKEND_URL   (direct-hit test) the quartizo backend's own loopback
                          URL, e.g. http://127.0.0.1:9100 (see `kirocrew app info`)
 
-Run against kirocrew 0.10.0rc4 (see docs/compatibility.md for measured
-results). The slot row names its owning app in the `app` field ("" for owner
-sessions, "quartizo" for app-token slots), with `origin` "app" for the latter.
+Run against kirocrew 0.10.0rc4 (see docs/compatibility.md for measured results).
 """
 from __future__ import annotations
 
 import json
 import os
-import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -75,25 +57,14 @@ def app_token(fresh: bool = False) -> str:
     if fresh or not _token_cache:
         _token_cache[:] = [exchange_app_token()]
     return _token_cache[0]
-OWNER_TOKEN = os.environ.get("KIROCREW_OWNER_TOKEN", "")
 NO_GATEWAY = ("no gateway: set KIROCREW_GATEWAY_URL and KIROCREW_APP_SECRET_FILE "
               "(or KIROCREW_APP_TOKEN) to run")
-NO_OWNER = "no gateway: set KIROCREW_GATEWAY_URL and KIROCREW_OWNER_TOKEN to run"
-# Well-formed (32 lowercase hex) but never pending.
-UNKNOWN_REQUEST_ID = "0123456789abcdef0123456789abcdef"
 
 
-def call(method: str, path: str, body: dict | None = None, *, owner: bool = False,
-         token: str | None = None) -> tuple[int, dict]:
+def call(method: str, path: str, body: dict | None = None, *, token: str | None = None) -> tuple[int, dict]:
     headers = {"Content-Type": "application/json"}
-    if owner:
-        # The page's credential: the owner's session cookie, named by port.
-        port = urllib.parse.urlsplit(GATEWAY).port or 80
-        url = f"{GATEWAY}{path}"
-        headers["Cookie"] = f"mc_token_{port}={OWNER_TOKEN}"
-    else:
-        sep = "&" if "?" in path else "?"
-        url = f"{GATEWAY}{path}{sep}token={urllib.parse.quote(token or app_token())}"
+    sep = "&" if "?" in path else "?"
+    url = f"{GATEWAY}{path}{sep}token={urllib.parse.quote(token or app_token())}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
@@ -105,145 +76,6 @@ def call(method: str, path: str, body: dict | None = None, *, owner: bool = Fals
             return err.code, json.loads(raw or b"{}")
         except ValueError:
             return err.code, {"raw": raw.decode(errors="replace")}
-
-
-@unittest.skipUnless(GATEWAY and TOKEN, NO_GATEWAY)
-class SessionOwnershipTests(unittest.TestCase):
-    def test_create_then_reopen_own_slot(self):
-        name = f"quartizo-it-{int(time.time())}"
-        status, body = call("POST", "/api/chat/slots", {"name": name})
-        self.assertEqual(status, 200, body)
-        key = body["key"]
-        self.assertEqual((body.get("app"), body.get("origin")), ("quartizo", "app"), body)
-        status, body = call("POST", "/api/chat/slots", {"name": key})
-        self.assertEqual((status, body.get("key")), (200, key))
-        self.assertEqual(call("GET", f"/api/chat/slots/{urllib.parse.quote(key)}?limit=1")[0], 200)
-
-    def test_foreign_slot_is_slot_not_found(self):
-        foreign = os.environ.get("KIROCREW_FOREIGN_SLOT")
-        if not foreign:
-            self.skipTest("set KIROCREW_FOREIGN_SLOT to a slot quartizo does not own")
-        status, body = call("POST", "/api/chat/slots", {"name": foreign})
-        self.assertEqual((status, body.get("code")), (404, "slot_not_found"))
-
-
-@unittest.skipUnless(GATEWAY and TOKEN, NO_GATEWAY)
-class ToolApprovalTests(unittest.TestCase):
-    def _own_slot(self) -> str:
-        status, body = call("POST", "/api/chat/slots", {"name": f"quartizo-ap-{int(time.time())}"})
-        self.assertEqual(status, 200, body)
-        return body["key"]
-
-    def test_approve_and_reject_refused_without_grant(self):
-        # quartizo does not declare permissions.sessionApproval, so the gateway
-        # must refuse both decisions with 403 even on the app's own slot.
-        key = self._own_slot()
-        for action in ("approved", "rejected"):
-            with self.subTest(action=action):
-                status, body = call("POST", f"/api/chat/slots/{urllib.parse.quote(key)}/approve",
-                                    {"action": action, "request_id": UNKNOWN_REQUEST_ID})
-                self.assertEqual((status, body.get("code")), (403, "session_approval_not_granted"))
-
-    def test_approve_reject_resolves_pending_request(self):
-        slot = os.environ.get("KIROCREW_PENDING_SLOT")
-        rid = os.environ.get("KIROCREW_PENDING_REQUEST_ID")
-        if not (slot and rid):
-            self.skipTest("needs a pending tool approval and a build with permissions.sessionApproval; "
-                          "set KIROCREW_PENDING_SLOT and KIROCREW_PENDING_REQUEST_ID")
-        action = os.environ.get("KIROCREW_PENDING_ACTION", "rejected")
-        status, body = call("POST", f"/api/chat/slots/{urllib.parse.quote(slot)}/approve",
-                            {"action": action, "request_id": rid})
-        self.assertEqual(status, 200, body)
-
-
-#: Fields of a GET /api/chat/slots row that the Agents tab reads (ui/src/agents.ts, M5).
-AGENTS_ROW_FIELDS = (
-    "key", "title", "app", "origin", "running", "stopping", "compacting", "pending_approval",
-    "needs_input", "interrupted", "last_activity_ts", "last_ts", "created", "workspace", "project",
-    "messages", "turn", "turn_gen", "queue_depth", "subagents_running", "subagents_queued", "parent",
-)
-
-
-@unittest.skipUnless(GATEWAY and TOKEN, NO_GATEWAY)
-class AgentsReadShapeTests(unittest.TestCase):
-    """M5: read-only GETs that pin the shapes the Agents tab relies on. Nothing is written."""
-
-    def test_slot_list_rows_carry_the_fields_the_agents_tab_reads(self):
-        status, rows = call("GET", "/api/chat/slots")
-        self.assertEqual(status, 200, rows)
-        self.assertIsInstance(rows, list)
-        if not rows:
-            self.skipTest("the gateway lists no sessions; an empty gateway checks nothing")
-        for row in rows:
-            missing = [f for f in AGENTS_ROW_FIELDS if f not in row]
-            self.assertEqual(missing, [], row.get("key"))
-            self.assertIsInstance(row["running"], bool)
-            self.assertIsInstance(row["subagents_running"], bool)
-            self.assertIsInstance(row["subagents_queued"], int)
-
-    def test_detail_of_an_app_owned_slot(self):
-        status, rows = call("GET", "/api/chat/slots")
-        self.assertEqual(status, 200, rows)
-        owned = [r["key"] for r in rows if r.get("app") == "quartizo"]
-        if not owned:
-            self.skipTest("no app-owned slot to read; an empty gateway checks nothing")
-        key = urllib.parse.quote(owned[0])
-        status, body = call("GET", f"/api/chat/slots/{key}?limit=50")
-        self.assertEqual(status, 200, body)
-        for field in ("key", "running", "stopping", "messages", "total", "has_more"):
-            self.assertIn(field, body)
-        self.assertIsInstance(body["messages"], list)
-
-    def test_owner_session_detail_is_slot_not_found_for_the_app_token(self):
-        status, rows = call("GET", "/api/chat/slots")
-        self.assertEqual(status, 200, rows)
-        owner = [r["key"] for r in rows if r.get("app") == ""]
-        if not owner:
-            self.skipTest("no owner session listed; an empty gateway checks nothing")
-        status, body = call("GET", f"/api/chat/slots/{urllib.parse.quote(owner[0])}?limit=1")
-        self.assertEqual((status, body.get("code")), (404, "slot_not_found"))
-
-    def test_undeclared_subagent_and_task_routes_are_refused(self):
-        # Not in permissions.api, so the gateway refuses the app token (token_auth.app_token_path_allowed).
-        # Measured on 0.10.0rc4: a refused call also revokes the token, so each probe
-        # uses a fresh one (a 403 from an already-revoked token would prove nothing),
-        # and the shared token is replaced afterwards for the tests that follow.
-        try:
-            for path in ("/api/sessions/dashboard:quartizo-it-probe/agents", "/api/tasks?limit=1"):
-                with self.subTest(path=path):
-                    fresh = app_token(fresh=True)
-                    self.assertEqual(call("GET", "/api/chat/slots", token=fresh)[0], 200)
-                    status, body = call("GET", path, token=fresh)
-                    self.assertEqual((status, body.get("code")), (403, "forbidden"), body)
-        finally:
-            if SECRET_FILE:
-                app_token(fresh=True)
-
-
-@unittest.skipUnless(GATEWAY and OWNER_TOKEN, NO_OWNER)
-class OwnerCookieTests(unittest.TestCase):
-    """What the shipped page gets: it calls with the owner's cookie."""
-
-    def _create(self) -> dict:
-        status, body = call("POST", "/api/chat/slots", {"name": f"quartizo-{int(time.time()):x}-0it000"}, owner=True)
-        self.assertEqual(status, 200, body)
-        return body
-
-    def test_slot_has_no_app_owner(self):
-        row = self._create()
-        # Measured on 0.10.0rc4: the owner field is `app` ("quartizo" on app-token slots).
-        self.assertIn("app", row, sorted(row))
-        self.assertEqual(row["app"], "", "an owner-created slot has no app owner")
-
-    def test_approve_is_not_refused_for_the_grant(self):
-        key = self._create()["key"]
-        for action in ("approved", "rejected"):
-            with self.subTest(action=action):
-                status, body = call("POST", f"/api/chat/slots/{urllib.parse.quote(key)}/approve",
-                                    {"action": action, "request_id": UNKNOWN_REQUEST_ID}, owner=True)
-                # Nothing is pending, so success is not expected; only the grant refusal is ruled out.
-                self.assertNotEqual(body.get("code"), "session_approval_not_granted", (status, body))
-                self.assertNotEqual(status, 403, body)
 
 
 @unittest.skipUnless(GATEWAY and TOKEN, NO_GATEWAY)

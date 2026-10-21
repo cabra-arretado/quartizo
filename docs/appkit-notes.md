@@ -1,5 +1,7 @@
 # KiroCrew App Kit notes
 
+> **History.** Notes taken while building the original editor version of Quartizo. The platform facts still hold for 0.10.0rc4; the parts about chat embeds and sessions concern features Quartizo no longer has.
+
 Source: github.com/kirodotdev/KiroCrew, `main` at commit `f62ab4fdb2bb0e492cd99325c596ec9e738abb70` (2026-10-20).
 Latest release tag read: `v0.9.0` (published 2026-10-16). Docs read from `main`, not from the tag.
 Files read (all HTTP 200): docs/app-kit/{README,getting-started,api-reference,manifest-reference,publishing-guide,migration-guide}.md.

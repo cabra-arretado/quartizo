@@ -1,0 +1,4 @@
+# Isolated format spike only; the backend vendors its own pinned ruamel.yaml (backend/_vendor).
+ruamel.yaml==0.19.1
+markdown-it-py==4.0.0
+mdurl==0.1.2

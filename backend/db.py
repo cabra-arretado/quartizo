@@ -1,12 +1,13 @@
 """Quartizo's registry database (stdlib ``sqlite3``).
 
-It holds the workspace registry (which roots the owner opted in), since
-migration 3 the Kanban task metadata of each project (QTZ-008), and since
-migration 4 the registered Git repository roots (QTZ-010) and since migration 5
-the session keys Quartizo created (M5). One project is
-one registered workspace, keyed by the workspace ``uid``. Note content always
-lives in the Markdown files themselves; a task only stores a workspace-relative
-``note_ref`` string, never file content and never an absolute path.
+It holds the workspace registry (which roots the owner opted in) and, since
+migration 6, the Kiro Notes companion switch plus its derived, rebuildable
+Markdown index. Note content always lives in the Markdown files themselves.
+
+Migrations 3-5 created the tables of features Quartizo no longer has (database
+tasks, Git repos, created chat sessions). Nothing reads them any more; they are
+kept rather than dropped so an upgrade never deletes data. A workspace's old
+tasks still go with it when it is removed (FK cascade).
 
 Schema changes are numbered entries in ``MIGRATIONS``; each is applied once, in
 order, inside one transaction, and recorded in ``schema_migrations``. Never edit
@@ -102,6 +103,65 @@ MIGRATIONS: tuple[str, ...] = (
         created_at    INTEGER NOT NULL
     );
     """,
+    # 6: Kiro Notes companion (read-only Board and TODOs over Markdown files).
+    # `workspaces.companion` is application state: the owner's explicit switch
+    # that makes Quartizo read-only in that folder and indexes it. The three
+    # companion_* tables are a DERIVED index: the files are authoritative, and
+    # dropping every companion_* row loses nothing a rescan cannot rebuild. A
+    # scan writes a new `generation` beside the active one and swaps
+    # companion_index.generation only once it finished (companion.py). Deleting
+    # the workspace row cascades to its index rows.
+    """
+    ALTER TABLE workspaces ADD COLUMN companion INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE companion_generations (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        workspace_uid TEXT    NOT NULL REFERENCES workspaces(uid) ON DELETE CASCADE,
+        started_at    INTEGER NOT NULL
+    );
+    CREATE TABLE companion_index (
+        workspace_uid TEXT    PRIMARY KEY REFERENCES workspaces(uid) ON DELETE CASCADE,
+        generation    INTEGER,
+        version       INTEGER NOT NULL,
+        started_at    INTEGER,
+        completed_at  INTEGER,
+        complete      INTEGER NOT NULL DEFAULT 0,
+        files         INTEGER NOT NULL DEFAULT 0,
+        retained      INTEGER NOT NULL DEFAULT 0,
+        error_code    TEXT,
+        error         TEXT,
+        failed_at     INTEGER
+    );
+    CREATE TABLE companion_notes (
+        workspace_uid TEXT    NOT NULL REFERENCES workspaces(uid) ON DELETE CASCADE,
+        generation    INTEGER NOT NULL,
+        path          TEXT    NOT NULL,
+        hash          TEXT,
+        size          INTEGER,
+        mtime_ms      INTEGER,
+        title         TEXT    NOT NULL,
+        ticket        INTEGER NOT NULL,
+        ticket_id     TEXT,
+        status        TEXT,
+        sort_key      TEXT,
+        diagnostics   TEXT    NOT NULL,
+        retained      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (workspace_uid, generation, path)
+    );
+    CREATE TABLE companion_todos (
+        workspace_uid TEXT    NOT NULL REFERENCES workspaces(uid) ON DELETE CASCADE,
+        generation    INTEGER NOT NULL,
+        path          TEXT    NOT NULL,
+        ordinal       INTEGER NOT NULL,
+        marker_start  INTEGER NOT NULL,
+        line          INTEGER NOT NULL,
+        col           INTEGER NOT NULL,
+        checked       INTEGER NOT NULL,
+        text          TEXT    NOT NULL,
+        depth         INTEGER NOT NULL,
+        heading       TEXT,
+        PRIMARY KEY (workspace_uid, generation, path, ordinal)
+    );
+    """,
 )
 
 
@@ -154,63 +214,38 @@ def migrate(conn: sqlite3.Connection) -> int:
 
 
 def list_workspaces(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM workspaces ORDER BY name, id").fetchall()
+    return conn.execute("SELECT id, uid, name, path, companion, created_at FROM workspaces ORDER BY name, id").fetchall()
 
 
 def get_workspace(conn: sqlite3.Connection, workspace_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM workspaces WHERE id = ?",
+    return conn.execute("SELECT id, uid, name, path, companion, created_at FROM workspaces WHERE id = ?",
                         (workspace_id,)).fetchone()
+
+
+def set_companion(conn: sqlite3.Connection, workspace_id: int, enabled: bool) -> bool:
+    return conn.execute("UPDATE workspaces SET companion = ? WHERE id = ?",
+                        (1 if enabled else 0, workspace_id)).rowcount > 0
 
 
 def new_uid() -> str:
     return secrets.token_hex(16)
 
 
-def insert_workspace(conn: sqlite3.Connection, name: str, path: str) -> tuple[int, str]:
+def insert_workspace(conn: sqlite3.Connection, name: str, path: str, companion: bool = False) -> tuple[int, str]:
     uid = new_uid()
-    cur = conn.execute("INSERT INTO workspaces (uid, name, path, created_at) VALUES (?, ?, ?, ?)",
-                       (uid, name, path, int(time.time())))
+    cur = conn.execute("INSERT INTO workspaces (uid, name, path, created_at, companion) VALUES (?, ?, ?, ?, ?)",
+                       (uid, name, path, int(time.time()), 1 if companion else 0))
     return int(cur.lastrowid), uid
+
+
+def old_task_counts(conn: sqlite3.Connection) -> dict[int, int]:
+    """Tasks left from the removed database board, per workspace id (only workspaces that have some)."""
+    return {r[0]: r[1] for r in conn.execute(
+        "SELECT w.id, COUNT(*) FROM tasks JOIN workspaces w ON w.uid = tasks.project_id GROUP BY w.id")}
 
 
 def delete_workspace(conn: sqlite3.Connection, workspace_id: int) -> bool:
     return conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,)).rowcount > 0
-
-
-def count_tasks(conn: sqlite3.Connection, workspace_id: int) -> int:
-    return conn.execute(
-        "SELECT COUNT(*) FROM tasks JOIN workspaces w ON w.uid = tasks.project_id WHERE w.id = ?",
-        (workspace_id,),
-    ).fetchone()[0]
-
-
-def list_repos(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM repos ORDER BY name, id").fetchall()
-
-
-def get_repo(conn: sqlite3.Connection, repo_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM repos WHERE id = ?", (repo_id,)).fetchone()
-
-
-def insert_repo(conn: sqlite3.Connection, name: str, path: str) -> tuple[int, str]:
-    uid = new_uid()
-    cur = conn.execute("INSERT INTO repos (uid, name, path, created_at) VALUES (?, ?, ?, ?)",
-                       (uid, name, path, int(time.time())))
-    return int(cur.lastrowid), uid
-
-
-def delete_repo(conn: sqlite3.Connection, repo_id: int) -> bool:
-    return conn.execute("DELETE FROM repos WHERE id = ?", (repo_id,)).rowcount > 0
-
-
-def insert_created_slot(conn: sqlite3.Connection, key: str, workspace_uid: str | None) -> None:
-    """Idempotent: an existing key keeps its first created_at."""
-    conn.execute("INSERT OR IGNORE INTO created_slots (key, workspace_uid, created_at) VALUES (?, ?, ?)",
-                 (key, workspace_uid, int(time.time())))
-
-
-def list_created_slots(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT key, workspace_uid, created_at FROM created_slots ORDER BY created_at, key").fetchall()
 
 
 @contextmanager

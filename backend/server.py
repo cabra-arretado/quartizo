@@ -21,7 +21,8 @@ Only ``GET /health`` is unsigned (the gateway probes it directly). Every other
 request must carry both valid headers, or it is refused before routing, and
 every route is dashboard-owner only (``owner-session`` principal).
 
-Git repos (QTZ-010) are read only: see gitrepo.py for how git is run.
+Quartizo never writes a note: the Board/TODOs index only reads the registered
+folders (companion.py). The routes change application state only.
 
 Workspace registry state lives in ``<KIROCREW_HOME>/apps/<KIROCREW_APP_NAME>/data``
 (the gateway injects both; ``manager.py::app_data_dir`` in 0.10.0rc4).
@@ -48,9 +49,7 @@ from urllib.parse import parse_qs, urlsplit
 # directory off sys.path; put it back (first) so the sibling modules load.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import gitrepo  # noqa: E402
-import notes  # noqa: E402
-import tasks  # noqa: E402
+import companion  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
 
 APP_NAME = "quartizo"
@@ -59,15 +58,8 @@ SECRET_ENV = "KIROCREW_PROXY_SECRET"
 PROXY_HEADER = "X-KiroCrew-Proxy"
 PRINCIPAL_HEADER = "X-KiroCrew-Principal"
 MAX_SKEW_SECONDS = 60
-MAX_BODY_BYTES = 1 << 20
-# Note writes only: a note may be 2 MiB, and JSON escaping can grow it (worst
-# case \u00XX, 6x). Allowed only after a cheap freshness check of the proxy
-# header, so an unsigned client cannot make us read 12 MiB.
-MAX_NOTE_BODY_BYTES = 6 * (2 << 20) + (64 << 10)
+MAX_BODY_BYTES = 64 << 10
 MAX_IN_FLIGHT = 16
-_NOTE_WRITE_RE = re.compile(r"/api/workspaces/[0-9]{1,12}/note")
-# Task import only (QTZ-008): up to tasks.MAX_IMPORT_BODY_BYTES, same freshness rule.
-_TASK_IMPORT_RE = re.compile(r"/api/workspaces/[0-9]{1,12}/tasks/import")
 MAX_PRINCIPAL_HEADER_BYTES = 4096
 
 _TS_RE = re.compile(r"[0-9]{1,12}")
@@ -216,7 +208,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         self._dispatch()
 
-    def do_PATCH(self) -> None:
+    def do_PATCH(self) -> None:  # no route takes it; answer 404 JSON like any unknown route
         self._dispatch()
 
     def do_DELETE(self) -> None:
@@ -284,6 +276,10 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.Error:
             self._json(500, {"error": "database error", "code": "db_error"})
             return
+        except Exception as err:  # never echo the message: it may name a path
+            sys.stderr.write(f"{APP_NAME}: unexpected {type(err).__name__}\n")
+            self._json(500, {"error": "internal error", "code": "internal"})
+            return
         if result is None:
             self._json(404, {"error": "not found"})
         else:
@@ -298,21 +294,19 @@ class Handler(BaseHTTPRequestHandler):
                 "version": APP_VERSION,
                 "principal": {"kind": principal.kind, "ownerId": principal.owner_id},
             }
-        if parts == ["api", "slots"]:
-            if method == "GET":
-                return 200, {"slots": registry.created_slots()}
-            if method == "POST":
-                return 200, {"slot": registry.record_slot(self._json_body().get("key"))}
-            return None
         if parts == ["api", "workspaces"]:
             if method == "GET":
-                return 200, {"workspaces": [w.to_json() for w in registry.list()]}
+                old = registry.old_task_counts()
+                return 200, {"workspaces": [{**w.to_json(), "oldTasks": old.get(w.id, 0)} for w in registry.list()]}
             if method == "POST":
                 body = self._json_body()
-                return 201, {"workspace": registry.register(body.get("path"), body.get("name")).to_json()}
+                ws = registry.register(body.get("path"), body.get("name"), body.get("companion", False))
+                if ws.companion:
+                    self.server.companion.request(ws, manual=True)  # type: ignore[attr-defined]
+                return 201, {"workspace": ws.to_json()}
             return None
-        if parts[:2] == ["api", "repos"]:
-            return self._handle_repos(parts[2:], query)
+        if parts[:2] == ["api", "companion"]:
+            return self._handle_companion(registry, parts[2:], query)
         if len(parts) >= 3 and parts[:2] == ["api", "workspaces"]:
             ws_id = _parse_id(parts[2])
             if ws_id is None:
@@ -321,101 +315,59 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "GET":
                     return 200, {"workspace": registry.get(ws_id).to_json()}
                 if method == "DELETE":
-                    # A workspace is also a task project: its tasks go with it,
-                    # so that needs ?deleteTasks=1 (409 project_has_tasks otherwise).
-                    registry.unregister(ws_id, delete_tasks=_q(query, "deleteTasks") == "1")
+                    # Its index goes with it, and its old database tasks only with ?deleteOldTasks=1
+                    # (409 has_old_tasks otherwise). The folder is untouched.
+                    uid = registry.get(ws_id).uid
+                    registry.unregister(ws_id, delete_old_tasks=_q(query, "deleteOldTasks") == "1")
+                    self.server.companion.cancel(uid)  # type: ignore[attr-defined]
                     return 200, {"ok": True}
                 return None
-            if parts[3] == "tasks":
-                return self._handle_tasks(ws_id, parts[4:])
-            if len(parts) == 4:
-                return self._handle_notes(registry, ws_id, parts[3], query)
+            index: companion.CompanionIndex = self.server.companion  # type: ignore[attr-defined]
+            if parts[3:] == ["companion"] and method == "PUT":
+                ws = registry.set_companion(ws_id, self._json_body().get("enabled"))
+                if ws.companion:
+                    index.request(ws, manual=True)
+                else:
+                    index.forget(ws.uid)  # derived rows only; the folder is untouched
+                return 200, {"workspace": ws.to_json(), "index": index.status(ws)}
+            if parts[3:] == ["board"] and method == "GET":
+                return 200, index.board(registry.get(ws_id))
         return None
 
-    def _handle_repos(self, rest: list[str], query: dict) -> tuple[int, dict] | None:
-        """/api/repos[...]: the Git repo registry and read-only status/diff (QTZ-010).
-
-        Clients send ids, a path and a mode only; every git argv is built in gitrepo.py.
-        """
+    def _handle_companion(self, registry: Registry, rest: list[str], query: dict) -> tuple[int, dict] | None:
+        """/api/companion[...]: status, refresh and the cross-workspace TODO list. Nothing here writes a file."""
         method = self.command
-        store: gitrepo.RepoStore = self.server.repos  # type: ignore[attr-defined]
-        if rest == []:
-            if method == "GET":
-                return 200, {"repos": [r.to_json() for r in store.list()]}
-            if method == "POST":
-                body = self._json_body()
-                return 201, {"repo": store.register(body.get("path"), body.get("name")).to_json()}
-            return None
-        repo_id = _parse_id(rest[0])
-        if repo_id is None or len(rest) > 2:
-            return None
-        if len(rest) == 1:
-            if method == "GET":
-                return 200, {"repo": store.get(repo_id).to_json()}
-            if method == "DELETE":
-                store.unregister(repo_id)
-                return 200, {"ok": True}
-            return None
-        if method != "GET":
-            return None
-        if rest[1] == "info":
-            return 200, store.info(repo_id)
-        if rest[1] == "status":
-            return 200, store.status(repo_id)
-        if rest[1] == "diff":
-            return 200, store.diff(repo_id, _q(query, "path", None), _q(query, "mode", None),
-                                   _q(query, "orig", None))
+        index: companion.CompanionIndex = self.server.companion  # type: ignore[attr-defined]
+        if rest == [] and method == "GET":
+            return 200, {
+                "available": index.unavailable is None,
+                "error": index.unavailable,
+                "workspaces": [{"workspace": w.to_json(), "index": index.status(w)} for w in registry.list()],
+            }
+        if rest == ["refresh"] and method == "POST":
+            body = self._json_body()
+            ws_id, rebuild, manual = body.get("workspaceId"), body.get("rebuild", False), body.get("manual", False)
+            if not isinstance(rebuild, bool) or not isinstance(manual, bool):
+                raise ApiError(400, "bad_refresh", "rebuild and manual must be true or false")
+            if ws_id is None:
+                targets = [w for w in registry.list() if w.companion]
+            elif isinstance(ws_id, int) and not isinstance(ws_id, bool):
+                targets = [registry.get(ws_id)]
+            else:
+                raise ApiError(400, "bad_refresh", "workspaceId must be a workspace id")
+            requested = [w.id for w in targets if index.request(w, rebuild=rebuild, manual=manual or rebuild)]
+            return 202, {"requested": requested, "skipped": [w.id for w in targets if w.id not in requested]}
+        if rest == ["todos"] and method == "GET":
+            raw = _q(query, "workspace")
+            if raw:
+                ws_id = _parse_id(raw)
+                if ws_id is None:
+                    raise ApiError(400, "bad_query", "workspace must be a workspace id")
+                scope = [registry.get(ws_id)]
+            else:
+                scope = [w for w in registry.list() if w.companion]
+            return 200, index.todos(scope, _q(query, "state", "open"))
         return None
-
-    def _handle_tasks(self, ws_id: int, rest: list[str]) -> tuple[int, dict] | None:
-        """/api/workspaces/{id}/tasks[...]: the Kanban board of that workspace's project."""
-        method = self.command
-        store: tasks.TaskStore = self.server.tasks  # type: ignore[attr-defined]
-        if rest == []:
-            if method == "GET":
-                return 200, store.list(ws_id)
-            if method == "POST":
-                return 201, store.create(ws_id, self._json_body())
-            return None
-        if rest == ["export"] and method == "GET":
-            return 200, store.export(ws_id)
-        if rest == ["import"] and method == "POST":
-            return 200, store.import_(ws_id, self._json_body())
-        task_id = _parse_id(rest[0])
-        if task_id is None or len(rest) > 2:
-            return None
-        if len(rest) == 1:
-            if method == "GET":
-                return 200, store.get(ws_id, task_id)
-            if method == "PATCH":
-                return 200, store.update(ws_id, task_id, self._json_body())
-            return None
-        if rest[1] == "move" and method == "POST":
-            return 200, store.move(ws_id, task_id, self._json_body())
-        if rest[1] == "delete" and method == "POST":
-            return 200, store.delete(ws_id, task_id, self._json_body())
-        return None
-
-    def _handle_notes(self, registry: Registry, ws_id: int, action: str, query: dict) -> tuple[int, dict] | None:
-        method = self.command
-        if (method, action) not in _NOTE_ROUTES:
-            return None
-        root = registry.get(ws_id).path
-        if method == "GET" and action == "notes":
-            return 200, notes.list_notes(root, _q(query, "q"), _q(query, "content") in ("1", "true"))
-        if method == "GET":  # note
-            return 200, notes.read_note(root, _q(query, "path", None))
-        body = self._json_body()
-        if action == "note" and method == "POST":
-            return 201, notes.create_note(root, body.get("path"), body.get("content"))
-        if action == "note":  # PUT
-            return 200, notes.update_note(root, body.get("path"), body.get("content"), body.get("expectedHash"))
-        if action == "rename":
-            return 200, notes.rename_note(root, body.get("from"), body.get("to"),
-                                          overwrite=body.get("overwrite", False), confirm=body.get("confirm", False),
-                                          expected_hash=body.get("expectedHash"))
-        return 200, notes.delete_note(root, body.get("path"), confirm=body.get("confirm"),
-                                      expected_hash=body.get("expectedHash"))
 
     def _json_body(self) -> dict:
         try:
@@ -426,23 +378,6 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "bad_json", "request body must be a JSON object")
         return data
 
-    def _body_limit(self) -> int:
-        """1 MiB, or the note / task-import limit for those writes with a fresh proxy timestamp.
-
-        The full HMAC needs the body, so only the timestamp can be checked
-        before reading; the signature is still verified afterwards.
-        """
-        if self.command in ("POST", "PUT") and _NOTE_WRITE_RE.fullmatch(self.path):
-            larger = MAX_NOTE_BODY_BYTES
-        elif self.command == "POST" and _TASK_IMPORT_RE.fullmatch(self.path):
-            larger = tasks.MAX_IMPORT_BODY_BYTES
-        else:
-            return MAX_BODY_BYTES
-        ts = (self.headers.get(PROXY_HEADER) or "").partition(":")[0]
-        if _TS_RE.fullmatch(ts) and abs(time.time() - int(ts)) <= MAX_SKEW_SECONDS:
-            return larger
-        return MAX_BODY_BYTES
-
     def _read_body(self) -> bytes | None:
         if self.headers.get("Transfer-Encoding"):
             self._json(400, {"error": "chunked bodies are not supported"})
@@ -452,7 +387,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "bad content-length"})
             return None
         length = int(raw_len)
-        if length > self._body_limit():
+        if length > MAX_BODY_BYTES:
             self._json(413, {"error": "body too large", "code": "too_large"})
             return None
         return self.rfile.read(length) if length else b""
@@ -476,12 +411,6 @@ class Handler(BaseHTTPRequestHandler):
         path = (getattr(self, "path", "") or "").split("?", 1)[0]
         status = args[1] if format.startswith('"%s"') and len(args) > 1 else "-"
         sys.stderr.write(f"{APP_NAME}: {command} {path} {status}\n")
-
-
-_NOTE_ROUTES = frozenset({
-    ("GET", "notes"), ("GET", "note"), ("POST", "note"), ("PUT", "note"),
-    ("POST", "rename"), ("POST", "delete"),
-})
 
 
 def _q(query: dict, key: str, default: str | None = "") -> str | None:
@@ -546,9 +475,8 @@ def make_server(port: int, secret: str, registry: Registry) -> Server:
     server.proxy_secret = secret  # type: ignore[attr-defined]
     server.replay_cache = ReplayCache()  # type: ignore[attr-defined]
     server.registry = registry  # type: ignore[attr-defined]
-    server.tasks = tasks.TaskStore(registry)  # type: ignore[attr-defined]
-    server.repos = gitrepo.RepoStore(  # type: ignore[attr-defined]
-        registry, gitrepo.GitRunner(home=str(registry.data_dir / "git-home")))
+    server.companion = companion.CompanionIndex(registry)  # type: ignore[attr-defined]
+    server.companion.start()  # type: ignore[attr-defined]
     return server
 
 

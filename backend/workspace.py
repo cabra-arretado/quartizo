@@ -1,8 +1,8 @@
 """Workspace roots: opt-in registration and path confinement.
 
 A workspace is a directory the dashboard owner explicitly registered. Every
-note path Quartizo touches is a *relative* path inside one registered root, and
-is reached only through ``open_dir`` / ``open_file`` below.
+note path Quartizo reads is a *relative* path inside one registered root, and
+is reached only through ``open_dir_at`` / ``open_file_at`` below.
 
 Confinement, in order:
 
@@ -27,7 +27,6 @@ import errno
 import grp
 import os
 import pwd
-import re
 import sqlite3
 import stat
 import threading
@@ -66,17 +65,20 @@ class Workspace:
     uid: str
     name: str
     path: str
+    # Kiro Notes companion mode: Quartizo only reads this folder (README).
+    companion: bool = False
 
     def to_json(self) -> dict:
-        return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path}
+        return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path,
+                "companion": self.companion}
 
 
-def validate_relpath(rel: object, *, allow_hidden: bool = False) -> list[str]:
-    """Split a client-supplied relative path into safe segments, or raise 400.
+def _workspace(row: sqlite3.Row) -> Workspace:
+    return Workspace(row["id"], row["uid"], row["name"], row["path"], bool(row["companion"]))
 
-    *allow_hidden* (Git paths only, QTZ-010) lets dot segments such as
-    ``.gitignore`` through; every other rule is the same.
-    """
+
+def validate_relpath(rel: object) -> list[str]:
+    """Split a relative path into safe segments, or raise 400."""
     if not isinstance(rel, str) or not rel:
         raise ApiError(400, "bad_path", "path must be a non-empty string")
     if len(rel) > MAX_REL_PATH_CHARS:
@@ -91,7 +93,7 @@ def validate_relpath(rel: object, *, allow_hidden: bool = False) -> list[str]:
     for seg in segments:
         if seg in ("", ".", ".."):
             raise ApiError(400, "bad_path", "empty, '.' and '..' path segments are not allowed")
-        if seg.startswith(".") and not allow_hidden:
+        if seg.startswith("."):
             raise ApiError(400, "bad_path", "hidden path segments are not allowed")
         try:
             encoded = seg.encode("utf-8")
@@ -164,39 +166,14 @@ def _owned(fd: int) -> int:
     return fd
 
 
-def open_dir_at(parent_fd: int, name: str, *, create: bool = False) -> int:
+def open_dir_at(parent_fd: int, name: str) -> int:
     """Open one directory segment relative to *parent_fd*: no symlink, owned by us."""
     try:
         return _owned(os.open(name, _DIR_FLAGS, dir_fd=parent_fd))
     except FileNotFoundError:
-        if not create:
-            raise ApiError(404, "not_found", "no such directory") from None
+        raise ApiError(404, "not_found", "no such directory") from None
     except OSError as err:
         raise _classify_open_error(err, parent_fd, name) from None
-    try:
-        os.mkdir(name, 0o777, dir_fd=parent_fd)
-    except FileExistsError:
-        pass  # raced with someone else creating it; the open below re-checks
-    except OSError as err:
-        raise _classify_open_error(err, parent_fd, name) from None
-    try:
-        return _owned(os.open(name, _DIR_FLAGS, dir_fd=parent_fd))
-    except OSError as err:
-        raise _classify_open_error(err, parent_fd, name) from None
-
-
-@contextmanager
-def open_parent(root: str, segments: list[str], *, create: bool = False) -> Iterator[int]:
-    """Yield an fd for the directory holding ``segments[-1]``, confined to *root*."""
-    fd = open_root(root)
-    try:
-        for seg in segments[:-1]:
-            nxt = open_dir_at(fd, seg, create=create)
-            os.close(fd)
-            fd = nxt
-        yield fd
-    finally:
-        os.close(fd)
 
 
 def open_file_at(parent_fd: int, name: str, flags: int = os.O_RDONLY) -> tuple[int, os.stat_result]:
@@ -287,8 +264,8 @@ def writable_by_others(st: os.stat_result) -> bool:
     return bool(st.st_mode & 0o020) and not _private_group(st.st_gid)
 
 
-def canonical_root(raw: object, protected: tuple[str, ...], noun: str = "workspace") -> str:
-    """The root policy shared by workspaces and Git repos: realpath, or raise 400.
+def canonical_root(raw: object, protected: tuple[str, ...]) -> str:
+    """The workspace root policy: realpath, or raise 400.
 
     Refused: non-absolute, NUL, missing, not a directory, ``/``, the home
     directory itself, ``/proc`` ``/sys`` ``/dev``, anything overlapping a
@@ -300,42 +277,34 @@ def canonical_root(raw: object, protected: tuple[str, ...], noun: str = "workspa
     if "\x00" in raw:
         raise ApiError(400, "bad_root", "path contains a NUL byte")
     if not os.path.isabs(raw):
-        raise ApiError(400, "bad_root", f"{noun} path must be absolute")
+        raise ApiError(400, "bad_root", "workspace path must be absolute")
     real = os.path.realpath(raw)
     try:
         st = os.stat(real)
     except OSError:
-        raise ApiError(400, "bad_root", f"{noun} path does not exist") from None
+        raise ApiError(400, "bad_root", "workspace path does not exist") from None
     if not stat.S_ISDIR(st.st_mode):
-        raise ApiError(400, "bad_root", f"{noun} path is not a directory")
+        raise ApiError(400, "bad_root", "workspace path is not a directory")
     ident = (st.st_dev, st.st_ino)
     if real == "/" or ident == _ident("/"):
-        raise ApiError(400, "root_refused", f"the filesystem root cannot be a {noun}")
+        raise ApiError(400, "root_refused", "the filesystem root cannot be a workspace")
     for home in _home_dirs():
         home_real = os.path.realpath(home)
         if real == home_real or ident == _ident(home_real):
             raise ApiError(400, "root_refused",
-                           f"your home directory itself cannot be a {noun}; pick a folder inside it")
+                           "your home directory itself cannot be a workspace; pick a folder inside it")
     for pseudo in PSEUDO_FS:
         if _inside(real, pseudo):
-            raise ApiError(400, "root_refused", f"{pseudo} is not a place for a {noun}")
+            raise ApiError(400, "root_refused", f"{pseudo} is not a place for a workspace")
     for p in protected:
         if _overlaps(real, p):
-            raise ApiError(400, "root_refused", f"{noun} overlaps KiroCrew or Quartizo data")
+            raise ApiError(400, "root_refused", "workspace overlaps KiroCrew or Quartizo data")
     if st.st_uid != os.getuid():
         raise ApiError(400, "root_not_owned", "the folder must belong to you")
     if writable_by_others(st):
         raise ApiError(400, "root_writable_by_others",
                        "the folder is world-writable or writable by a shared group; run `chmod go-w` on it first")
     return real
-
-
-# Port of ui/src/slots.ts SLOT_NAME_RE (use fullmatch: `$` would admit a trailing newline).
-SLOT_NAME_RE = re.compile(r"quartizo-(?:w([0-9a-f]{32})-)?[0-9a-z]+-[0-9a-z]{6}")
-
-
-def _slot_json(row: sqlite3.Row) -> dict:
-    return {"key": row["key"], "workspaceUid": row["workspace_uid"], "createdAt": row["created_at"]}
 
 
 class Registry:
@@ -361,41 +330,32 @@ class Registry:
 
     def list(self) -> list[Workspace]:
         with self._conn() as conn:
-            return [Workspace(r["id"], r["uid"], r["name"], r["path"]) for r in db.list_workspaces(conn)]
+            return [_workspace(r) for r in db.list_workspaces(conn)]
 
     def get(self, workspace_id: int) -> Workspace:
         with self._conn() as conn:
             row = db.get_workspace(conn, workspace_id)
         if row is None:
             raise ApiError(404, "workspace_not_found", "no such workspace")
-        return Workspace(row["id"], row["uid"], row["name"], row["path"])
+        return _workspace(row)
 
-    def record_slot(self, raw: object) -> dict:
-        """Remember a session key Quartizo created (idempotent).
-
-        The key must match the names the UI generates (slots.ts SLOT_NAME_RE);
-        for a workspace chat the uid must belong to a registered workspace.
-        """
-        m = SLOT_NAME_RE.fullmatch(raw) if isinstance(raw, str) else None
-        if m is None:
-            raise ApiError(400, "bad_slot_key", "not a session name Quartizo generates")
-        uid = m.group(1)
+    def set_companion(self, workspace_id: int, enabled: object) -> Workspace:
+        """Switch Kiro Notes companion mode. Only application state changes; no file is touched."""
+        if not isinstance(enabled, bool):
+            raise ApiError(400, "bad_companion", "enabled must be true or false")
         with self._lock, self._conn() as conn:
-            if uid is not None and not any(w["uid"] == uid for w in db.list_workspaces(conn)):
+            if not db.set_companion(conn, workspace_id, enabled):
                 raise ApiError(404, "workspace_not_found", "no such workspace")
-            db.insert_created_slot(conn, raw, uid)
-            row = next(r for r in db.list_created_slots(conn) if r["key"] == raw)
-        return _slot_json(row)
-
-    def created_slots(self) -> list[dict]:
-        with self._conn() as conn:
-            return [_slot_json(r) for r in db.list_created_slots(conn)]
+        return self.get(workspace_id)
 
     def canonical_root(self, raw: object) -> str:
         """Validate a candidate root and return its realpath, or raise."""
         return canonical_root(raw, self.protected)
 
-    def register(self, raw_path: object, name: object = None) -> Workspace:
+    def register(self, raw_path: object, name: object = None, companion: object = False) -> Workspace:
+        """Register a root; *companion* also shares it with Kiro Notes, in the same insert."""
+        if not isinstance(companion, bool):
+            raise ApiError(400, "bad_companion", "companion must be true or false")
         real = self.canonical_root(raw_path)
         if name is None or name == "":
             label = os.path.basename(real)
@@ -408,23 +368,27 @@ class Registry:
                 if _overlaps(real, ws["path"]):
                     raise ApiError(409, "root_overlaps",
                                    f"overlaps the registered workspace {ws['name']!r}", workspaceId=ws["id"])
-            new_id, uid = db.insert_workspace(conn, label, real)
-        return Workspace(new_id, uid, label, real)
+            new_id, uid = db.insert_workspace(conn, label, real, companion)
+        return Workspace(new_id, uid, label, real, companion)
 
-    def unregister(self, workspace_id: int, *, delete_tasks: bool = False) -> None:
-        """Forget a root. Files are never touched.
+    def old_task_counts(self) -> dict[int, int]:
+        with self._conn() as conn:
+            return db.old_task_counts(conn)
 
-        The workspace is also a task project (QTZ-008), and its tasks go with
-        it (FK cascade). So a workspace that still has tasks is refused with
-        409 ``project_has_tasks`` unless the caller explicitly passed
-        *delete_tasks*. Count and delete happen in one transaction.
+    def unregister(self, workspace_id: int, *, delete_old_tasks: bool = False) -> None:
+        """Forget a root and its index. Files are never touched.
+
+        Tasks left from the removed database board go with it (FK cascade), so
+        a workspace that still has some is refused with 409 ``has_old_tasks``
+        (``taskCount``) unless the caller passed *delete_old_tasks* after the
+        owner confirmed. Count and delete happen in one transaction.
         """
         with self._lock, self._conn() as conn, db.transaction(conn):
             if db.get_workspace(conn, workspace_id) is None:
                 raise ApiError(404, "workspace_not_found", "no such workspace")
-            count = db.count_tasks(conn, workspace_id)
-            if count and delete_tasks is not True:
-                raise ApiError(409, "project_has_tasks",
-                               f"this workspace has {count} task(s); removing it deletes them",
+            count = db.old_task_counts(conn).get(workspace_id, 0)
+            if count and delete_old_tasks is not True:
+                raise ApiError(409, "has_old_tasks",
+                               f"this folder still has {count} task(s) from the old task board; removing it deletes them",
                                taskCount=count)
             db.delete_workspace(conn, workspace_id)
