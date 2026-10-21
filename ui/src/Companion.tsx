@@ -13,6 +13,7 @@ import { type AppApi, useNavigate } from '@kirocrew/app-sdk'
 import { Btn } from '@kirocrew/app-sdk/ui'
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  type ApiFailure,
   type BoardData,
   companionStatus,
   type CompanionWorkspace,
@@ -29,12 +30,14 @@ import {
   type Ticket,
   type TodoData,
   type TodoState,
+  STATUS_LABELS,
   todoLabel,
+  toFailure,
+  withTimeout,
+  type Workspace,
 } from './companionApi'
-import { withTimeout } from './freshness'
 import { KIRO_NOTES_ROUTE, noteName } from './noteNav'
-import { type ApiFailure, toFailure, type Workspace } from './notesApi'
-import { STATUS_LABELS } from './tasksApi'
+import { ErrorLine, S as UI, storage } from './ui'
 
 /** While a scan runs the views check every SCANNING_MS; otherwise they rescan every IDLE_MS while visible. */
 export const SCANNING_MS = 1500
@@ -43,36 +46,14 @@ export const IDLE_MS = 30000
 const WS_KEY = 'quartizo:workspace'
 
 const S = {
-  column: { display: 'flex', flexDirection: 'column' as const, gap: 8, minHeight: 0, minWidth: 0 },
-  row: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const },
-  input: { padding: '4px 6px', border: '1px solid rgba(128,128,128,.4)', borderRadius: 4, background: 'transparent', color: 'inherit' },
+  ...UI,
   board: { display: 'grid', gridAutoFlow: 'column' as const, gridAutoColumns: 'minmax(170px, 1fr)', gap: 8, overflowX: 'auto' as const, minHeight: 0, flex: 1 },
   lane: { display: 'flex', flexDirection: 'column' as const, gap: 6, minHeight: 120, padding: 6, borderRadius: 4, border: '1px solid rgba(128,128,128,.25)' },
   cards: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' as const, gap: 6 },
   card: { display: 'flex', alignItems: 'flex-start', gap: 4, padding: 6, borderRadius: 4, border: '1px solid rgba(128,128,128,.35)' },
   open: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, gap: 2, padding: 0, background: 'transparent', color: 'inherit', border: 'none', textAlign: 'left' as const, cursor: 'pointer' },
-  notice: { padding: 8, borderRadius: 4, border: '1px solid rgba(220,120,0,.6)' },
-  group: { padding: 8, borderRadius: 4, border: '1px solid rgba(128,128,128,.35)', display: 'flex', flexDirection: 'column' as const, gap: 4 },
-  badge: { fontSize: 11, padding: '0 4px', borderRadius: 3, border: '1px solid rgba(220,120,0,.7)' },
   todoRow: { display: 'flex', gap: 6, alignItems: 'baseline' },
   copy: { flex: 'none', fontSize: 11, padding: '1px 6px', borderRadius: 3, border: '1px solid rgba(128,128,128,.4)', background: 'transparent', color: 'inherit', cursor: 'pointer' },
-}
-
-function storage(): Storage | undefined {
-  try {
-    return window.localStorage
-  } catch {
-    return undefined
-  }
-}
-
-function ErrorLine({ failure }: { failure: ApiFailure | null }) {
-  if (!failure) return null
-  return (
-    <div role="alert" className="text-sm text-danger" data-code={failure.code}>
-      {failure.message}
-    </div>
-  )
 }
 
 function usePageVisible(): boolean {
@@ -85,12 +66,11 @@ function usePageVisible(): boolean {
   return visible
 }
 
-/** The companion workspaces, re-read each time the view is shown (Settings may have changed them). */
-export function useCompanions(api: AppApi, active: boolean) {
+/** The companion workspaces, read when the view opens (Settings may have changed them). */
+function useCompanions(api: AppApi) {
   const [companions, setCompanions] = useState<CompanionWorkspace[] | null>(null)
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   useEffect(() => {
-    if (!active) return
     let cancelled = false
     companionStatus(api)
       .then(s => {
@@ -102,7 +82,7 @@ export function useCompanions(api: AppApi, active: boolean) {
     return () => {
       cancelled = true
     }
-  }, [api, active])
+  }, [api])
   return { companions, failure }
 }
 
@@ -126,8 +106,10 @@ function useIndexed<T>(
   const latest = useRef<T | null>(null)
   const fetchRef = useRef(fetch)
   const rescanRef = useRef(rescan)
+  const scanningRef = useRef(scanning)
   fetchRef.current = fetch
   rescanRef.current = rescan
+  scanningRef.current = scanning
 
   useEffect(() => {
     latest.current = null
@@ -143,7 +125,7 @@ function useIndexed<T>(
     const run = async () => {
       try {
         // Opening the view and each idle period ask for a rescan; the backend skips it if one just ran.
-        if (first || !latest.current || !scanning(latest.current)) await withTimeout(rescanRef.current(false))
+        if (first || !latest.current || !scanningRef.current(latest.current)) await withTimeout(rescanRef.current(false))
         const value = await withTimeout(fetchRef.current())
         if (cancelled) return
         latest.current = value
@@ -153,14 +135,14 @@ function useIndexed<T>(
         if (!cancelled) setFailure(toFailure(err))
       }
       first = false
-      if (!cancelled) timer = setTimeout(run, latest.current && scanning(latest.current) ? SCANNING_MS : IDLE_MS)
+      if (!cancelled) timer = setTimeout(run, latest.current && scanningRef.current(latest.current) ? SCANNING_MS : IDLE_MS)
     }
     void run()
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [active, visible, key, tick]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active, visible, key, tick])
 
   /** Refresh from the button: never throttled. */
   const refresh = useCallback(async () => {
@@ -233,8 +215,8 @@ function NoCompanions() {
 // Tasks: the board of one companion workspace
 // ---------------------------------------------------------------------------
 
-export function TasksView(props: { api: AppApi; active: boolean }) {
-  const { companions, failure } = useCompanions(props.api, props.active)
+export function TasksView(props: { api: AppApi }) {
+  const { companions, failure } = useCompanions(props.api)
   const [wsId, setWsId] = useState<number | null>(() => {
     const v = Number(storage()?.getItem(WS_KEY))
     return Number.isInteger(v) && v > 0 ? v : null
@@ -267,17 +249,17 @@ export function TasksView(props: { api: AppApi; active: boolean }) {
           </select>
         </div>
       )}
-      <TicketBoard key={current.id} api={props.api} workspace={current} active={props.active} />
+      <TicketBoard key={current.id} api={props.api} workspace={current} />
     </div>
   )
 }
 
-function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean }) {
+function TicketBoard(props: { api: AppApi; workspace: Workspace }) {
   const { api, workspace } = props
   const wsId = workspace.id
   const navigate = useNavigate()
   const { data, failure, busy, refresh } = useIndexed<BoardData>(
-    props.active,
+    true,
     String(wsId),
     () => loadBoard(api, wsId),
     manual => requestRefresh(api, { workspaceId: wsId, manual }),
@@ -384,10 +366,10 @@ function TicketCard(props: { ticket: Ticket; lane: number; index: number; onOpen
 // TODOs
 // ---------------------------------------------------------------------------
 
-export function TodoView(props: { api: AppApi; active: boolean }) {
+export function TodoView(props: { api: AppApi }) {
   const { api } = props
   const navigate = useNavigate()
-  const { companions, failure: statusFailure } = useCompanions(api, props.active)
+  const { companions, failure: statusFailure } = useCompanions(api)
   const [scope, setScope] = useState<number | 'all'>('all')
   const [state, setState] = useState<TodoState>('open')
   const [search, setSearch] = useState('')
@@ -397,7 +379,7 @@ export function TodoView(props: { api: AppApi; active: boolean }) {
   }, [companions, scope])
 
   const wsId = scope === 'all' ? undefined : scope
-  const enabled = props.active && !!companions && companions.length > 0
+  const enabled = !!companions && companions.length > 0
   const { data, failure, busy, refresh } = useIndexed<TodoData>(
     enabled,
     `${scope}:${state}`,
@@ -452,7 +434,7 @@ export function TodoView(props: { api: AppApi; active: boolean }) {
       {data && groups.length === 0 && <p className="text-sm text-muted">{search.trim() ? 'No TODO matches.' : 'No TODOs.'}</p>}
       <div style={{ ...S.column, overflowY: 'auto' }}>
         {groups.map(g => (
-          <section key={`${g.workspaceId}:${g.path}`} aria-label={g.title} style={S.group}>
+          <section key={`${g.workspaceId}:${g.path}`} aria-label={g.title} style={S.box}>
             <strong className="text-sm">
               {g.title}
               {g.ticket && g.status && <span className="text-muted" style={{ fontWeight: 400 }}>{` · ${STATUS_LABELS[g.status]}`}</span>}

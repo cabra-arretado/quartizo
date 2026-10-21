@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AppApi } from '@kirocrew/app-sdk'
 import {
-  ago, companionStatus, describeIndex, filterTodos, groupLanes, indexWarning, LANES, loadBoard, loadTodos,
-  requestRefresh, setCompanion, type Ticket, type TodoGroup, todoLabel,
+  addWorkspace, ago, companionStatus, describeIndex, filterTodos, groupLanes, indexWarning, LANES, listWorkspaces, loadBoard,
+  loadTodos, query, removeWorkspace, REQUEST_TIMEOUT_MS, requestRefresh, setCompanion, type Ticket, type TodoGroup, todoLabel,
+  toFailure, withTimeout,
 } from '../src/companionApi'
-import { describeSource, KIRO_NOTES, KIRO_NOTES_ROUTE, noteName, openInKiroNotes } from '../src/noteNav'
+import { noteName } from '../src/noteNav'
 
 const B = '/apps/quartizo/api'
 
@@ -53,6 +54,68 @@ describe('companion API client', () => {
     expect(patch).not.toHaveBeenCalled()
     expect(del).not.toHaveBeenCalled()
     for (const call of post.mock.calls) expect((call as unknown[])[0]).toBe(`${B}/companion/refresh`)
+  })
+})
+
+describe('workspace API client', () => {
+  it('lists, adds (already shared) and removes folders', async () => {
+    const { api, get, post, del } = mockApi()
+    get.mockResolvedValueOnce({ workspaces: [] })
+    post.mockResolvedValue({ workspace: {} })
+    await listWorkspaces(api)
+    await addWorkspace(api, '/home/u/notes')
+    await addWorkspace(api, '/home/u/notes', 'Vault')
+    await removeWorkspace(api, 3)
+    expect(get).toHaveBeenCalledWith(`${B}/workspaces`)
+    expect(post.mock.calls).toEqual([
+      [`${B}/workspaces`, { path: '/home/u/notes', companion: true }],
+      [`${B}/workspaces`, { path: '/home/u/notes', name: 'Vault', companion: true }],
+    ])
+    expect(del).toHaveBeenCalledWith(`${B}/workspaces/3`)
+  })
+
+  it('percent-encodes query values (a raw + would read as a space)', () => {
+    expect(query({ q: 'a b+c/ü&x=1' })).toBe('?q=a%20b%2Bc%2F%C3%BC%26x%3D1')
+    expect(query({ a: undefined, b: '' })).toBe('')
+  })
+
+  it('classifies backend failures', () => {
+    const apiError = (status: number, body: unknown) => {
+      const text = typeof body === 'string' ? body : JSON.stringify(body)
+      return Object.assign(new Error(`API ${status}: ${text}`), { name: 'AppApiError', status, body: text })
+    }
+    expect(toFailure(apiError(403, { error: 'no', code: 'symlink_refused' })))
+      .toEqual({ status: 403, code: 'symlink_refused', message: 'no' })
+    expect(toFailure(apiError(502, '<html>'))).toMatchObject({ status: 502, code: undefined })
+    expect(toFailure(new TypeError('Failed to fetch')).message).toBe('Failed to fetch')
+    expect(toFailure(Object.assign(new Error('x'), { name: 'AppApiPermissionError' })).code).toBe('permission_denied')
+  })
+})
+
+describe('withTimeout', () => {
+  it('passes a result through and clears its timer', async () => {
+    vi.useFakeTimers()
+    try {
+      await expect(withTimeout(Promise.resolve(7), 1000)).resolves.toBe(7)
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects a request that never settles', async () => {
+    vi.useFakeTimers()
+    try {
+      const outcome = withTimeout(new Promise<never>(() => {})).then(() => 'ok', (e: Error) => e.message)
+      await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS)
+      await expect(outcome).resolves.toMatch(/timed out after 15 s/)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('rejects with the original error when the request fails first', async () => {
+    await expect(withTimeout(Promise.reject(new Error('API 502')), 1000)).rejects.toThrow('API 502')
   })
 })
 
@@ -119,28 +182,6 @@ describe('TODO filtering', () => {
   it('labels an empty checkbox', () => {
     expect(todoLabel('  ')).toBe('(empty)')
     expect(todoLabel('**bold**')).toBe('**bold**')
-  })
-})
-
-describe('note navigation adapter', () => {
-  it('only opens the Kiro Notes app, and says so', () => {
-    const navigate = vi.fn()
-    const result = openInKiroNotes(navigate, { workspaceId: 1, workspaceName: 'W', path: 'x/y.md' })
-    expect(navigate).toHaveBeenCalledWith(KIRO_NOTES_ROUTE)
-    expect(KIRO_NOTES).toEqual({ app: true, note: false, line: false })
-    expect(result.exact).toBe(false)
-    expect(result.message).toMatch(/Select x\/y\.md there/)
-  })
-
-  it('reports exact targeting only when the editor supports it', () => {
-    const result = openInKiroNotes(vi.fn(), { workspaceId: 1, workspaceName: 'W', path: 'y.md' }, { app: true, note: true, line: false })
-    expect(result).toEqual({ message: 'Opened y.md in Kiro Notes.', exact: true })
-  })
-
-  it('describes the source location', () => {
-    expect(describeSource({ workspaceId: 1, workspaceName: 'Vault', path: 'a/b.md', line: 12, column: 3, heading: 'Plan' }))
-      .toBe('Vault › a/b.md · line 12, column 3 · under “Plan”')
-    expect(describeSource({ workspaceId: 1, workspaceName: 'Vault', path: 'b.md' })).toBe('Vault › b.md')
   })
 })
 

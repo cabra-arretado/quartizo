@@ -63,9 +63,9 @@ export default function Quartizo() {
           aria-labelledby={`qz-tab-${tab}`}
           style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
         >
-          {tab === 'tasks' && <TasksView api={api} active />}
-          {tab === 'todos' && <TodoView api={api} active />}
-          {tab === 'settings' && <Settings api={api} active />}
+          {tab === 'tasks' && <TasksView api={api} />}
+          {tab === 'todos' && <TodoView api={api} />}
+          {tab === 'settings' && <Settings api={api} />}
         </div>
       </div>
     </>

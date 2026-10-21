@@ -1,15 +1,100 @@
 /**
- * Client for the Kiro Notes companion routes (backend/companion.py) and the
- * pure rules the read-only Board and TODOs views apply to their answers.
+ * Client for Quartizo's backend (reached through the gateway proxy at
+ * /apps/quartizo/api/...; wire shapes in backend/server.py and
+ * backend/companion.py) and the pure rules the views apply to its answers.
  *
- * Everything here reads. The only calls that change anything change
- * application state: the companion switch of a workspace and a request to
- * rescan its folder. No route writes a note, ticket property or checkbox.
+ * Nothing here writes a note: the calls that change anything change
+ * application state only (the registered folders, their companion switch and
+ * a request to rescan).
  */
 import type { AppApi } from '@kirocrew/app-sdk'
-import { query, type Workspace } from './notesApi'
-import { BACKEND_BASE } from './slots'
-import { STATUS_LABELS, STATUSES, type TaskStatus } from './tasksApi'
+
+export const BACKEND_BASE = '/apps/quartizo/api'
+
+/** Each request gives up after this long; a timeout counts as a failure. */
+export const REQUEST_TIMEOUT_MS = 15000
+
+export const STATUSES = ['backlog', 'ready', 'in_progress', 'review', 'done'] as const
+export type TaskStatus = (typeof STATUSES)[number]
+
+export const STATUS_LABELS: Record<TaskStatus, string> = {
+  backlog: 'Backlog',
+  ready: 'Ready',
+  in_progress: 'In Progress',
+  review: 'Review',
+  done: 'Done',
+}
+
+export interface Workspace {
+  id: number
+  /** 32 random hex chars, unique per registration (ids are never reused either). */
+  uid: string
+  name: string
+  path: string
+  /** Shared with Kiro Notes: indexed for the board and the TODO list. */
+  companion?: boolean
+}
+
+export interface ApiFailure {
+  status?: number
+  code?: string
+  message: string
+}
+
+/** Map anything AppApi throws to a displayable failure, keeping the backend's code. */
+export function toFailure(err: unknown): ApiFailure {
+  const e = err as { name?: string; status?: unknown; body?: unknown; message?: unknown } | null
+  if (e?.name === 'AppApiPermissionError') {
+    return { code: 'permission_denied', message: 'Quartizo has not declared access to this API in app.json.' }
+  }
+  const status = typeof e?.status === 'number' ? e.status : undefined
+  let parsed: Record<string, unknown> | undefined
+  if (typeof e?.body === 'string' && e.body) {
+    try {
+      const v: unknown = JSON.parse(e.body)
+      if (v && typeof v === 'object' && !Array.isArray(v)) parsed = v as Record<string, unknown>
+    } catch {
+      /* not JSON */
+    }
+  }
+  const code = typeof parsed?.code === 'string' ? parsed.code : undefined
+  const message =
+    typeof parsed?.error === 'string' ? parsed.error : typeof e?.message === 'string' ? e.message : String(err)
+  return { status, code, message }
+}
+
+/** Reject if `p` has not settled within `ms`; the late result is ignored. */
+export function withTimeout<T>(p: Promise<T>, ms: number = REQUEST_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`request timed out after ${Math.round(ms / 1000)} s`)), ms)
+  })
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
+}
+
+/** Query string with encodeURIComponent (the backend's parse_qs reads a raw `+` as a space). */
+export function query(params: Record<string, string | undefined>): string {
+  const parts = Object.entries(params)
+    .filter((kv): kv is [string, string] => kv[1] !== undefined && kv[1] !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+  return parts.length ? `?${parts.join('&')}` : ''
+}
+
+export async function listWorkspaces(api: AppApi): Promise<Workspace[]> {
+  const res = await api.get<{ workspaces: Workspace[] }>(`${BACKEND_BASE}/workspaces`)
+  return res.workspaces
+}
+
+/** Register a folder, already shared with Kiro Notes (one request, so it is never left half-added). */
+export async function addWorkspace(api: AppApi, path: string, name?: string): Promise<Workspace> {
+  const res = await api.post<{ workspace: Workspace }>(`${BACKEND_BASE}/workspaces`, name ? { path, name, companion: true } : { path, companion: true })
+  return res.workspace
+}
+
+/** Call only after the user confirmed in the UI. The folder and its files are not touched. */
+export async function removeWorkspace(api: AppApi, wsId: number): Promise<void> {
+  await api.del(`${BACKEND_BASE}/workspaces/${wsId}`)
+}
 
 export interface Diagnostic {
   code: string
@@ -43,7 +128,6 @@ export interface CompanionWorkspace {
 export interface CompanionStatus {
   available: boolean
   error: string | null
-  writes: false
   workspaces: CompanionWorkspace[]
 }
 
@@ -71,8 +155,6 @@ export interface BoardData {
   index: IndexStatus
   /** Sorted by the backend: rank (ASCII), then ticket ID, then path. */
   tickets: Ticket[]
-  /** Ordinary notes with diagnostics. */
-  notes: NoteItem[]
 }
 
 export interface TodoItem {
@@ -102,7 +184,6 @@ export type TodoState = 'open' | 'done' | 'all'
 
 export interface TodoData {
   groups: TodoGroup[]
-  counts: { open: number; done: number }
   truncated: boolean
   index: Record<string, IndexStatus>
 }

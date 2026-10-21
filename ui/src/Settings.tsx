@@ -6,58 +6,72 @@
 import type { AppApi } from '@kirocrew/app-sdk'
 import { Btn } from '@kirocrew/app-sdk/ui'
 import { useEffect, useState } from 'react'
-import { requestRefresh, setCompanion } from './companionApi'
-import { type ApiFailure, listWorkspaces, registerWorkspace, toFailure, type Workspace } from './notesApi'
-import { removeWorkspace, toTaskFailure } from './tasksApi'
+import {
+  addWorkspace,
+  type ApiFailure,
+  listWorkspaces,
+  removeWorkspace,
+  requestRefresh,
+  setCompanion,
+  toFailure,
+  type Workspace,
+} from './companionApi'
+import { ErrorLine, S } from './ui'
 
-const S = {
-  column: { display: 'flex', flexDirection: 'column' as const, gap: 8, minWidth: 0 },
-  row: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' as const },
-  input: { flex: 1, minWidth: 0, padding: '4px 6px', border: '1px solid rgba(128,128,128,.4)', borderRadius: 4, background: 'transparent', color: 'inherit' },
-  item: { padding: 8, borderRadius: 4, border: '1px solid rgba(128,128,128,.35)', display: 'flex', flexDirection: 'column' as const, gap: 6 },
-  notice: { padding: 8, borderRadius: 4, border: '1px solid rgba(220,120,0,.6)', display: 'flex', flexDirection: 'column' as const, gap: 6 },
-  mono: { fontFamily: 'ui-monospace, monospace', fontSize: 12, wordBreak: 'break-all' as const },
-}
+const grow = { ...S.input, flex: 1, minWidth: 0 }
 
-export default function Settings(props: { api: AppApi; active: boolean }) {
-  const { api } = props
-  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
-  const [failure, setFailure] = useState<ApiFailure | null>(null)
-  const [reload, setReload] = useState(0)
-  const [path, setPath] = useState('')
-  const [name, setName] = useState('')
+/** Busy flag and last failure around one action at a time. */
+function useAction() {
   const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (!props.active) return
-    let cancelled = false
-    listWorkspaces(api)
-      .then(value => !cancelled && setWorkspaces(value))
-      .catch(err => !cancelled && setFailure(toFailure(err)))
-    return () => {
-      cancelled = true
-    }
-  }, [api, props.active, reload])
-
-  const add = async () => {
+  const [failure, setFailure] = useState<ApiFailure | null>(null)
+  const run = async (action: () => Promise<unknown>): Promise<boolean> => {
     setBusy(true)
     setFailure(null)
     try {
-      await registerWorkspace(api, path.trim(), name.trim() || undefined, true)
+      await action()
+      return true
+    } catch (err) {
+      setFailure(toFailure(err))
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+  return { busy, failure, run }
+}
+
+export default function Settings(props: { api: AppApi }) {
+  const { api } = props
+  const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
+  const [loadFailure, setLoadFailure] = useState<ApiFailure | null>(null)
+  const [reload, setReload] = useState(0)
+  const [path, setPath] = useState('')
+  const [name, setName] = useState('')
+  const { busy, failure, run } = useAction()
+
+  useEffect(() => {
+    let cancelled = false
+    listWorkspaces(api)
+      .then(value => !cancelled && setWorkspaces(value))
+      .catch(err => !cancelled && setLoadFailure(toFailure(err)))
+    return () => {
+      cancelled = true
+    }
+  }, [api, reload])
+
+  const add = async () => {
+    if (await run(() => addWorkspace(api, path.trim(), name.trim() || undefined))) {
       setPath('')
       setName('')
       setReload(n => n + 1)
-    } catch (err) {
-      setFailure(toFailure(err))
-    } finally {
-      setBusy(false)
     }
   }
 
   return (
     <div style={S.column}>
       <strong className="text-sm">Folders</strong>
-      {!workspaces && !failure && <p className="text-sm text-muted">Loading…</p>}
+      <ErrorLine failure={loadFailure} />
+      {!workspaces && !loadFailure && <p className="text-sm text-muted">Loading…</p>}
       {workspaces?.length === 0 && <p className="text-sm text-muted">No folder yet. Add the folder you also attached in Kiro Notes.</p>}
       {workspaces?.map(w => (
         <WorkspaceItem key={w.id} api={api} workspace={w} onChanged={() => setReload(n => n + 1)} />
@@ -68,65 +82,32 @@ export default function Settings(props: { api: AppApi; active: boolean }) {
           placeholder="/home/you/notes"
           value={path}
           onChange={e => setPath(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && path.trim() && void add()}
-          style={S.input}
+          onKeyDown={e => e.key === 'Enter' && path.trim() && !busy && void add()}
+          style={grow}
         />
-        <input aria-label="Name (optional)" placeholder="Name (optional)" value={name} onChange={e => setName(e.target.value)} style={{ ...S.input, flex: '0 1 180px' }} />
+        <input aria-label="Name (optional)" placeholder="Name (optional)" value={name} onChange={e => setName(e.target.value)} style={{ ...grow, flex: '0 1 180px' }} />
         <Btn onClick={() => void add()} disabled={busy || !path.trim()}>
           Add folder
         </Btn>
       </div>
-      {failure && (
-        <div role="alert" className="text-sm text-danger" data-code={failure.code}>
-          {failure.message}
-        </div>
-      )}
+      <ErrorLine failure={failure} />
     </div>
   )
 }
 
 function WorkspaceItem(props: { api: AppApi; workspace: Workspace; onChanged: () => void }) {
   const { api, workspace: w } = props
-  const [busy, setBusy] = useState(false)
-  const [failure, setFailure] = useState<ApiFailure | null>(null)
+  const { busy, failure, run } = useAction()
   const [message, setMessage] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
-  // Set when the backend refused the removal because the workspace still has database tasks.
-  const [taskCount, setTaskCount] = useState<number | null>(null)
-
-  const run = async (action: () => Promise<unknown>, done?: string) => {
-    setBusy(true)
-    setFailure(null)
-    setMessage(null)
-    try {
-      await action()
-      if (done) setMessage(done)
-      return true
-    } catch (err) {
-      setFailure(toFailure(err))
-      return false
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const remove = async (deleteTasks = false) => {
-    setBusy(true)
-    setFailure(null)
-    try {
-      await removeWorkspace(api, w.id, deleteTasks)
-      props.onChanged()
-    } catch (err) {
-      const f = toTaskFailure(err)
-      if (f.code === 'project_has_tasks' && !deleteTasks) setTaskCount(f.taskCount ?? 0)
-      else setFailure(f)
-    } finally {
-      setBusy(false)
-    }
-  }
+  useEffect(() => {
+    if (!message) return
+    const t = setTimeout(() => setMessage(null), 3000)
+    return () => clearTimeout(t)
+  }, [message])
 
   return (
-    <section aria-label={w.name} style={S.item}>
+    <section aria-label={w.name} style={S.box}>
       <div style={S.row}>
         <strong className="text-sm">{w.name}</strong>
         <span className="text-sm text-muted" style={S.mono}>
@@ -145,7 +126,14 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; onChanged: ()
         </label>
         <span style={{ flex: 1 }} />
         {w.companion && (
-          <Btn onClick={() => void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true }), 'Rebuild requested.')} disabled={busy}>
+          <Btn
+            onClick={() =>
+              void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true })).then(
+                ok => ok && setMessage('Rebuild requested.'),
+              )
+            }
+            disabled={busy}
+          >
             Rebuild index
           </Btn>
         )}
@@ -157,22 +145,12 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; onChanged: ()
       </div>
       {confirmRemove && (
         <div role="alertdialog" aria-label="Remove folder" style={S.notice}>
-          <span className="text-sm">
-            {taskCount === null
-              ? `Stop showing “${w.name}” in Quartizo? The folder and its files are not touched.`
-              : `“${w.name}” still has ${taskCount} task(s) in Quartizo's own database. Removing it also deletes them.`}
-          </span>
+          <span className="text-sm">Stop showing “{w.name}” in Quartizo? The folder and its files are not touched.</span>
           <div style={S.row}>
-            <Btn onClick={() => void remove(taskCount !== null)} disabled={busy}>
-              {taskCount === null ? 'Remove' : `Remove and delete ${taskCount} task(s)`}
+            <Btn onClick={() => void run(() => removeWorkspace(api, w.id)).then(ok => ok && props.onChanged())} disabled={busy}>
+              Remove
             </Btn>
-            <Btn
-              onClick={() => {
-                setConfirmRemove(false)
-                setTaskCount(null)
-              }}
-              disabled={busy}
-            >
+            <Btn onClick={() => setConfirmRemove(false)} disabled={busy}>
               Cancel
             </Btn>
           </div>
@@ -183,11 +161,7 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; onChanged: ()
           {message}
         </span>
       )}
-      {failure && (
-        <div role="alert" className="text-sm text-danger" data-code={failure.code}>
-          {failure.message}
-        </div>
-      )}
+      <ErrorLine failure={failure} />
     </section>
   )
 }
