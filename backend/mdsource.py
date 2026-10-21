@@ -3,9 +3,9 @@
 A port of the read half of the phase 1 spike (``spikes/markdown_tickets/source.py``);
 the contracts are in docs/markdown-tickets-phase1.md. Nothing here writes or
 patches bytes: this delivery only indexes. YAML nodes, never a reserialized
-document, are inspected; the Markdown block parser finds the title and the
-headings, and checkboxes follow native Kiro Notes' line rule (``_todos``) so
-Quartizo lists exactly the checkboxes Kiro Notes shows.
+document, are inspected. Checkboxes and their headings follow native Kiro
+Notes' line rules (``_todos``), so Quartizo lists exactly the checkboxes Kiro
+Notes shows; no Markdown parser is involved.
 
 Every problem becomes a ``Diagnostic`` on the note rather than an exception,
 so a damaged note stays visible.
@@ -21,8 +21,6 @@ import vendored
 
 vendored.activate()
 
-from markdown_it import MarkdownIt  # noqa: E402
-from markdown_it.rules_block.paragraph import paragraph  # noqa: E402
 from ruamel.yaml import YAML  # noqa: E402
 from ruamel.yaml.error import YAMLError  # noqa: E402
 from ruamel.yaml.events import AliasEvent, MappingEndEvent, MappingStartEvent, SequenceEndEvent, SequenceStartEvent  # noqa: E402
@@ -41,9 +39,15 @@ _STRING_TAG = "tag:yaml.org,2002:str"
 _SAFE_TAGS = frozenset({"str", "int", "float", "bool", "null", "timestamp", "binary", "map", "seq"})
 _TICKET_ID = re.compile(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})")
 _RANK = re.compile(r"[0-9a-f]{32}")
-# Native Kiro Notes' checkbox line (see _todos), and the list lines that keep its indentation levels.
-_KIRO_CHECKBOX = re.compile(r"^(\s*)- \[( |x)\] (.*)$")
-_LIST_LINE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
+# Native Kiro Notes' rules (kirocrew 0.10.0rc4, md-notebook utils.ts and Preview.tsx), as JavaScript
+# reads them: JS ``\s`` also matches U+FEFF and ``.`` stops at ``\r``, so a CRLF line is never a checkbox.
+_JS_SPACE = "[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+_JS_DOT = "[^\n\r\u2028\u2029]"
+_KIRO_FRONTMATTER = re.compile(r"---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|\Z)")  # FM_RE
+_KIRO_LIST = re.compile(rf"({_JS_SPACE}*)(- \[[ x]\] |[-*] |(\d+)\. )")  # LIST_MARKER_RE
+_KIRO_CHECKBOX = re.compile(rf"({_JS_SPACE}*)- \[( |x)\] ({_JS_DOT}*)\Z")
+_KIRO_HEADING = re.compile(rf"(#{{1,6}}) ({_JS_DOT}*)\Z")
+_TAB_STOP = 4
 _DELIMITER = re.compile(r"---[ \t]*$")
 # Unparseable metadata can still say it is a ticket; such a note goes to the
 # board's repair lane instead of disappearing.
@@ -95,33 +99,12 @@ def valid_rank(rank: object) -> bool:
     return isinstance(rank, str) and bool(_RANK.fullmatch(rank)) and MIN_RANK < int(rank, 16) < MAX_RANK
 
 
-def _inline_label(token) -> str:
-    return "".join(" " if child.type in ("softbreak", "hardbreak") else child.content
-                   for child in token.children or []
-                   if child.type in ("text", "code_inline", "image", "softbreak", "hardbreak")).strip()
-
-
-def _capture_paragraph(state, start_line, end_line, silent):
-    # Lists and blockquotes adjust bMarks/tShift before calling the paragraph
-    # rule. Capture that position before they restore the outer parser state.
-    start = state.bMarks[start_line] + state.tShift[start_line]
-    index = len(state.tokens)
-    matched = paragraph(state, start_line, end_line, silent)
-    if matched and not silent:
-        for token in state.tokens[index:]:
-            if token.type == "inline":
-                token.meta["source_column"] = start - state.env["line_starts"][start_line]
-    return matched
-
-
-def _make_parser() -> MarkdownIt:
-    parser = MarkdownIt("commonmark")
-    parser.block.ruler.at("paragraph", _capture_paragraph)
-    return parser
-
-
-# Shared: each parse() builds its own state, so one configured parser serves every thread.
-_PARSER = _make_parser()
+def _indent_columns(indent: str) -> int:
+    """Kiro Notes' indentPx in columns: tabs expand to the next tab stop."""
+    col = 0
+    for ch in indent:
+        col = col + _TAB_STOP - col % _TAB_STOP if ch == "\t" else col + 1
+    return col
 
 
 def _stem(path: str) -> str:
@@ -140,7 +123,7 @@ class _Source:
             self.char_starts.append(self.char_starts[-1] + len(line))
             self.byte_starts.append(self.byte_starts[-1] + len(line.encode("utf-8")))
         if len(set(re.findall(r"\r\n|\r|\n", text))) > 1:
-            note.diagnose("mixed_endings", "mixed line endings; Quartizo will never modify this note")
+            note.diagnose("mixed_endings", "mixed line endings")
         self.body_line = 0
         self.body_start = 1 if text.startswith("﻿") else 0
         self.fields: dict[str, object] = {}
@@ -224,11 +207,10 @@ class _Source:
         node = self.fields.get(key)
         return node.value if isinstance(node, ScalarNode) and node.tag == _STRING_TAG else None
 
-    def tokens(self):
-        body = self.text[self.body_start:].replace("\r\n", "\n").replace("\r", "\n")
-        line_starts = [0]
-        line_starts.extend(match.end() for match in re.finditer("\n", body))
-        return _PARSER.parse(body, {"line_starts": line_starts})
+    def position(self, char_offset: int) -> tuple[int, int]:
+        """Zero-based physical line and column of a character offset."""
+        line = bisect_right(self.char_starts, char_offset) - 1
+        return line, char_offset - self.char_starts[line]
 
 
 def _ticket_fields(source: _Source, note: Note) -> None:
@@ -247,46 +229,60 @@ def _ticket_fields(source: _Source, note: Note) -> None:
         note.order = None
 
 
-def _todos(source: _Source, note: Note, tokens) -> None:
+def _todos(source: _Source, note: Note) -> None:
     """Checkboxes exactly as native Kiro Notes renders them, so both show the same TODOs.
 
-    Kiro Notes (kirocrew 0.10.0rc4, MdNotebookPage) checks each body line
-    against ``^(\\s*)- \\[( |x)\\] (.*)$`` and skips only lines inside
-    backtick fences: ``*``/``+``/numbered items, ``[X]``, quoted items and
-    ``~~~`` fences are not checkboxes there, while an indented line is one.
+    Like Kiro Notes: drop a frontmatter block that starts the file, split the
+    rest on ``\\n``, skip ```` ``` ```` fences, and take ``- [ ] text`` /
+    ``- [x] text`` lines at any indentation. ``*``/``+``/numbered items,
+    ``[X]``, quoted items, ``~~~`` fences and CRLF lines are not checkboxes
+    there, while an indented line is one. Depth follows its list rails: any
+    line that is not a list item ends the list.
     """
-    # Nearest preceding top-level heading, by body line.
-    headings = [(tokens[i].map[0], _inline_label(tokens[i + 1])) for i, token in enumerate(tokens)
-                if token.type == "heading_open" and token.level == 0 and token.map]
-    fenced, indents = False, []
-    for line in range(source.body_line, len(source.lines)):
-        text = source.lines[line].rstrip("\r\n")
-        bom = 1 if line == 0 and text.startswith("﻿") else 0
-        text = text[bom:]
-        if text.startswith("```"):
+    text = source.text
+    frontmatter = _KIRO_FRONTMATTER.match(text)
+    offset = frontmatter.end() if frontmatter else 0
+    fenced, heading, indents = False, None, []
+    for raw in text[offset:].split("\n"):
+        start, offset = offset, offset + len(raw) + 1
+        if not _KIRO_LIST.match(raw):
+            indents = []
+        if raw.startswith("```"):
             fenced = not fenced
             continue
         if fenced:
             continue
-        match = _KIRO_CHECKBOX.match(text)
+        head = _KIRO_HEADING.match(raw)
+        if head:
+            heading = head[2].strip() or None
+            continue
+        match = _KIRO_CHECKBOX.match(raw)
         if not match:
-            if not _LIST_LINE.match(text):
-                indents = []
             continue
         if len(note.todos) >= MAX_TODOS_PER_NOTE:
             note.diagnose("todo_limit", f"only the first {MAX_TODOS_PER_NOTE} checkboxes are indexed")
             return
-        indent = len(match[1])
+        indent = _indent_columns(match[1])
         while indents and indents[-1] >= indent:
             indents.pop()
         depth = len(indents)
         indents.append(indent)
-        column = bom + indent + 2  # the '[' after "- "
-        marker_byte = source.byte_offset(source.char_starts[line] + column)
-        body_line = line - source.body_line
-        heading = next((h for start, h in reversed(headings) if start < body_line), None)
-        note.todos.append(Todo(marker_byte, line + 1, column + 1, match[2] == "x",
+        marker = start + len(match[1]) + 2  # the '[' after "- "
+        line, column = source.position(marker)
+        note.todos.append(Todo(source.byte_offset(marker), line + 1, column + 1, match[2] == "x",
                                match[3].strip()[:MAX_LABEL_CHARS], depth, heading))
+
+
+def _title(source: _Source) -> str | None:
+    """The first ``# `` heading after Quartizo's own frontmatter reading, outside ``` fences."""
+    fenced = False
+    for raw in source.lines[source.body_line:]:
+        line = raw.rstrip("\r\n").lstrip("\ufeff")
+        if line.startswith("```"):
+            fenced = not fenced
+        elif not fenced and line.startswith("# "):
+            return line[2:].strip().rstrip("#").strip() or None
+    return None
 
 
 def parse_note(path: str, data: bytes) -> Note:
@@ -302,14 +298,6 @@ def parse_note(path: str, data: bytes) -> Note:
         return note
     source = _Source(data, text, note)
     _ticket_fields(source, note)
-    try:
-        tokens = source.tokens()
-    except RecursionError:
-        note.diagnose("markdown_limit", "note is nested too deeply to index its checkboxes")
-        return note
-    for index, token in enumerate(tokens):
-        if token.type == "heading_open" and token.tag == "h1" and token.level == 0:
-            note.title = _inline_label(tokens[index + 1]) or note.title
-            break
-    _todos(source, note, tokens)
+    note.title = _title(source) or note.title
+    _todos(source, note)
     return note

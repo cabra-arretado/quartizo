@@ -1,11 +1,10 @@
-"""Load the vendored Markdown/YAML parsers, and only those.
+"""Load the vendored YAML parser, and only that.
 
 ``backend/_vendor`` holds unchanged copies of hash-pinned wheels (see
 ``scripts/vendor_parsers.py`` and ``_vendor/README.md``). The gateway runs the
 backend with its own interpreter, whose site-packages may hold other versions
-of the same packages (0.10.0rc4 ships markdown-it-py 4.2.0), so the vendor dir
-goes first on ``sys.path`` and every import is checked for both its version and
-its location. Source-position rules depend on the exact parser version.
+of the same package, so the vendor dir goes first on ``sys.path`` and the import
+is checked for both its version and its location.
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ import os
 import sys
 
 VENDOR_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_vendor")
-PINS = {"ruamel.yaml": "0.19.1", "markdown_it": "4.0.0", "mdurl": "0.1.2"}
+PINS = {"ruamel.yaml": "0.19.1"}
 
 
 def activate() -> None:

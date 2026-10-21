@@ -165,6 +165,34 @@ class TodoTests(IndexTestCase):
         self.assertEqual(sum(len(g["items"]) for g in result["groups"]), 3)
 
 
+class KiroNotesEdgeCaseTests(IndexTestCase):
+    def items(self, name: str, data: bytes) -> list:
+        self.put(name, data)
+        self.scan()
+        group = next((g for g in self.index.todos([self.ws], "all")["groups"] if g["path"] == name), None)
+        return [(i["text"], i["line"], i["column"], i["depth"], i["heading"]) for i in group["items"]] if group else []
+
+    def test_crlf_lines_are_not_checkboxes(self):
+        # Kiro Notes splits on \n only, and its "." stops at the remaining \r.
+        self.assertEqual(self.items("crlf.md", b"- [ ] one\r\n- [ ] two\r\n- [ ] last"), [("last", 3, 3, 0, None)])
+
+    def test_a_lone_cr_file_is_one_line(self):
+        self.assertEqual(self.items("cr.md", b"- [ ] one\r- [ ] two\r"), [])
+
+    def test_unclosed_frontmatter_is_body(self):
+        self.assertEqual(self.items("open.md", b"---\ntitle: x\n- [ ] in yaml\n"), [("in yaml", 3, 3, 0, None)])
+
+    def test_closed_frontmatter_is_skipped_but_a_bom_breaks_it(self):
+        self.assertEqual(self.items("fm.md", b"---\n- [ ] yaml\n---\n- [ ] body\n"), [("body", 4, 3, 0, None)])
+        bom = self.items("bom.md", "\ufeff---\n- [ ] yaml\n---\n- [ ] body\n".encode())
+        self.assertEqual([i[0] for i in bom], ["yaml", "body"])
+
+    def test_depth_follows_indentation_with_tab_stops_and_headings(self):
+        data = b"# Top\n- [ ] a\n\t- [ ] b\n    - [ ] c\n  - [ ] d\n## Next\n- [x] e\n"
+        self.assertEqual([(t, d, h) for t, _, _, d, h in self.items("depth.md", data)],
+                         [("a", 0, "Top"), ("b", 1, "Top"), ("c", 1, "Top"), ("d", 1, "Top"), ("e", 0, "Next")])
+
+
 class ReconcileTests(IndexTestCase):
     def test_browsing_refreshing_and_rebuilding_leave_vault_bytes_unchanged(self):
         before = snapshot(self.vault)

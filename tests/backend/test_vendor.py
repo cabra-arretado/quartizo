@@ -30,16 +30,14 @@ class VendorTests(unittest.TestCase):
         self.assertEqual(actual, listed)
 
     def test_parsers_are_loaded_from_the_vendored_copy(self):
-        import markdown_it
         import ruamel.yaml
-        for module in (markdown_it, ruamel.yaml):
-            self.assertTrue(os.path.abspath(module.__file__).startswith(vendored.VENDOR_DIR + os.sep))
+        self.assertTrue(os.path.abspath(ruamel.yaml.__file__).startswith(vendored.VENDOR_DIR + os.sep))
 
     def test_a_shadowing_copy_is_refused(self):
-        fake = types.ModuleType("markdown_it")
-        fake.__file__ = "/elsewhere/markdown_it/__init__.py"
-        fake.__version__ = "4.0.0"
-        with mock.patch.dict("sys.modules", {"markdown_it": fake}):
+        fake = types.ModuleType("ruamel.yaml")
+        fake.__file__ = "/elsewhere/ruamel/yaml/__init__.py"
+        fake.__version__ = "0.19.1"
+        with mock.patch.dict("sys.modules", {"ruamel.yaml": fake}):
             with self.assertRaises(ImportError):
                 vendored.activate()
 
