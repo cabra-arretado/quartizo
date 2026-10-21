@@ -53,6 +53,7 @@ const S = {
   card: { display: 'flex', alignItems: 'flex-start', gap: 4, padding: 6, borderRadius: 4, border: '1px solid rgba(128,128,128,.35)' },
   open: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' as const, gap: 2, padding: 0, background: 'transparent', color: 'inherit', border: 'none', textAlign: 'left' as const, cursor: 'pointer' },
   todoRow: { display: 'flex', gap: 6, alignItems: 'baseline' },
+  fileName: { fontFamily: 'ui-monospace, monospace', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, maxWidth: '100%' },
   copy: { flex: 'none', fontSize: 11, padding: '1px 6px', borderRadius: 3, border: '1px solid rgba(128,128,128,.4)', background: 'transparent', color: 'inherit', cursor: 'pointer' },
 }
 
@@ -212,7 +213,7 @@ function FileName({ path, title }: { path: string; title: string }) {
   const name = noteName(path)
   if (name === title) return null
   return (
-    <span className="text-sm text-muted" style={S.mono}>
+    <span className="text-sm text-muted" title={name} style={S.fileName}>
       {name}
     </span>
   )

@@ -1,8 +1,8 @@
 import { jsx as r, jsxs as d, Fragment as P } from "react/jsx-runtime";
 import { useNavigate as U, useAppApi as oe } from "@kirocrew/app-sdk";
 import { Btn as C, PageHeader as ae } from "@kirocrew/app-sdk/ui";
-import { useState as b, useEffect as T, useMemo as H, useRef as O, useCallback as se } from "react";
-const R = "/apps/quartizo/api", ie = 15e3, le = ["backlog", "ready", "in_progress", "review", "done"], Q = {
+import { useState as b, useEffect as S, useMemo as H, useRef as L, useCallback as ie } from "react";
+const R = "/apps/quartizo/api", se = 15e3, le = ["backlog", "ready", "in_progress", "review", "done"], Q = {
   backlog: "Backlog",
   ready: "Ready",
   in_progress: "In Progress",
@@ -21,12 +21,12 @@ function E(n) {
       c && typeof c == "object" && !Array.isArray(c) && (o = c);
     } catch {
     }
-  const s = typeof (o == null ? void 0 : o.code) == "string" ? o.code : void 0, a = typeof (o == null ? void 0 : o.error) == "string" ? o.error : typeof (e == null ? void 0 : e.message) == "string" ? e.message : String(n);
-  return { status: t, code: s, message: a };
+  const i = typeof (o == null ? void 0 : o.code) == "string" ? o.code : void 0, a = typeof (o == null ? void 0 : o.error) == "string" ? o.error : typeof (e == null ? void 0 : e.message) == "string" ? e.message : String(n);
+  return { status: t, code: i, message: a };
 }
-function B(n, e = ie) {
+function F(n, e = se) {
   let t;
-  const o = new Promise((s, a) => {
+  const o = new Promise((i, a) => {
     t = setTimeout(() => a(new Error(`request timed out after ${Math.round(e / 1e3)} s`)), e);
   });
   return Promise.race([n, o]).finally(() => clearTimeout(t));
@@ -44,24 +44,24 @@ async function ue(n, e, t) {
 async function pe(n, e, t = !1) {
   await n.del(`${R}/workspaces/${e}${t ? "?deleteOldTasks=1" : ""}`);
 }
-const F = `${R}/companion`;
+const W = `${R}/companion`;
 function me(n) {
-  return n.get(F);
+  return n.get(W);
 }
 function fe(n, e, t) {
   return n.put(`${R}/workspaces/${e}/companion`, { enabled: t });
 }
-function K(n, e = {}) {
+function B(n, e = {}) {
   const t = {};
-  return e.workspaceId !== void 0 && (t.workspaceId = e.workspaceId), e.rebuild && (t.rebuild = !0), e.manual && (t.manual = !0), n.post(`${F}/refresh`, t);
+  return e.workspaceId !== void 0 && (t.workspaceId = e.workspaceId), e.rebuild && (t.rebuild = !0), e.manual && (t.manual = !0), n.post(`${W}/refresh`, t);
 }
 function he(n, e) {
   return n.get(`${R}/workspaces/${e}/board`);
 }
 function ge(n, e, t) {
-  return n.get(`${F}/todos${ce({ workspace: t === void 0 ? void 0 : String(t), state: e })}`);
+  return n.get(`${W}/todos${ce({ workspace: t === void 0 ? void 0 : String(t), state: e })}`);
 }
-const V = [...le, "repair"], W = { ...Q, repair: "Needs repair" };
+const V = [...le, "repair"], K = { ...Q, repair: "Needs repair" };
 function be(n) {
   const e = Object.fromEntries(V.map((t) => [t, []]));
   for (const t of n) (e[t.lane] ?? e.repair).push(t);
@@ -105,11 +105,11 @@ function ke(n, e) {
   const t = e.trim().toLocaleLowerCase();
   if (!t) return [...n];
   const o = [];
-  for (const s of n) {
-    const c = `${s.title}
-${s.path}`.toLocaleLowerCase().includes(t) ? s.items : s.items.filter((p) => `${p.text}
+  for (const i of n) {
+    const c = `${i.title}
+${i.path}`.toLocaleLowerCase().includes(t) ? i.items : i.items.filter((p) => `${p.text}
 ${p.heading ?? ""}`.toLocaleLowerCase().includes(t));
-    c.length && o.push({ ...s, items: c });
+    c.length && o.push({ ...i, items: c });
   }
   return o;
 }
@@ -147,101 +147,102 @@ const ve = 1500, Ne = 3e4, M = "quartizo:workspace", g = {
   card: { display: "flex", alignItems: "flex-start", gap: 4, padding: 6, borderRadius: 4, border: "1px solid rgba(128,128,128,.35)" },
   open: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2, padding: 0, background: "transparent", color: "inherit", border: "none", textAlign: "left", cursor: "pointer" },
   todoRow: { display: "flex", gap: 6, alignItems: "baseline" },
+  fileName: { fontFamily: "ui-monospace, monospace", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" },
   copy: { flex: "none", fontSize: 11, padding: "1px 6px", borderRadius: 3, border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit", cursor: "pointer" }
 };
-function Te() {
+function Se() {
   const [n, e] = b(() => typeof document > "u" || document.visibilityState !== "hidden");
-  return T(() => {
+  return S(() => {
     const t = () => e(document.visibilityState !== "hidden");
     return document.addEventListener("visibilitychange", t), () => document.removeEventListener("visibilitychange", t);
   }, []), n;
 }
 function Y(n) {
-  const [e, t] = b(null), [o, s] = b(null);
-  return T(() => {
+  const [e, t] = b(null), [o, i] = b(null);
+  return S(() => {
     let a = !1;
     return me(n).then((c) => {
-      a || (t(c.workspaces.filter((p) => p.workspace.companion)), s(c.available ? null : { message: c.error ?? "The Markdown index is unavailable." }));
-    }).catch((c) => !a && s(E(c))), () => {
+      a || (t(c.workspaces.filter((p) => p.workspace.companion)), i(c.available ? null : { message: c.error ?? "The Markdown index is unavailable." }));
+    }).catch((c) => !a && i(E(c))), () => {
       a = !0;
     };
   }, [n]), { companions: e, failure: o };
 }
-function J(n, e, t, o, s) {
-  const a = Te(), [c, p] = b(null), [u, m] = b(null), [y, N] = b(0), [S, i] = b(!1), w = O(null), k = O(t), f = O(o), x = O(s);
-  k.current = t, f.current = o, x.current = s, T(() => {
+function J(n, e, t, o, i) {
+  const a = Se(), [c, p] = b(null), [u, m] = b(null), [y, N] = b(0), [T, s] = b(!1), w = L(null), k = L(t), f = L(o), x = L(i);
+  k.current = t, f.current = o, x.current = i, S(() => {
     w.current = null, p(null), m(null);
-  }, [e]), T(() => {
+  }, [e]), S(() => {
     if (!n || !a) return;
     let h = !1, z, I = !0;
-    const D = async () => {
+    const O = async () => {
       try {
-        (I || !w.current || !x.current(w.current)) && await B(f.current(!1));
-        const A = await B(k.current());
+        (I || !w.current || !x.current(w.current)) && await F(f.current(!1));
+        const A = await F(k.current());
         if (h) return;
         w.current = A, p(A), m(null);
       } catch (A) {
         h || m(E(A));
       }
-      I = !1, h || (z = setTimeout(D, w.current && x.current(w.current) ? ve : Ne));
+      I = !1, h || (z = setTimeout(O, w.current && x.current(w.current) ? ve : Ne));
     };
-    return D(), () => {
+    return O(), () => {
       h = !0, clearTimeout(z);
     };
   }, [n, a, e, y]);
-  const l = se(async () => {
-    i(!0);
+  const l = ie(async () => {
+    s(!0);
     try {
-      await B(f.current(!0)), m(null), N((h) => h + 1);
+      await F(f.current(!0)), m(null), N((h) => h + 1);
     } catch (h) {
       m(E(h));
     } finally {
-      i(!1);
+      s(!1);
     }
   }, []);
-  return { data: c, failure: u, busy: S, refresh: l };
+  return { data: c, failure: u, busy: T, refresh: l };
 }
 function Z(n) {
-  const e = Date.now(), t = n.statuses.map((s) => xe(s, e)).filter(Boolean), o = n.statuses.map((s) => ye(s)).filter((s) => !!s);
+  const e = Date.now(), t = n.statuses.map((i) => xe(i, e)).filter(Boolean), o = n.statuses.map((i) => ye(i)).filter((i) => !!i);
   return /* @__PURE__ */ d(P, { children: [
     /* @__PURE__ */ d("div", { style: g.row, children: [
       /* @__PURE__ */ r("span", { className: "text-sm text-muted", role: "status", "aria-live": "polite", children: t.join(" · ") }),
       /* @__PURE__ */ r(C, { onClick: n.onRefresh, disabled: n.busy, children: "Refresh" })
     ] }),
-    o.map((s) => /* @__PURE__ */ r("div", { role: "note", className: "text-sm", style: g.notice, children: s }, s))
+    o.map((i) => /* @__PURE__ */ r("div", { role: "note", className: "text-sm", style: g.notice, children: i }, i))
   ] });
 }
 function ee({ path: n }) {
   const e = X(n), [t, o] = b("idle");
-  T(() => {
+  S(() => {
     if (t === "idle") return;
     const a = setTimeout(() => o("idle"), 1500);
     return () => clearTimeout(a);
   }, [t]);
-  const s = async () => {
+  const i = async () => {
     try {
       await navigator.clipboard.writeText(e), o("copied");
     } catch {
       o("failed");
     }
   };
-  return /* @__PURE__ */ r("button", { type: "button", onClick: () => void s(), "aria-label": `Copy note name “${e}”`, title: e, style: g.copy, children: t === "copied" ? "Copied" : t === "failed" ? "Failed" : "Copy name" });
+  return /* @__PURE__ */ r("button", { type: "button", onClick: () => void i(), "aria-label": `Copy note name “${e}”`, title: e, style: g.copy, children: t === "copied" ? "Copied" : t === "failed" ? "Failed" : "Copy name" });
 }
 function te({ path: n, title: e }) {
   const t = X(n);
-  return t === e ? null : /* @__PURE__ */ r("span", { className: "text-sm text-muted", style: g.mono, children: t });
+  return t === e ? null : /* @__PURE__ */ r("span", { className: "text-sm text-muted", title: t, style: g.fileName, children: t });
 }
 function ne() {
   return /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "No folder is shared with Kiro Notes yet. Add one in Settings." });
 }
-function Se(n) {
+function Te(n) {
   var c, p;
-  const { companions: e, failure: t } = Y(n.api), [o, s] = b(() => {
+  const { companions: e, failure: t } = Y(n.api), [o, i] = b(() => {
     var m;
     const u = Number((m = q()) == null ? void 0 : m.getItem(M));
     return Number.isInteger(u) && u > 0 ? u : null;
   }), a = ((c = e == null ? void 0 : e.find((u) => u.workspace.id === o)) == null ? void 0 : c.workspace) ?? ((p = e == null ? void 0 : e[0]) == null ? void 0 : p.workspace) ?? null;
-  return T(() => {
+  return S(() => {
     var u;
     try {
       a && ((u = q()) == null || u.setItem(M, String(a.id)));
@@ -250,32 +251,32 @@ function Se(n) {
   }, [a]), t ? /* @__PURE__ */ r($, { failure: t }) : e ? a ? /* @__PURE__ */ d("div", { style: { ...g.column, flex: 1 }, children: [
     e.length > 1 && /* @__PURE__ */ d("div", { style: g.row, children: [
       /* @__PURE__ */ r("label", { className: "text-sm", htmlFor: "qz-board-ws", children: "Workspace" }),
-      /* @__PURE__ */ r("select", { id: "qz-board-ws", value: a.id, onChange: (u) => s(Number(u.target.value)), style: g.input, children: e.map((u) => /* @__PURE__ */ r("option", { value: u.workspace.id, children: u.workspace.name }, u.workspace.id)) })
+      /* @__PURE__ */ r("select", { id: "qz-board-ws", value: a.id, onChange: (u) => i(Number(u.target.value)), style: g.input, children: e.map((u) => /* @__PURE__ */ r("option", { value: u.workspace.id, children: u.workspace.name }, u.workspace.id)) })
     ] }),
     /* @__PURE__ */ r($e, { api: n.api, workspace: a }, a.id)
   ] }) : /* @__PURE__ */ r(ne, {}) : /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading…" });
 }
 function $e(n) {
-  const { api: e, workspace: t } = n, o = t.id, s = U(), { data: a, failure: c, busy: p, refresh: u } = J(
+  const { api: e, workspace: t } = n, o = t.id, i = U(), { data: a, failure: c, busy: p, refresh: u } = J(
     !0,
     String(o),
     () => he(e, o),
-    (i) => K(e, { workspaceId: o, manual: i }),
-    (i) => i.index.state === "scanning"
-  ), m = H(() => be((a == null ? void 0 : a.tickets) ?? []), [a]), y = V.filter((i) => i !== "repair" || m.repair.length > 0), N = O(null), S = (i) => {
-    var I, D;
-    const w = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"], k = i.target, f = Number(k.dataset.lane), x = Number(k.dataset.index);
-    if (!w.includes(i.key) || Number.isNaN(f) || Number.isNaN(x)) return;
+    (s) => B(e, { workspaceId: o, manual: s }),
+    (s) => s.index.state === "scanning"
+  ), m = H(() => be((a == null ? void 0 : a.tickets) ?? []), [a]), y = V.filter((s) => s !== "repair" || m.repair.length > 0), N = L(null), T = (s) => {
+    var I, O;
+    const w = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"], k = s.target, f = Number(k.dataset.lane), x = Number(k.dataset.index);
+    if (!w.includes(s.key) || Number.isNaN(f) || Number.isNaN(x)) return;
     let l = f, h = x;
-    if (i.key === "ArrowUp" && (h = Math.max(0, x - 1)), i.key === "ArrowDown" && (h = x + 1), i.key === "Home" && (h = 0), i.key === "End" && (h = Number.MAX_SAFE_INTEGER), i.key === "ArrowLeft" || i.key === "ArrowRight") {
-      const A = i.key === "ArrowLeft" ? -1 : 1;
+    if (s.key === "ArrowUp" && (h = Math.max(0, x - 1)), s.key === "ArrowDown" && (h = x + 1), s.key === "Home" && (h = 0), s.key === "End" && (h = Number.MAX_SAFE_INTEGER), s.key === "ArrowLeft" || s.key === "ArrowRight") {
+      const A = s.key === "ArrowLeft" ? -1 : 1;
       do
         l += A;
       while (l >= 0 && l < y.length && m[y[l]].length === 0);
       if (l < 0 || l >= y.length) return;
     }
     const z = m[y[l]];
-    h = Math.min(h, z.length - 1), i.preventDefault(), (D = (I = N.current) == null ? void 0 : I.querySelector(`[data-lane="${l}"][data-index="${h}"]`)) == null || D.focus();
+    h = Math.min(h, z.length - 1), s.preventDefault(), (O = (I = N.current) == null ? void 0 : I.querySelector(`[data-lane="${l}"][data-index="${h}"]`)) == null || O.focus();
   };
   return /* @__PURE__ */ d("div", { style: { ...g.column, flex: 1 }, children: [
     /* @__PURE__ */ r(Z, { statuses: a ? [a.index] : [], busy: p, onRefresh: () => void u() }),
@@ -295,15 +296,15 @@ function $e(n) {
       /* @__PURE__ */ r("code", { children: "order" }),
       " in its frontmatter."
     ] }),
-    a && a.tickets.length > 0 && /* @__PURE__ */ r("div", { ref: N, style: g.board, onKeyDown: S, "aria-label": `Board of ${t.name}`, role: "group", children: y.map((i, w) => /* @__PURE__ */ d("section", { "aria-label": W[i], style: g.lane, children: [
+    a && a.tickets.length > 0 && /* @__PURE__ */ r("div", { ref: N, style: g.board, onKeyDown: T, "aria-label": `Board of ${t.name}`, role: "group", children: y.map((s, w) => /* @__PURE__ */ d("section", { "aria-label": K[s], style: g.lane, children: [
       /* @__PURE__ */ d("strong", { className: "text-sm", children: [
-        W[i],
+        K[s],
         " (",
-        m[i].length,
+        m[s].length,
         ")"
       ] }),
-      /* @__PURE__ */ r("ul", { style: g.cards, children: m[i].map((k, f) => /* @__PURE__ */ r("li", { children: /* @__PURE__ */ r(Ae, { ticket: k, lane: w, index: f, onOpen: () => s(G) }) }, k.path)) })
-    ] }, i)) })
+      /* @__PURE__ */ r("ul", { style: g.cards, children: m[s].map((k, f) => /* @__PURE__ */ r("li", { children: /* @__PURE__ */ r(Ae, { ticket: k, lane: w, index: f, onOpen: () => i(G) }) }, k.path)) })
+    ] }, s)) })
   ] });
 }
 function Ae(n) {
@@ -337,18 +338,18 @@ function Ae(n) {
   ] });
 }
 function Ce(n) {
-  const { api: e } = n, t = U(), { companions: o, failure: s } = Y(e), [a, c] = b("all"), [p, u] = b("open"), [m, y] = b("");
-  T(() => {
+  const { api: e } = n, t = U(), { companions: o, failure: i } = Y(e), [a, c] = b("all"), [p, u] = b("open"), [m, y] = b("");
+  S(() => {
     o && a !== "all" && !o.some((l) => l.workspace.id === a) && c("all");
   }, [o, a]);
-  const N = a === "all" ? void 0 : a, S = !!o && o.length > 0, { data: i, failure: w, busy: k, refresh: f } = J(
-    S,
+  const N = a === "all" ? void 0 : a, T = !!o && o.length > 0, { data: s, failure: w, busy: k, refresh: f } = J(
+    T,
     `${a}:${p}`,
     () => ge(e, p, N),
-    (l) => K(e, { workspaceId: N, manual: l }),
+    (l) => B(e, { workspaceId: N, manual: l }),
     (l) => Object.values(l.index).some((h) => h.state === "scanning")
-  ), x = H(() => ke((i == null ? void 0 : i.groups) ?? [], m), [i, m]);
-  return s ? /* @__PURE__ */ r($, { failure: s }) : o ? o.length === 0 ? /* @__PURE__ */ r(ne, {}) : /* @__PURE__ */ d("div", { style: { ...g.column, flex: 1 }, children: [
+  ), x = H(() => ke((s == null ? void 0 : s.groups) ?? [], m), [s, m]);
+  return i ? /* @__PURE__ */ r($, { failure: i }) : o ? o.length === 0 ? /* @__PURE__ */ r(ne, {}) : /* @__PURE__ */ d("div", { style: { ...g.column, flex: 1 }, children: [
     /* @__PURE__ */ d("div", { style: g.row, children: [
       o.length > 1 && /* @__PURE__ */ d(
         "select",
@@ -379,11 +380,11 @@ function Ce(n) {
         }
       )
     ] }),
-    /* @__PURE__ */ r(Z, { statuses: i ? Object.values(i.index) : [], busy: k, onRefresh: () => void f() }),
+    /* @__PURE__ */ r(Z, { statuses: s ? Object.values(s.index) : [], busy: k, onRefresh: () => void f() }),
     /* @__PURE__ */ r($, { failure: w }),
-    (i == null ? void 0 : i.truncated) && /* @__PURE__ */ r("div", { role: "note", className: "text-sm", style: g.notice, children: "Only the first items are listed. Narrow it down by workspace, state or filter." }),
-    !i && !w && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading TODOs…" }),
-    i && x.length === 0 && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: m.trim() ? "No TODO matches." : "No TODOs." }),
+    (s == null ? void 0 : s.truncated) && /* @__PURE__ */ r("div", { role: "note", className: "text-sm", style: g.notice, children: "Only the first items are listed. Narrow it down by workspace, state or filter." }),
+    !s && !w && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading TODOs…" }),
+    s && x.length === 0 && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: m.trim() ? "No TODO matches." : "No TODOs." }),
     /* @__PURE__ */ r("div", { style: { ...g.column, overflowY: "auto" }, children: x.map((l) => /* @__PURE__ */ d("section", { "aria-label": l.title, style: g.box, children: [
       /* @__PURE__ */ d("strong", { className: "text-sm", children: [
         l.title,
@@ -424,8 +425,8 @@ function re() {
   } };
 }
 function Re(n) {
-  const { api: e } = n, [t, o] = b(null), [s, a] = b(null), [c, p] = b(0), [u, m] = b(""), [y, N] = b(""), { busy: S, failure: i, run: w } = re();
-  T(() => {
+  const { api: e } = n, [t, o] = b(null), [i, a] = b(null), [c, p] = b(0), [u, m] = b(""), [y, N] = b(""), { busy: T, failure: s, run: w } = re();
+  S(() => {
     let f = !1;
     return de(e).then((x) => {
       f || (o(x), a(null));
@@ -438,8 +439,8 @@ function Re(n) {
   };
   return /* @__PURE__ */ d("div", { style: v.column, children: [
     /* @__PURE__ */ r("strong", { className: "text-sm", children: "Folders" }),
-    /* @__PURE__ */ r($, { failure: s }),
-    !t && !s && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading…" }),
+    /* @__PURE__ */ r($, { failure: i }),
+    !t && !i && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading…" }),
     (t == null ? void 0 : t.length) === 0 && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "No folder yet. Add the folder you also attached in Kiro Notes." }),
     t == null ? void 0 : t.map((f) => /* @__PURE__ */ r(Ie, { api: e, workspace: f, onChanged: () => p((x) => x + 1) }, f.id)),
     /* @__PURE__ */ d("div", { style: v.row, children: [
@@ -450,19 +451,19 @@ function Re(n) {
           placeholder: "/home/you/notes",
           value: u,
           onChange: (f) => m(f.target.value),
-          onKeyDown: (f) => f.key === "Enter" && u.trim() && !S && void k(),
+          onKeyDown: (f) => f.key === "Enter" && u.trim() && !T && void k(),
           style: j
         }
       ),
       /* @__PURE__ */ r("input", { "aria-label": "Name (optional)", placeholder: "Name (optional)", value: y, onChange: (f) => N(f.target.value), style: { ...j, flex: "0 1 180px" } }),
-      /* @__PURE__ */ r(C, { onClick: () => void k(), disabled: S || !u.trim(), children: "Add folder" })
+      /* @__PURE__ */ r(C, { onClick: () => void k(), disabled: T || !u.trim(), children: "Add folder" })
     ] }),
-    /* @__PURE__ */ r($, { failure: i })
+    /* @__PURE__ */ r($, { failure: s })
   ] });
 }
 function Ie(n) {
-  const { api: e, workspace: t } = n, { busy: o, failure: s, run: a } = re(), [c, p] = b(null), [u, m] = b(!1);
-  return T(() => {
+  const { api: e, workspace: t } = n, { busy: o, failure: i, run: a } = re(), [c, p] = b(null), [u, m] = b(!1);
+  return S(() => {
     if (!c) return;
     const y = setTimeout(() => p(null), 3e3);
     return () => clearTimeout(y);
@@ -488,7 +489,7 @@ function Ie(n) {
       t.companion && /* @__PURE__ */ r(
         C,
         {
-          onClick: () => void a(() => K(e, { workspaceId: t.id, manual: !0, rebuild: !0 })).then(
+          onClick: () => void a(() => B(e, { workspaceId: t.id, manual: !0, rebuild: !0 })).then(
             (y) => y && p("Rebuild requested.")
           ),
           disabled: o,
@@ -517,10 +518,10 @@ function Ie(n) {
       ] })
     ] }),
     c && /* @__PURE__ */ r("span", { className: "text-sm text-muted", role: "status", children: c }),
-    /* @__PURE__ */ r($, { failure: s })
+    /* @__PURE__ */ r($, { failure: i })
   ] });
 }
-const L = [
+const D = [
   { id: "tasks", label: "Tasks" },
   { id: "todos", label: "TODOs" },
   { id: "settings", label: "Settings" }
@@ -530,34 +531,34 @@ function ze() {
   return /* @__PURE__ */ d(P, { children: [
     /* @__PURE__ */ r(ae, { title: "Quartizo", subtitle: "Kiro Notes board and TODOs" }),
     /* @__PURE__ */ d("div", { className: "px-6 pb-8 flex-1 min-h-0 flex flex-col gap-3", children: [
-      /* @__PURE__ */ r("div", { role: "tablist", "aria-label": "Quartizo", onKeyDown: (s) => {
+      /* @__PURE__ */ r("div", { role: "tablist", "aria-label": "Quartizo", onKeyDown: (i) => {
         var p;
-        if (s.key !== "ArrowLeft" && s.key !== "ArrowRight") return;
-        s.preventDefault();
-        const a = L.findIndex((u) => u.id === e), c = L[(a + (s.key === "ArrowRight" ? 1 : L.length - 1)) % L.length];
+        if (i.key !== "ArrowLeft" && i.key !== "ArrowRight") return;
+        i.preventDefault();
+        const a = D.findIndex((u) => u.id === e), c = D[(a + (i.key === "ArrowRight" ? 1 : D.length - 1)) % D.length];
         t(c.id), (p = document.getElementById(`qz-tab-${c.id}`)) == null || p.focus();
-      }, style: { display: "flex", gap: 4 }, children: L.map((s) => /* @__PURE__ */ r(
+      }, style: { display: "flex", gap: 4 }, children: D.map((i) => /* @__PURE__ */ r(
         "button",
         {
-          id: `qz-tab-${s.id}`,
+          id: `qz-tab-${i.id}`,
           type: "button",
           role: "tab",
-          "aria-selected": e === s.id,
+          "aria-selected": e === i.id,
           "aria-controls": "qz-panel",
-          tabIndex: e === s.id ? 0 : -1,
-          onClick: () => t(s.id),
+          tabIndex: e === i.id ? 0 : -1,
+          onClick: () => t(i.id),
           style: {
             padding: "4px 12px",
             background: "transparent",
             color: "inherit",
             border: "none",
-            borderBottom: e === s.id ? "2px solid currentColor" : "2px solid transparent",
-            fontWeight: e === s.id ? 600 : 400,
+            borderBottom: e === i.id ? "2px solid currentColor" : "2px solid transparent",
+            fontWeight: e === i.id ? 600 : 400,
             cursor: "pointer"
           },
-          children: s.label
+          children: i.label
         },
-        s.id
+        i.id
       )) }),
       /* @__PURE__ */ d(
         "div",
@@ -567,7 +568,7 @@ function ze() {
           "aria-labelledby": `qz-tab-${e}`,
           style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
           children: [
-            e === "tasks" && /* @__PURE__ */ r(Se, { api: n }),
+            e === "tasks" && /* @__PURE__ */ r(Te, { api: n }),
             e === "todos" && /* @__PURE__ */ r(Ce, { api: n }),
             e === "settings" && /* @__PURE__ */ r(Re, { api: n })
           ]
