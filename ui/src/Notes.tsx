@@ -21,6 +21,7 @@ import {
   type NoteContext,
   wholeNoteContext,
 } from './context'
+import { setCompanion } from './companionApi'
 import { nextIndex } from './listNav'
 import { parseSourceLines, renderMarkdown } from './markdown'
 import NoteChat from './NoteChat'
@@ -198,6 +199,7 @@ export default function Notes(props: {
         load={workspaces}
         current={current}
         onSelect={id => confirmLeave() && setWsId(id)}
+        confirmLeave={confirmLeave}
         onChanged={id => {
           if (id !== undefined) setWsId(id)
           setReloadWs(n => n + 1)
@@ -231,6 +233,7 @@ function WorkspaceBar(props: {
   current: Workspace | null
   onSelect: (id: number) => void
   onChanged: (selectId?: number | null) => void
+  confirmLeave: () => boolean
 }) {
   const { api, load, current } = props
   const [adding, setAdding] = useState(false)
@@ -239,6 +242,7 @@ function WorkspaceBar(props: {
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [confirmCompanion, setConfirmCompanion] = useState(false)
   // Set when the backend refused the removal because the workspace still has tasks.
   const [taskCount, setTaskCount] = useState<number | null>(null)
   const list = load.status === 'ready' ? load.value : []
@@ -278,6 +282,21 @@ function WorkspaceBar(props: {
       setBusy(false)
     }
   }
+  const switchCompanion = async () => {
+    if (!current || !props.confirmLeave()) return
+    setBusy(true)
+    setFailure(null)
+    try {
+      await setCompanion(api, current.id, !current.companion)
+      setConfirmCompanion(false)
+      props.onChanged(current.id)
+    } catch (err) {
+      setFailure(toFailure(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const cancelRemove = () => {
     setConfirmRemove(false)
     setTaskCount(null)
@@ -317,7 +336,35 @@ function WorkspaceBar(props: {
             Remove…
           </Btn>
         )}
+        {current && !confirmCompanion && (
+          <Btn onClick={() => setConfirmCompanion(true)} disabled={busy}>
+            {current.companion ? 'Stop using with Kiro Notes…' : 'Use with Kiro Notes…'}
+          </Btn>
+        )}
       </div>
+      {current?.companion && !confirmCompanion && (
+        <p className="text-sm text-muted" role="note">
+          Kiro Notes companion: Quartizo only reads this folder. Edit its notes in Kiro Notes; the Tasks tab shows its ticket notes
+          and the TODOs tab its checkboxes.
+        </p>
+      )}
+      {confirmCompanion && current && (
+        <div role="alertdialog" aria-label="Kiro Notes companion mode" style={S.notice}>
+          <span className="text-sm">
+            {current.companion
+              ? `Stop using “${current.name}” with Kiro Notes? Quartizo can edit its notes again, and its file-backed board and TODOs are no longer indexed. No file changes.`
+              : `Use “${current.name}” with Kiro Notes? Attach the same folder in Kiro Notes and edit there. Quartizo then only reads it: notes open read-only here, the Tasks tab shows its ticket notes instead of the database board (those cards are kept, not converted), and the TODOs tab lists its checkboxes. No file changes.`}
+          </span>
+          <div style={S.row}>
+            <Btn onClick={() => void switchCompanion()} disabled={busy}>
+              {current.companion ? 'Stop companion mode' : 'Use with Kiro Notes'}
+            </Btn>
+            <Btn onClick={() => setConfirmCompanion(false)} disabled={busy}>
+              Cancel
+            </Btn>
+          </div>
+        </div>
+      )}
       {confirmRemove && current && (
         <div role="alertdialog" aria-label="Remove workspace" style={S.notice}>
           <span className="text-sm">
@@ -572,9 +619,11 @@ function WorkspaceView(props: {
             Search contents
           </label>
           <Btn onClick={reloadList}>Refresh</Btn>
-          <Btn onClick={() => setNewName(n => (n === null ? '' : null))}>{newName === null ? 'New note' : 'Cancel'}</Btn>
+          {!workspace.companion && (
+            <Btn onClick={() => setNewName(n => (n === null ? '' : null))}>{newName === null ? 'New note' : 'Cancel'}</Btn>
+          )}
         </div>
-        {newName !== null && (
+        {newName !== null && !workspace.companion && (
           <div style={S.row}>
             <input
               aria-label="New note path"
@@ -646,6 +695,7 @@ function WorkspaceView(props: {
             api={api}
             wsId={wsId}
             workspaceName={workspace.name}
+            companion={!!workspace.companion}
             onContext={onContext}
             doc={doc}
             setDoc={setDoc}
@@ -710,6 +760,8 @@ function NoteEditor(props: {
   api: AppApi
   wsId: number
   workspaceName: string
+  /** Kiro Notes companion folder: viewing only, the backend refuses every write. */
+  companion: boolean
   onContext: (result: ContextResult) => void
   doc: EditorDoc
   setDoc: (fn: (d: EditorDoc | null) => EditorDoc | null) => void
@@ -725,7 +777,7 @@ function NoteEditor(props: {
   const [renameTo, setRenameTo] = useState<string | null>(null)
   const [renameExists, setRenameExists] = useState(false)
   const dirty = isDirty(doc)
-  const editable = canEdit(doc)
+  const editable = canEdit(doc) && !props.companion
   const html = useMemo(() => (mode === 'edit' ? '' : renderMarkdown(doc.text)), [doc.text, mode])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
@@ -872,18 +924,25 @@ function NoteEditor(props: {
             Whole note → chat
           </button>
         </div>
-        <Btn onClick={save} disabled={busy || !dirty || !editable || !!doc.conflict}>
-          Save
-        </Btn>
-        <Btn onClick={() => setRenameTo(r => (r === null ? doc.path : null))} disabled={busy}>
-          Rename
-        </Btn>
-        <Btn onClick={() => setConfirmDelete(true)} disabled={busy || confirmDelete}>
-          Delete…
-        </Btn>
+        {!props.companion && (
+          <>
+            <Btn onClick={save} disabled={busy || !dirty || !editable || !!doc.conflict}>
+              Save
+            </Btn>
+            <Btn onClick={() => setRenameTo(r => (r === null ? doc.path : null))} disabled={busy}>
+              Rename
+            </Btn>
+            <Btn onClick={() => setConfirmDelete(true)} disabled={busy || confirmDelete}>
+              Delete…
+            </Btn>
+          </>
+        )}
       </div>
 
-      {!editable && (
+      {props.companion && (
+        <p className="text-sm text-muted">Read only: this is a Kiro Notes companion folder. Edit this note in Kiro Notes.</p>
+      )}
+      {!editable && !props.companion && (
         <p className="text-sm text-muted">
           This note mixes line-ending styles. Editing would normalize them, so it is read-only in Quartizo.
         </p>

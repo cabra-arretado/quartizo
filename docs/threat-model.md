@@ -15,6 +15,8 @@ Chat context is covered in [m2.md](m2.md).
 | T5 | **Untrusted Markdown.** Hostile note text runs script or loads resources in the dashboard | markdown-it with `html: false`, URL allowlist, images never loaded, `rel="noopener noreferrer nofollow"`, React text for names ([§3](#3-untrusted-markdown)) | `ui/test/markdown.test.ts` (30 payloads, allowlist checks) |
 | T6 | **Git outputs and hostile config.** Repo config, attributes or output make Quartizo run code, hang, exhaust memory or mutate the repo | Fixed argv, config/env neutralized, filter drivers blanked, no-spawn `RLIMIT_NPROC` trampoline (fails closed), heap and output caps, timeout, plumbing for diffs, no git stderr to the page, React text rendering ([§5](#5-git-read-only-m4)) | `test_git.py` (hostile config per layer, argv injection, caps, not-mutated snapshot), `ui/test/diffView.test.ts` |
 | T7 | **Command injection.** A request field reaches a shell, an option parser or SQL | The only subprocess is `git`, as an argv list with no shell and server-built flags, paths after `--` as `:(literal)`; SQL values are always bound parameters and the few interpolated identifiers come from fixed in-code lists; no `eval`/`exec`/`os.system` ([§9](#9-command-injection)) | `test_git.py` (argv injection), `test_tasks.py`, `test_slots.py` (key patterns), `test_notes.py`/`test_workspace.py` (path rules) |
+| T8 | **Shared-folder writes.** Quartizo and native Kiro Notes both write a companion folder and one silently overwrites the other | Companion mode writes nothing: no ticket/checkbox write route, every note write route refuses companion workspaces before reading, the index lives only in the app DB; scans open with the same no-follow fd rules and only read ([§10](#10-kiro-notes-companion-read-only)) | `tests/backend/test_companion.py` (409 refusals, vault byte/mtime snapshot unchanged after browse, refresh and rebuild) |
+| T9 | **Hostile or damaged Markdown/YAML** exhausts the parser or makes the index lie | 2 MiB per note, 64 KiB / 8,192 events / 64 levels of frontmatter, safe node composition without object construction, anchors/aliases/custom tags refused, markdown-it nesting limit, recursion caught, every checkbox position byte-verified, scan entry/note/depth limits; parsers vendored at pinned versions and refused from anywhere else ([§10](#10-kiro-notes-companion-read-only)) | `test_companion.py`, `test_vendor.py`, `spikes/markdown_tickets/test_source.py` |
 
 ## Residual risks
 
@@ -32,6 +34,8 @@ Each is accepted for 0.0.1 and explained in the section named.
 10. **Platform.** POSIX only (Windows unsupported); sandbox coverage beyond the owner's home was not mapped; Unicode normalization is not applied, so lookalike names can appear twice ([§1](#1-workspace-confinement)).
 11. **Dependencies.** No known advisory affects the shipped runtime (`npm audit --omit=dev`: 0), but the dev toolchain has open advisories ([dependencies.md](dependencies.md)).
 12. **Unverified live:** the git sandbox under the gateway's OS sandbox, and macOS behaviour beyond CI ([compatibility.md](compatibility.md)).
+13. **Companion mode relies on the owner's switch.** Quartizo refuses its own writes in a companion folder, but cannot stop other tools, or Quartizo running an older version against the same DB, from writing there; and a folder attached in Kiro Notes but not switched to companion mode is still editable in Quartizo ([§10](#10-kiro-notes-companion-read-only)).
+14. **Index freshness is bounded, not live.** Between scans (30 s while a view is shown, otherwise on demand) the views can show an older state; they say when it was indexed ([§10](#10-kiro-notes-companion-read-only)).
 
 ## Assets and actors
 
@@ -446,3 +450,35 @@ prevent that; it makes the transfer deliberate, visible and bounded.
   `openat` components after validation.
 - **UI.** Nothing from notes, git or transcripts reaches `innerHTML` except
   the sanitized Markdown output (§3).
+
+## 10. Kiro Notes companion, read only
+
+Native Kiro Notes 0.10.0rc4 decides whether a save is stale by mtime alone; an
+external edit that preserves the mtime is overwritten without a conflict
+([phase 1 evidence](markdown-tickets-phase1.md#native-notes-verification)).
+Quartizo's own hash checks cannot strengthen another app's save guard, so the
+companion does not write:
+
+- The four note write routes check `workspace.companion` first and answer 409
+  `companion_read_only` without opening any file. Reads still go through the
+  confined reader. No companion route accepts a write: the Board and TODO
+  routes are `GET`; `PUT .../companion` and `POST /companion/refresh` change
+  only app state (tested: the full vault snapshot, including mtimes and hidden
+  entries, is identical after enabling, browsing, refreshing and
+  rebuilding).
+- Scans reuse `open_root` / `open_dir_at` / `open_file_at` (no symlink is
+  followed, regular files only, owner-owned directories), skip hidden entries,
+  read at most 2 MiB + 1 byte per note and never decode file names the notes
+  API could not address.
+- Parsing treats every note as hostile input: frontmatter and Markdown limits
+  as above; YAML is composed into nodes with the safe loader (no object
+  construction) and anchors, aliases, merge keys and custom tags are refused;
+  a recursion error becomes a diagnostic. TODO labels are stored as raw text
+  (500 characters) and rendered by React as text, never as HTML.
+- The parsers are third-party code running in the backend. They are vendored
+  unchanged from hash-pinned wheels with a file manifest checked in CI, and
+  `vendored.py` refuses copies loaded from outside `backend/_vendor` or at
+  another version (the gateway's venv has a different markdown-it-py).
+- Queries bind every value; the interpolated identifiers are the fixed table
+  names in `companion.py`.
+

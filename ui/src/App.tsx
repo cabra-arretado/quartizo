@@ -3,15 +3,17 @@ import { PageHeader } from '@kirocrew/app-sdk/ui'
 import { type KeyboardEvent, useCallback, useRef, useState } from 'react'
 import Agents, { type AgentsRequest } from './Agents'
 import Chat from './Chat'
+import { TicketBoard, TodoView } from './Companion'
 import Git, { type GitRequest } from './Git'
 import Notes, { type NotesRequest, type NotesState } from './Notes'
 import type { Workspace } from './notesApi'
 import Tasks, { type TaskFocus } from './Tasks'
 
-type Tab = 'notes' | 'tasks' | 'agents' | 'git' | 'chat'
+type Tab = 'notes' | 'tasks' | 'todos' | 'agents' | 'git' | 'chat'
 const TABS: { id: Tab; label: string }[] = [
   { id: 'notes', label: 'Notes' },
   { id: 'tasks', label: 'Tasks' },
+  { id: 'todos', label: 'TODOs' },
   { id: 'agents', label: 'Agents' },
   { id: 'git', label: 'Git' },
   { id: 'chat', label: 'Chat' },
@@ -29,6 +31,7 @@ export default function Quartizo() {
   // switching tabs neither reopens the slot nor drops a draft.
   const [chatOpened, setChatOpened] = useState(false)
   const [tasksOpened, setTasksOpened] = useState(false)
+  const [todosOpened, setTodosOpened] = useState(false)
   const [gitOpened, setGitOpened] = useState(false)
   const [agentsOpened, setAgentsOpened] = useState(false)
   // Cross-tab links (task -> session -> subagent -> repo) push the tab they came from, so "Back" returns there.
@@ -50,6 +53,7 @@ export default function Quartizo() {
     setTab(t)
     if (t === 'chat') setChatOpened(true)
     if (t === 'tasks') setTasksOpened(true)
+    if (t === 'todos') setTodosOpened(true)
     if (t === 'git') setGitOpened(true)
     if (t === 'agents') setAgentsOpened(true)
   }
@@ -154,7 +158,17 @@ export default function Quartizo() {
           hidden={tab !== 'tasks'}
           style={{ display: tab === 'tasks' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}
         >
-          {tasksOpened && (
+          {/* A Kiro Notes companion workspace gets the read-only board of its ticket notes; others keep the database board. */}
+          {tasksOpened && workspace?.companion && (
+            <TicketBoard
+              key={workspace.id}
+              api={api}
+              workspace={workspace}
+              active={tab === 'tasks'}
+              onViewNote={(wsId, path) => toNotes(wsId, { path })}
+            />
+          )}
+          {tasksOpened && !workspace?.companion && (
             <Tasks
               api={api}
               workspace={workspace}
@@ -165,6 +179,26 @@ export default function Quartizo() {
               onShowAgents={showAgents}
               focus={taskFocus}
               confirmLeave={confirmLeave}
+            />
+          )}
+        </div>
+        <div
+          id="qz-panel-todos"
+          role="tabpanel"
+          aria-labelledby="qz-tab-todos"
+          hidden={tab !== 'todos'}
+          style={{ display: tab === 'todos' ? 'flex' : 'none', flexDirection: 'column', flex: 1, minHeight: 0 }}
+        >
+          {/* Checkboxes of every Kiro Notes companion folder, read only; polls only while shown. */}
+          {todosOpened && (
+            <TodoView
+              api={api}
+              active={tab === 'todos'}
+              onViewNote={(wsId, path) => toNotes(wsId, { path })}
+              onShowWorkspace={wsId => {
+                if (notesState.workspace?.id !== wsId) setRequest(r => ({ seq: (r?.seq ?? 0) + 1, wsId }))
+                go('tasks')
+              }}
             />
           )}
         </div>

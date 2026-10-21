@@ -113,7 +113,7 @@ class RegistrationTests(TmpTree):
     def test_workspace_has_a_fresh_uid_and_ids_are_not_reused(self):
         ws = self.registry.register(str(self.a / "notes"))
         self.assertRegex(ws.uid, r"^[0-9a-f]{32}$")
-        self.assertEqual(ws.to_json(), {"id": ws.id, "uid": ws.uid, "name": ws.name, "path": ws.path})
+        self.assertEqual(ws.to_json(), {"id": ws.id, "uid": ws.uid, "name": ws.name, "path": ws.path, "companion": False})
         self.registry.unregister(ws.id)
         again = self.registry.register(str(self.a / "notes"))
         self.assertGreater(again.id, ws.id)

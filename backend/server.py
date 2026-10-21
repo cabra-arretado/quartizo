@@ -22,6 +22,8 @@ request must carry both valid headers, or it is refused before routing, and
 every route is dashboard-owner only (``owner-session`` principal).
 
 Git repos (QTZ-010) are read only: see gitrepo.py for how git is run.
+Kiro Notes companion workspaces are read only too: the Board/TODOs index only
+reads them (companion.py) and every note write route refuses them.
 
 Workspace registry state lives in ``<KIROCREW_HOME>/apps/<KIROCREW_APP_NAME>/data``
 (the gateway injects both; ``manager.py::app_data_dir`` in 0.10.0rc4).
@@ -48,6 +50,7 @@ from urllib.parse import parse_qs, urlsplit
 # directory off sys.path; put it back (first) so the sibling modules load.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import companion  # noqa: E402
 import gitrepo  # noqa: E402
 import notes  # noqa: E402
 import tasks  # noqa: E402
@@ -313,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             return None
         if parts[:2] == ["api", "repos"]:
             return self._handle_repos(parts[2:], query)
+        if parts[:2] == ["api", "companion"]:
+            return self._handle_companion(registry, parts[2:], query)
         if len(parts) >= 3 and parts[:2] == ["api", "workspaces"]:
             ws_id = _parse_id(parts[2])
             if ws_id is None:
@@ -328,6 +333,16 @@ class Handler(BaseHTTPRequestHandler):
                 return None
             if parts[3] == "tasks":
                 return self._handle_tasks(ws_id, parts[4:])
+            index: companion.CompanionIndex = self.server.companion  # type: ignore[attr-defined]
+            if parts[3:] == ["companion"] and method == "PUT":
+                ws = registry.set_companion(ws_id, self._json_body().get("enabled"))
+                if ws.companion:
+                    index.request(ws, manual=True)
+                else:
+                    index.forget(ws.uid)  # derived rows only; the folder is untouched
+                return 200, {"workspace": ws.to_json(), "index": index.status(ws)}
+            if parts[3:] == ["board"] and method == "GET":
+                return 200, index.board(registry.get(ws_id))
             if len(parts) == 4:
                 return self._handle_notes(registry, ws_id, parts[3], query)
         return None
@@ -367,6 +382,43 @@ class Handler(BaseHTTPRequestHandler):
                                    _q(query, "orig", None))
         return None
 
+    def _handle_companion(self, registry: Registry, rest: list[str], query: dict) -> tuple[int, dict] | None:
+        """/api/companion[...]: status, refresh and the cross-workspace TODO list. Nothing here writes a file."""
+        method = self.command
+        index: companion.CompanionIndex = self.server.companion  # type: ignore[attr-defined]
+        if rest == [] and method == "GET":
+            return 200, {
+                "available": index.unavailable is None,
+                "error": index.unavailable,
+                # Shared-folder writes stay off until the native Notes conflict gap is fixed.
+                "writes": False,
+                "workspaces": [{"workspace": w.to_json(), "index": index.status(w)} for w in registry.list()],
+            }
+        if rest == ["refresh"] and method == "POST":
+            body = self._json_body()
+            ws_id, rebuild, manual = body.get("workspaceId"), body.get("rebuild", False), body.get("manual", False)
+            if not isinstance(rebuild, bool) or not isinstance(manual, bool):
+                raise ApiError(400, "bad_refresh", "rebuild and manual must be true or false")
+            if ws_id is None:
+                targets = [w for w in registry.list() if w.companion]
+            elif isinstance(ws_id, int) and not isinstance(ws_id, bool):
+                targets = [registry.get(ws_id)]
+            else:
+                raise ApiError(400, "bad_refresh", "workspaceId must be a workspace id")
+            requested = [w.id for w in targets if index.request(w, rebuild=rebuild, manual=manual or rebuild)]
+            return 202, {"requested": requested, "skipped": [w.id for w in targets if w.id not in requested]}
+        if rest == ["todos"] and method == "GET":
+            raw = _q(query, "workspace")
+            if raw:
+                ws_id = _parse_id(raw)
+                if ws_id is None:
+                    raise ApiError(400, "bad_query", "workspace must be a workspace id")
+                scope = [registry.get(ws_id)]
+            else:
+                scope = [w for w in registry.list() if w.companion]
+            return 200, index.todos(scope, _q(query, "state", "open"))
+        return None
+
     def _handle_tasks(self, ws_id: int, rest: list[str]) -> tuple[int, dict] | None:
         """/api/workspaces/{id}/tasks[...]: the Kanban board of that workspace's project."""
         method = self.command
@@ -400,7 +452,13 @@ class Handler(BaseHTTPRequestHandler):
         method = self.command
         if (method, action) not in _NOTE_ROUTES:
             return None
-        root = registry.get(ws_id).path
+        ws = registry.get(ws_id)
+        root = ws.path
+        if method != "GET" and ws.companion:
+            # Native Kiro Notes is the only writer of a companion folder (it can
+            # silently overwrite timestamp-preserving external edits).
+            raise ApiError(409, "companion_read_only",
+                           "this workspace is a Kiro Notes companion folder; edit it in Kiro Notes")
         if method == "GET" and action == "notes":
             return 200, notes.list_notes(root, _q(query, "q"), _q(query, "content") in ("1", "true"))
         if method == "GET":  # note
@@ -549,6 +607,8 @@ def make_server(port: int, secret: str, registry: Registry) -> Server:
     server.tasks = tasks.TaskStore(registry)  # type: ignore[attr-defined]
     server.repos = gitrepo.RepoStore(  # type: ignore[attr-defined]
         registry, gitrepo.GitRunner(home=str(registry.data_dir / "git-home")))
+    server.companion = companion.CompanionIndex(registry)  # type: ignore[attr-defined]
+    server.companion.start()  # type: ignore[attr-defined]
     return server
 
 

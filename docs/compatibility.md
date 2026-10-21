@@ -13,7 +13,7 @@ kirocrew gateway; "tests" means unit/HTTP tests with no gateway.
 | **OS** | Ubuntu 26.04.1 LTS, x86_64 (Linux 7.0) | Verified live and in tests. |
 | | macOS | CI only (`macos-latest`, Apple Silicon, Python 3.12 and 3.13, Node 22): full suite and the `ui/dist` drift check pass (run 39473401789, 12 tests skipped for Linux-only behaviour, e.g. `renameat2`, the `RLIMIT_DATA` bombs, non-UTF-8 file names). The `renameat2` fallback path is what runs there. Not run live against a gateway |
 | | Windows | Unsupported (POSIX `dir_fd`/`openat` backend); not in CI |
-| **Python** | 3.12.13 | The gateway's own venv ran the backend live. 3.12 and 3.13 are in the CI matrix. 3.14.4 ran the suite locally. The backend is stdlib-only; `pyproject.toml` targets 3.10+ for lint, but 3.10/3.11 are not tested |
+| **Python** | 3.12.13 | The gateway's own venv ran the backend live. 3.12 and 3.13 are in the CI matrix. 3.14.4 ran the suite locally. The backend needs no installed packages (stdlib plus the parsers vendored in `backend/_vendor/`, which shadow the gateway venv's own markdown-it-py 4.2.0); `pyproject.toml` targets 3.10+ for lint, but 3.10/3.11 are not tested |
 | **Node** | 22 | CI (`npm ci`, typecheck, tests, build, `ui/dist` drift check). Package needs 22.12+ |
 | | 26.11.1 | Developed on, and built the committed `ui/dist` |
 | **git** (runtime, for the Git tab) | 2.53.0 | Real-git tests; minimum enforced by the backend is 2.38 (`git_too_old` below). Not run through the gateway sandbox |
@@ -33,7 +33,9 @@ kirocrew gateway; "tests" means unit/HTTP tests with no gateway.
 | Git API and Git tab (M4) | **No** (throwaway harness only; behaviour inside the gateway sandbox unverified) | Yes (real git, `test_git.py`) |
 | Agents tab (M5) | Read-only gateway response shapes (4 integration tests); not the rendered tab | Yes (`agents.test.ts`, `freshness.test.ts`) |
 | Dev mode (`app dev`), in-place update | **No** | - |
-| DB migrations 1-5 | Only those that existed at the time of each live run | Yes (fresh DB; `test_workspace.py` and later) |
+| DB migrations 1-5 (6: see the companion row) | Only those that existed at the time of each live run | Yes (fresh DB; `test_workspace.py` and later) |
+| Kiro Notes companion API (read-only index, Board, TODOs, write refusal) | Yes, through an isolated 0.10.0rc4 gateway (see below); migration 6 ran on its fresh DB | Yes (`test_companion.py`, `test_vendor.py`, `companion.test.ts`) |
+| Kiro Notes companion Board / TODOs **rendered** in the host, and against native Notes edits | **No** (the isolated gateway's setup gate needs a signed-in `kiro-cli`) | Logic only (`companion.test.ts`) |
 | `renameat2` rename path | **No** (rename/delete not exercised live) | Yes, on Linux; the fallback is forced in tests and runs natively on macOS CI |
 
 ## Pinned upstream
@@ -185,6 +187,24 @@ Run by the operator after M1, with `quartizo` trusted
 | Uninstall | `kirocrew app uninstall quartizo` **clears `agent.apps_trusted`**. Trust must be granted again after a reinstall |
 | Dashboard console noise | 403/503 errors in the browser console come from the host polling `/api/instances` and `/api/sessions/usage`, not from Quartizo |
 
+## Kiro Notes companion, isolated gateway (kirocrew 0.10.0rc4, 2026-10-20)
+
+A throwaway gateway (`KIROCREW_HOME` under `/tmp`, `--no-crons --no-tunnel`,
+port 5599) with this tree installed, trusted and enabled, and the phase 1
+fixture vault (`python -m spikes.markdown_tickets.fixtures`) registered.
+Calls were made from the dashboard origin with the owner session, through the
+gateway proxy. The owner's own gateway and vaults were not touched.
+
+| Check | Result |
+|---|---|
+| Backend under the gateway's interpreter (whose venv has markdown-it-py **4.2.0**) | `GET /companion`: `available: true`, so the vendored 4.0.0 copies were the ones loaded |
+| Enable companion mode on the fixture vault | Scan finished in about 50 ms: 11 notes, `complete: true`, migration 6 applied |
+| Board | `ticket.md`, `bom-crlf.md`, `diagnostics/duplicate.md` in Ready (both copies of the shared ID flagged `duplicate_id`); `invalid-yaml`, `duplicate-key`, `missing-fields` in the repair lane with their codes |
+| TODOs | 12 open, 7 done across 6 notes, matching the backend tests |
+| `POST .../note` in the companion folder | 409 `companion_read_only` |
+| Vault afterwards | Byte-identical to the fixture |
+| Rendering the Tasks/TODOs tabs | **Not reached**: the dashboard shows its "Set up Kiro" gate until a coding agent is installed and signed in on the host |
+
 ## Not verified
 
 - **Sandbox coverage.** The live run used one workspace in the owner's home,
@@ -204,6 +224,10 @@ Run by the operator after M1, with `quartizo` trusted
   the grant.
 - **Sending a message / getting a reply**: no turn was sent (`kiro-cli` is not
   installed on this host).
+- **Kiro Notes companion in the rendered host**: the Board and TODOs tabs,
+  the source panel, **Open Kiro Notes**, and reconciliation against real
+  native Notes edits (including sync and restart) were not exercised in a
+  dashboard; only the API was, through an isolated gateway.
 - **Codex** (or any non-default agent runtime): not validated. The slot is
   created with no `agent`, so the gateway default applies.
 

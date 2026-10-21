@@ -6,9 +6,10 @@ It is an Obsidian-like workspace of real `.md` files. You register folders
 preview their notes from the dashboard. The files stay plain Markdown on
 disk. The page also has a **Chat** tab with a Quartizo-created chat session
 (`ChatEmbed` on a slot the page creates; it is owned by the dashboard owner,
-not by the app, see [compatibility](docs/compatibility.md)). A stdlib Python
-backend verifies the gateway's signed proxy requests and does all file
-access, confined to the registered folders.
+not by the app, see [compatibility](docs/compatibility.md)). A Python backend
+(standard library, plus three hash-pinned Markdown/YAML parsers vendored in
+`backend/_vendor/`) verifies the gateway's signed proxy requests and does all
+file access, confined to the registered folders.
 
 Scope so far: workspaces and notes (M1), note context to the workspace chat
 (M2, [docs/m2.md](docs/m2.md)), per-workspace task metadata with a Kanban
@@ -18,6 +19,14 @@ board (M3, QTZ-008/009; see [Tasks](#tasks-projects) below), and a
 repository. M5 (QTZ-012, [docs/m5.md](docs/m5.md)) adds a read-only
 **Agents** tab that monitors Quartizo's sessions, their tool calls, errors
 and subagents.
+
+**Kiro Notes companion (read only).** A workspace can be switched to companion
+mode for a folder that is also attached in native Kiro Notes. Kiro Notes stays
+the editor; Quartizo then only reads that folder and shows its ticket notes on
+the Tasks board and its Markdown checkboxes on a **TODOs** tab, from a
+rebuildable index. Moving cards and checking boxes are deliberately not offered
+yet (see [Using the Kiro Notes companion](#using-the-kiro-notes-companion) and
+[the plan](docs/markdown-tickets-plan.md)).
 
 Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
 (after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
@@ -32,15 +41,22 @@ measured and what is not verified.
 ```
 app.json              manifest (name, ui page, backend, permissions)
 assets/icon.png       512x512 opaque placeholder (same as `kirocrew app init`)
-backend/server.py     stdlib-only HTTP backend: auth, routing
+backend/server.py     HTTP backend (stdlib): auth, routing
 backend/workspace.py  workspace root registry + fd-based path confinement
 backend/db.py         sqlite3 DB (registry + tasks) with a migrations table
 backend/notes.py      .md list/search/read/create/update/rename/delete
 backend/tasks.py      task CRUD, ordered moves, JSON import/export (M3)
 backend/gitrepo.py    repo registry + hardened read-only git: status, diff (M4)
+backend/companion.py  Kiro Notes companion: read-only scan, rebuildable ticket/TODO index
+backend/mdsource.py   read-only parsing of one note: ticket frontmatter, title, checkboxes
+backend/vendored.py   loads the vendored parsers (pinned version, from _vendor only)
+backend/_vendor/      ruamel.yaml, markdown-it-py, mdurl copied from hash-pinned wheels
+scripts/              vendor_parsers.py: re-create backend/_vendor from its pins
+spikes/               phase 1 format experiment (not imported by the app)
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
                       (src/*.ts: tested logic; src/*.tsx: components)
                       (agentsModel.ts / freshness.ts + Agents.tsx: M5 monitoring)
+                      (companionApi.ts / noteNav.ts + Companion.tsx: read-only Board, TODOs)
 tests/backend/        backend auth unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
 docs/                 App Kit notes, compatibility matrix, architecture, threat model,
@@ -51,7 +67,8 @@ Makefile, pyproject.toml, .github/workflows/ci.yml   quality gates
 ## Requirements
 
 - Node 22.12+ (24 LTS recommended upstream; developed on Node 26; CI uses 22) and npm.
-- Python 3.10+ (stdlib only; the backend has no dependencies; CI tests 3.12 and 3.13).
+- Python 3.10+ (nothing to install: the backend uses the standard library plus
+  the parsers vendored in `backend/_vendor/`; CI tests 3.12 and 3.13).
 - git 2.38+ for the Git tab.
 - macOS or Linux. Windows is unsupported.
 - A running KiroCrew gateway to actually use the app (not needed for tests).
@@ -76,7 +93,7 @@ built bundle.
 ## Quality gates (`make`)
 
 ```bash
-make check    # lint + test + dist-check: what CI runs
+make check    # lint + test + test-formats + dist-check: what CI runs
 make lint     # ruff check . and tsc --noEmit (strict)
 make test     # backend unittest, then `npm test` (builds, then vitest)
 make build    # rebuild ui/dist/index.mjs
@@ -95,7 +112,7 @@ TS/React would add dependencies for little signal. CI
 ## Run the tests
 
 ```bash
-# backend: auth acceptance/refusal + real HTTP round-trips (no dependencies)
+# backend: auth acceptance/refusal + real HTTP round-trips (nothing to install)
 python3 -m unittest discover -s tests -t . -v
 
 # frontend: notes, tasks and git clients, editor/conflict state, line endings,
@@ -207,7 +224,8 @@ kirocrew app uninstall quartizo      # preserves app data by default; clears tru
 
 Data lives in `$KIROCREW_HOME/apps/quartizo/data/` (default
 `~/.kiro/crew/apps/quartizo/data/`): `quartizo.sqlite3` (workspace registry,
-tasks, repos, recorded sessions), `git-home/` (empty HOME for git) and
+tasks, repos, recorded sessions, the companion switch and the derived companion
+index), `git-home/` (empty HOME for git) and
 `logs/`. Your notes are never there: they stay in your own folders as plain
 `.md` files, and Quartizo's only side effect in them is `<workspace>/.trash/`
 for deleted notes. Removing the data directory forgets registrations and
@@ -337,6 +355,73 @@ Notes that mix line-ending styles open read-only: a textarea would normalize
 them. See [docs/architecture.md](docs/architecture.md) for the editor
 choice.
 
+## Using the Kiro Notes companion
+
+Use this for a folder you write in with native Kiro Notes. Kiro Notes stays the
+editor; Quartizo shows a Board of its ticket notes and a list of its TODOs.
+
+1. Attach the folder in Kiro Notes (**Attach a folder**) and register the same
+   folder in Quartizo's **Notes** tab. Select it, then **Use with Kiro Notes…**
+   and confirm. No file changes. From then on Quartizo only reads that folder:
+   its notes open read-only in the Notes tab and the backend refuses every note
+   write there (409 `companion_read_only`).
+2. A **ticket** is any note whose frontmatter has `type: ticket`, plus `id`
+   (a UUID, or a 32-hex legacy UID), `status` (`backlog`, `ready`,
+   `in_progress`, `review`, `done`) and `order` (32 lowercase hex characters,
+   quoted). The title is the note's first `#` heading, or its file name:
+
+   ```markdown
+   ---
+   id: 8423e295-12ce-4b61-a281-d719c1fa86f6
+   type: ticket
+   status: ready
+   order: "7fffffffffffffffffffffffffffffff"
+   ---
+
+   # Fix login timeout
+
+   - [ ] Reproduce the timeout
+   ```
+
+   Ordinary notes need no properties. The full format contract is in
+   [docs/markdown-tickets-phase1.md](docs/markdown-tickets-phase1.md).
+3. The **Tasks** tab of a companion workspace shows its ticket notes by status,
+   sorted by `order` (then `id`). Tickets with missing or invalid fields, or
+   with metadata Quartizo cannot read safely (invalid YAML, duplicate keys,
+   anchors), are kept in a **Needs repair** lane with the reason. Two notes
+   with the same `id`, in any companion workspace, are both shown and both
+   flagged; they are never merged. The database board's cards of that
+   workspace are kept as they are (not converted) and come back when companion
+   mode is switched off.
+4. The **TODOs** tab lists the real Markdown checkboxes (`- [ ]`, `- [x]`) of
+   every companion folder, grouped by note, open ones by default. Examples in
+   code blocks, frontmatter and later paragraphs are not TODOs. Each checkbox
+   appears once, also when its note is a ticket.
+5. Selecting a card or a TODO shows where it is: workspace, path, line and
+   column, and the heading above it. **Open Kiro Notes** opens the Notes app;
+   Kiro Notes cannot be told which note to open, so select it there by its path.
+   **View in Quartizo (read-only)** opens it in the Notes tab.
+6. Edit in Kiro Notes; the views follow. They rescan when they open, every
+   30 s while shown, on **Refresh**, and on **Rebuild index…** (re-reads and
+   re-parses everything). Every scan reads and hashes every note, so an edit
+   that kept the file's timestamp is still seen. The status line says when
+   the index was built. An incomplete scan (a limit reached, a folder that
+   could not be read) or a note that could not be read is called out, and
+   such notes keep their last known state instead of disappearing.
+7. **Stop using with Kiro Notes…** makes the folder editable in Quartizo again
+   and drops its index. Nothing on disk changes either way.
+
+**Why read only.** Native Kiro Notes (checked on 0.10.0rc4) guards its saves
+by timestamp only: an external edit that keeps the file's modification time can
+be silently overwritten by Notes' autosave
+([evidence](docs/markdown-tickets-phase1.md#native-notes-verification)).
+Until Kiro Notes checks content as well, Quartizo does not write to these
+folders at all, so moving cards and checking boxes are not offered.
+
+Limits: 200,000 directory entries, 50,000 notes, 32 folder levels, 2 MiB per
+note, 2,000 checkboxes per note; the TODO list returns at most 5,000 items.
+Hidden folders (`.trash`, `.obsidian`, `.git`) and symlinks are skipped.
+
 ## Backend contract
 
 - `GET /health` is unsigned (the gateway probes it directly) -> `{"status":"ok"}`.
@@ -359,13 +444,36 @@ metadata (M3). Note content stays in the files.
 
 | Route | Body / result |
 |---|---|
-| `GET /api/workspaces` | `{workspaces: [{id, uid, name, path}]}`. `id` is never reused (AUTOINCREMENT); `uid` is 32 random hex chars per registration, used by the UI to key per-workspace state |
+| `GET /api/workspaces` | `{workspaces: [{id, uid, name, path, companion}]}`. `id` is never reused (AUTOINCREMENT); `uid` is 32 random hex chars per registration, used by the UI to key per-workspace state |
 | `POST /api/workspaces` | `{path, name?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`) |
 | `GET /api/workspaces/{id}` | `{workspace}` or 404 `workspace_not_found` |
-| `DELETE /api/workspaces/{id}[?deleteTasks=1]` | Forgets the root. Files are never touched. A workspace that still has tasks is refused with 409 `project_has_tasks` (`taskCount`) unless `deleteTasks=1`, which deletes its tasks in the same transaction |
+| `DELETE /api/workspaces/{id}[?deleteTasks=1]` | Forgets the root. Files are never touched. A workspace that still has tasks is refused with 409 `project_has_tasks` (`taskCount`) unless `deleteTasks=1`, which deletes its tasks in the same transaction. Its companion index goes with it |
+| `PUT /api/workspaces/{id}/companion` | `{enabled: true\|false}` -> `{workspace, index}`. Switches Kiro Notes companion mode (application state only). On: queues a scan. Off: drops the derived index. 400 `bad_companion` |
 
 See [docs/threat-model.md](docs/threat-model.md) for path confinement
 (no `..`, no hidden segments, no symlinks followed, fd-relative opens).
+
+### Kiro Notes companion (read only)
+
+Migration 6 adds `workspaces.companion` and the derived `companion_*` index
+tables. The files are authoritative: deleting every `companion_*` row and
+rescanning gives the same results. No route below writes a file, and there is
+no route that moves a ticket or toggles a checkbox.
+
+| Route | Body / result |
+|---|---|
+| `GET /api/companion` | `{available, error, writes: false, workspaces: [{workspace, index}]}`. `available` is false (with `error`) when the vendored parsers could not be loaded; the rest of the app still works |
+| `POST /api/companion/refresh` | `{workspaceId?, rebuild?, manual?}` -> 202 `{requested, skipped}`. Without `workspaceId`: every companion workspace. Automatic requests within 10 s of the last scan are skipped; `manual` or `rebuild` are not. `rebuild` re-parses every note |
+| `GET /api/workspaces/{id}/board` | `{workspace, index, tickets, notes}`. A ticket is `{path, title, id, status, order, lane, todos: {total, done}, diagnostics, retained, hash, mtimeMs}`; `lane` is its status, or `repair`. `notes` are ordinary notes with diagnostics. 409 `not_companion`, 503 `parsers_unavailable` |
+| `GET /api/companion/todos?workspace=&state=` | `{groups: [{workspaceId, workspace, path, title, ticket, ticketId, status, hash, retained, items}], counts: {open, done}, truncated, index}`. An item is `{ordinal, line, column, checked, text, depth, heading}`; `line`/`column` are one-based (column in code points). `state` is `open` (default), `done` or `all`. Without `workspace`: every companion workspace |
+
+`index` is `{state, queued, progress, indexedAt, complete, files, retained,
+error}`: `state` is `off`, `unavailable`, `unindexed`, `scanning`, `ready`,
+`stale` (the last scan failed; the previous one is shown) or `error`.
+`complete: false` means a limit or an unreadable folder stopped the scan;
+`retained` counts notes shown as last indexed. A diagnostic is `{code,
+message}` (`duplicate_id` adds `others`): see
+[docs/markdown-tickets-phase1.md](docs/markdown-tickets-phase1.md) for the codes.
 
 ### Created sessions
 
@@ -422,6 +530,9 @@ line endings included. Files that are not valid UTF-8 are refused (415
 | `PUT /note` | `{path, content, expectedHash}` -> `{path, hash, size, mtimeMs}`. 409 `conflict` with `currentHash` (null if deleted) / `currentMtimeMs` when the file changed since it was read |
 | `POST /rename` | `{from, to, expectedHash?, overwrite?, confirm?}` -> `{path, trashed}`. An existing `to` is 409 `exists` unless **both** `overwrite: true` and `confirm: true`; then the displaced note goes to `.trash` first |
 | `POST /delete` | `{path, confirm: true, expectedHash?}` -> `{trashed}`. Without `confirm: true`: 400 `confirm_required` |
+
+In a Kiro Notes companion workspace, `POST /note`, `PUT /note`, `/rename` and
+`/delete` are refused with 409 `companion_read_only` before anything is read.
 
 **Writes** are atomic: a temp file in the same folder, `fsync`, then
 `os.replace` (update) or `link` (create, rename and trash, which fail instead

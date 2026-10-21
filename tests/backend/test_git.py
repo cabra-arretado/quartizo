@@ -327,7 +327,7 @@ class MigrationTests(unittest.TestCase):
             conn.close()
             conn = db.connect(path)
             try:
-                self.assertEqual([r[0] for r in conn.execute("SELECT version FROM schema_migrations")], [1, 2, 3, 4, 5])
+                self.assertEqual([r[0] for r in conn.execute("SELECT version FROM schema_migrations")], [1, 2, 3, 4, 5, 6])
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM tasks").fetchone()[0], 1)
                 cols = {r[1] for r in conn.execute("PRAGMA table_info(repos)")}
                 self.assertEqual(cols, {"id", "uid", "name", "path", "created_at"})

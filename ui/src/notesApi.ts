@@ -12,6 +12,8 @@ export interface Workspace {
   uid: string
   name: string
   path: string
+  /** Kiro Notes companion mode: Quartizo only reads this folder (every note write is refused). */
+  companion?: boolean
 }
 
 export interface NoteEntry {

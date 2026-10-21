@@ -4,9 +4,9 @@
 RUFF ?= ruff
 PYTHON ?= python3
 
-.PHONY: check lint test build dist-check
+.PHONY: check lint test test-formats build dist-check
 
-check: lint test dist-check  ## everything
+check: lint test test-formats dist-check  ## everything
 
 lint:  ## ruff (Python) + tsc strict (UI)
 	$(RUFF) check .
@@ -15,6 +15,9 @@ lint:  ## ruff (Python) + tsc strict (UI)
 test:  ## backend unittest (gateway tests skip without env) + UI build and vitest
 	$(PYTHON) -m unittest discover -s tests -t . -v
 	cd ui && npm test
+
+test-formats:  ## isolated phase 1 spike; install spikes/markdown_tickets/requirements.txt first
+	$(PYTHON) -m unittest spikes.markdown_tickets.test_source spikes.markdown_tickets.test_ranks -v
 
 build:  ## rebuild ui/dist/index.mjs (commit it)
 	cd ui && npm run build

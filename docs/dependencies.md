@@ -1,10 +1,45 @@
 # Dependencies and audit
 
 Audited 2026-10-20 in `ui/` with npm (Node 26.11.1) against the committed
-`package-lock.json`. The Python backend has **no third-party dependencies**
-(standard library only). Dev tooling (ruff 0.17.1) is not shipped.
+`package-lock.json`. Dev tooling (ruff 0.17.1) is not shipped.
 
-## Bundled runtime dependencies
+## Backend: vendored Python parsers
+
+The backend installs nothing: it runs under the gateway's interpreter with
+`python -I`. Besides the standard library it uses three pure-Python packages,
+copied **unchanged** from hash-pinned PyPI wheels into `backend/_vendor/`, for
+the read-only Markdown ticket index only (`backend/mdsource.py`):
+
+| Package | Version | Wheel sha256 | License | Role |
+|---|---|---|---|---|
+| ruamel.yaml | 0.19.1 | `27592957…c667c93` | MIT | Safe YAML parsing of frontmatter, by node and source position |
+| markdown-it-py | 4.0.0 | `87327c59…d578147` | MIT (+ markdown-it's MIT) | CommonMark block parsing with line maps for checkboxes and headings |
+| mdurl | 0.1.2 | `84008a41…196b8f8` | MIT | Required by markdown-it-py |
+
+Full hashes and the wheel URLs are in `scripts/vendor_parsers.py`, which
+verifies them before extracting anything. Left out: ruamel.yaml's
+`clibz/` (the build script of its optional C extension, which imports
+setuptools) and markdown-it-py's `cli/`. All three have no further runtime
+dependencies. License texts: `backend/_vendor/licenses/` and
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
+Why vendored rather than a root `requirements.txt` (which the gateway would
+`pip install --target` at spawn): the TODO source-position tests depend on the
+exact markdown-it-py paragraph rule, so the shipped bytes must be the tested
+bytes; first start must not need the network; and the host's provisioning path
+had not been exercised live. The 0.10.0rc4 gateway venv itself contains
+markdown-it-py **4.2.0**, so `backend/vendored.py` puts `_vendor` first on
+`sys.path` and refuses a parser that was not loaded from there at the pinned
+version (the companion views then report the index as unavailable; the rest of
+the app keeps working). `tests/backend/test_vendor.py` (in the companion test
+module) compares the tree with `backend/_vendor/MANIFEST.sha256`.
+
+To update: change the pins in `scripts/vendor_parsers.py`, run it, rerun the
+format and backend suites (`make check`), and review the diff. The spike in
+`spikes/markdown_tickets/` keeps its own `requirements.txt` with the same pins
+and is still tested separately (`make test-formats`).
+
+## UI: bundled runtime dependencies
 
 `ui/dist/index.mjs` is built by Vite. `react`, `react-dom` and the KiroCrew SDK
 are Rollup externals resolved by the host's import map, so they are **not in

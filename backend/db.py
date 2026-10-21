@@ -2,8 +2,9 @@
 
 It holds the workspace registry (which roots the owner opted in), since
 migration 3 the Kanban task metadata of each project (QTZ-008), and since
-migration 4 the registered Git repository roots (QTZ-010) and since migration 5
-the session keys Quartizo created (M5). One project is
+migration 4 the registered Git repository roots (QTZ-010), since migration 5
+the session keys Quartizo created (M5), and since migration 6 the Kiro Notes
+companion switch plus its derived, rebuildable Markdown index. One project is
 one registered workspace, keyed by the workspace ``uid``. Note content always
 lives in the Markdown files themselves; a task only stores a workspace-relative
 ``note_ref`` string, never file content and never an absolute path.
@@ -102,6 +103,65 @@ MIGRATIONS: tuple[str, ...] = (
         created_at    INTEGER NOT NULL
     );
     """,
+    # 6: Kiro Notes companion (read-only Board and TODOs over Markdown files).
+    # `workspaces.companion` is application state: the owner's explicit switch
+    # that makes Quartizo read-only in that folder and indexes it. The three
+    # companion_* tables are a DERIVED index: the files are authoritative, and
+    # dropping every companion_* row loses nothing a rescan cannot rebuild. A
+    # scan writes a new `generation` beside the active one and swaps
+    # companion_index.generation only once it finished (companion.py). Deleting
+    # the workspace row cascades to its index rows.
+    """
+    ALTER TABLE workspaces ADD COLUMN companion INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE companion_generations (
+        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        workspace_uid TEXT    NOT NULL REFERENCES workspaces(uid) ON DELETE CASCADE,
+        started_at    INTEGER NOT NULL
+    );
+    CREATE TABLE companion_index (
+        workspace_uid TEXT    PRIMARY KEY REFERENCES workspaces(uid) ON DELETE CASCADE,
+        generation    INTEGER,
+        version       INTEGER NOT NULL,
+        started_at    INTEGER,
+        completed_at  INTEGER,
+        complete      INTEGER NOT NULL DEFAULT 0,
+        files         INTEGER NOT NULL DEFAULT 0,
+        retained      INTEGER NOT NULL DEFAULT 0,
+        error_code    TEXT,
+        error         TEXT,
+        failed_at     INTEGER
+    );
+    CREATE TABLE companion_notes (
+        workspace_uid TEXT    NOT NULL REFERENCES workspaces(uid) ON DELETE CASCADE,
+        generation    INTEGER NOT NULL,
+        path          TEXT    NOT NULL,
+        hash          TEXT,
+        size          INTEGER,
+        mtime_ms      INTEGER,
+        title         TEXT    NOT NULL,
+        ticket        INTEGER NOT NULL,
+        ticket_id     TEXT,
+        status        TEXT,
+        sort_key      TEXT,
+        diagnostics   TEXT    NOT NULL,
+        retained      INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (workspace_uid, generation, path)
+    );
+    CREATE TABLE companion_todos (
+        workspace_uid TEXT    NOT NULL REFERENCES workspaces(uid) ON DELETE CASCADE,
+        generation    INTEGER NOT NULL,
+        path          TEXT    NOT NULL,
+        ordinal       INTEGER NOT NULL,
+        marker_start  INTEGER NOT NULL,
+        line          INTEGER NOT NULL,
+        col           INTEGER NOT NULL,
+        checked       INTEGER NOT NULL,
+        text          TEXT    NOT NULL,
+        depth         INTEGER NOT NULL,
+        heading       TEXT,
+        PRIMARY KEY (workspace_uid, generation, path, ordinal)
+    );
+    """,
 )
 
 
@@ -154,12 +214,17 @@ def migrate(conn: sqlite3.Connection) -> int:
 
 
 def list_workspaces(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM workspaces ORDER BY name, id").fetchall()
+    return conn.execute("SELECT id, uid, name, path, companion, created_at FROM workspaces ORDER BY name, id").fetchall()
 
 
 def get_workspace(conn: sqlite3.Connection, workspace_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT id, uid, name, path, created_at FROM workspaces WHERE id = ?",
+    return conn.execute("SELECT id, uid, name, path, companion, created_at FROM workspaces WHERE id = ?",
                         (workspace_id,)).fetchone()
+
+
+def set_companion(conn: sqlite3.Connection, workspace_id: int, enabled: bool) -> bool:
+    return conn.execute("UPDATE workspaces SET companion = ? WHERE id = ?",
+                        (1 if enabled else 0, workspace_id)).rowcount > 0
 
 
 def new_uid() -> str:

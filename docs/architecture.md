@@ -1,13 +1,16 @@
-# Architecture (M1-M5)
+# Architecture (M1-M5, Kiro Notes companion)
 
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
-  App.tsx        PageHeader + in-page tabs: Notes | Tasks | Agents | Git | Chat; cross-tab links + Back trail
+  App.tsx        PageHeader + in-page tabs: Notes | Tasks | TODOs | Agents | Git | Chat; cross-tab links + Back trail
   Notes.tsx      workspace picker/registration, note list + search, editor, preview
   Tasks.tsx      Kanban board of the selected workspace, task details, links (M3)
   tasksApi.ts    typed client for .../workspaces/{id}/tasks
   board.ts       column grouping, move/reindex mirror, keyboard moves, drop index
   taskContext.ts bounded task context block for an agent prompt
+  Companion.tsx  read-only Board of ticket notes + TODOs of Kiro Notes companion folders
+  companionApi.ts typed client for .../companion and .../board, lanes, index status wording
+  noteNav.ts     note-navigation adapter: Kiro Notes app only, source path/line fallback
   Agents.tsx     read-only session / tool / subagent monitor, bounded polling (M5)
   agentsModel.ts     slot rows, visibility classification, status, transcript summary, links
   freshness.ts   poll cadence, backoff, stale-since, restart detection
@@ -24,13 +27,16 @@ dashboard page (ui/dist/index.mjs, rendered by the host)
         |
         | same-origin fetch, owner cookie (gateway signs + forwards)
         v
-backend (python3 -I backend/server.py, stdlib only)
+backend (python3 -I backend/server.py: stdlib + parsers vendored in backend/_vendor)
   server.py      HMAC + signed principal (owner-session only), routing
   workspace.py   root registry, path validation, fd-based no-follow opens
   notes.py       list/search, read, atomic create/update/rename, trash-delete
   tasks.py       task CRUD, ordered moves, version checks, JSON import/export (M3)
   gitrepo.py     repo registry, hardened git runner, status/diff parsing (M4)
-  db.py          sqlite3 registry + tasks + repos + migrations ($KIROCREW_HOME/apps/quartizo/data)
+  companion.py   read-only scan worker + rebuildable ticket/TODO index (generations)
+  mdsource.py    one note -> ticket fields, title, checkboxes with source positions
+  vendored.py    loads ruamel.yaml / markdown-it-py / mdurl from backend/_vendor only
+  db.py          sqlite3 registry + tasks + repos + companion index + migrations ($KIROCREW_HOME/apps/quartizo/data)
         |
         v
 plain .md files in the registered folders (readable by Obsidian or any editor)
@@ -248,3 +254,52 @@ See [m5.md](m5.md) for the gateway routes and the permission decision.
   `TaskFocus`, `GitRequest`, by `seq`) and a short trail of tabs for "Back".
   Notes still owns the workspace selection; opening a task in another
   workspace asks Notes to switch first.
+
+## Kiro Notes companion, read only
+
+The first delivery of [the Markdown-ticket plan](markdown-tickets-plan.md):
+native Kiro Notes edits a shared folder, Quartizo shows a Board of its ticket
+notes and its TODOs. Format contracts: [phase 1](markdown-tickets-phase1.md).
+
+- **Read only, enforced in the backend.** Phase 1 reproduced native Notes
+  silently overwriting an external edit that kept the file's mtime, so this
+  delivery writes nothing to a companion folder: there is no ticket or
+  checkbox write route, and every existing note write route refuses a
+  companion workspace (409 `companion_read_only`) before reading anything.
+  The UI hides the editor's write actions there too, but the backend is what
+  decides. Only application state changes: the per-workspace
+  `companion` switch and the derived index.
+- **Per-workspace opt-in.** Turning the mode on is the "switch each workspace
+  explicitly" step of the plan; the database board of that workspace is kept,
+  untouched, and returns when the mode is switched off. Converting its cards to
+  ticket notes is the separate, explicit migration of phase 4 and is not
+  triggered by browsing.
+- **Files are authoritative; the index is derived.** `companion.py` scans
+  with the same fd-relative, no-follow opens as the notes API, reads and hashes
+  every note on every scan (timestamps alone miss edits), re-parses only
+  changed hashes, and writes a new generation that replaces the active one in
+  one transaction. A failed root keeps the previous generation; an incomplete
+  scan or an unreadable note keeps last-known rows (`retained`), so nothing is
+  inferred deleted from damaged or missing input. Interrupted generations are
+  dropped at startup. Dropping every `companion_*` row and rebuilding gives
+  the same results (tested).
+- **One worker, throttled requests.** A single daemon thread scans one
+  workspace at a time. The views ask for a rescan when they open and every
+  30 s while visible; automatic requests within 10 s of the last scan are
+  skipped, Refresh and Rebuild are not. No filesystem watcher: the plan adds
+  one only if measured latency needs it.
+- **Parsing.** `mdsource.py` is the read half of the phase 1 spike: YAML nodes
+  (never reserialized) for frontmatter, a CommonMark block parse with the
+  pinned paragraph rule wrapped to record the physical column, and a byte
+  check that each recorded position really holds its `[ ]`/`[x]` marker (a
+  note whose positions do not verify gets an `ambiguous_location` diagnostic
+  and no TODOs). Unreadable metadata that still says `type: ticket` puts the
+  note in the repair lane instead of hiding it.
+- **Duplicates** are computed at query time over every companion workspace and
+  reported on every copy; nothing is merged.
+- **Navigation adapter** (`noteNav.ts`). Board and TODOs call one function with
+  the source reference. Kiro Notes on 0.10.0rc4 can only be opened as an app
+  (`/md-notebook`), so the adapter promises that and nothing more, and the
+  views always show workspace, path, line/column and heading. Release 2 swaps
+  the adapter for Quartizo's own editor.
+

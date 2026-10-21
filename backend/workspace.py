@@ -66,9 +66,16 @@ class Workspace:
     uid: str
     name: str
     path: str
+    # Kiro Notes companion mode: Quartizo only reads this folder (README).
+    companion: bool = False
 
     def to_json(self) -> dict:
-        return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path}
+        return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path,
+                "companion": self.companion}
+
+
+def _workspace(row: sqlite3.Row) -> Workspace:
+    return Workspace(row["id"], row["uid"], row["name"], row["path"], bool(row["companion"]))
 
 
 def validate_relpath(rel: object, *, allow_hidden: bool = False) -> list[str]:
@@ -361,14 +368,23 @@ class Registry:
 
     def list(self) -> list[Workspace]:
         with self._conn() as conn:
-            return [Workspace(r["id"], r["uid"], r["name"], r["path"]) for r in db.list_workspaces(conn)]
+            return [_workspace(r) for r in db.list_workspaces(conn)]
 
     def get(self, workspace_id: int) -> Workspace:
         with self._conn() as conn:
             row = db.get_workspace(conn, workspace_id)
         if row is None:
             raise ApiError(404, "workspace_not_found", "no such workspace")
-        return Workspace(row["id"], row["uid"], row["name"], row["path"])
+        return _workspace(row)
+
+    def set_companion(self, workspace_id: int, enabled: object) -> Workspace:
+        """Switch Kiro Notes companion mode. Only application state changes; no file is touched."""
+        if not isinstance(enabled, bool):
+            raise ApiError(400, "bad_companion", "enabled must be true or false")
+        with self._lock, self._conn() as conn:
+            if not db.set_companion(conn, workspace_id, enabled):
+                raise ApiError(404, "workspace_not_found", "no such workspace")
+        return self.get(workspace_id)
 
     def record_slot(self, raw: object) -> dict:
         """Remember a session key Quartizo created (idempotent).
