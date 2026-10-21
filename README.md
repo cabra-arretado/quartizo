@@ -393,17 +393,18 @@ editor; Quartizo shows a Board of its ticket notes and a list of its TODOs.
    flagged; they are never merged. The database board's cards of that
    workspace are kept as they are (not converted) and come back when companion
    mode is switched off.
-4. The **TODOs** tab lists the real Markdown checkboxes (`- [ ]`, `- [x]`) of
-   every companion folder, grouped by note, open ones by default. Examples in
-   code blocks, frontmatter and later paragraphs are not TODOs. Each checkbox
-   appears once, also when its note is a ticket.
-5. Selecting a card or a TODO shows where it is: workspace, path, line and
-   column, and the heading above it. **Open Kiro Notes** opens the Notes app;
-   Kiro Notes cannot be told which note to open, so select it there by its path.
-   **View in Quartizo (read-only)** opens it in the Notes tab.
+4. The **TODOs** tab lists the checkboxes of every companion folder, grouped
+   by note, open ones by default: exactly the ones Kiro Notes renders, i.e.
+   lines `- [ ] text` or `- [x] text` (a `-` bullet, lower-case `x`, any
+   indentation) outside ```` ``` ```` fences. `*`/`+`/numbered items, `[X]`,
+   quoted items and frontmatter are not TODOs. Each checkbox appears once,
+   also when its note is a ticket.
+5. Clicking a card or a TODO opens Kiro Notes. It cannot be told which note to
+   open, so each card and TODO has a **Copy name** button: paste the name into
+   Kiro Notes' search.
 6. Edit in Kiro Notes; the views follow. They rescan when they open, every
-   30 s while shown, on **Refresh**, and on **Rebuild index…** (re-reads and
-   re-parses everything). Every scan reads and hashes every note, so an edit
+   30 s while shown, on **Refresh**, and on **Rebuild index** in Settings
+   (re-reads and re-parses everything). Every scan reads and hashes every note, so an edit
    that kept the file's timestamp is still seen. The status line says when
    the index was built. An incomplete scan (a limit reached, a folder that
    could not be read) or a note that could not be read is called out, and

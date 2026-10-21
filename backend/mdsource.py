@@ -3,9 +3,9 @@
 A port of the read half of the phase 1 spike (``spikes/markdown_tickets/source.py``);
 the contracts are in docs/markdown-tickets-phase1.md. Nothing here writes or
 patches bytes: this delivery only indexes. YAML nodes, never a reserialized
-document, are inspected; Markdown block-parser positions (with the pinned
-paragraph rule wrapped to keep the physical column) distinguish real list
-checkboxes from examples in code, frontmatter or later paragraphs.
+document, are inspected; the Markdown block parser finds the title and the
+headings, and checkboxes follow native Kiro Notes' line rule (``_todos``) so
+Quartizo lists exactly the checkboxes Kiro Notes shows.
 
 Every problem becomes a ``Diagnostic`` on the note rather than an exception,
 so a damaged note stays visible.
@@ -41,7 +41,9 @@ _STRING_TAG = "tag:yaml.org,2002:str"
 _SAFE_TAGS = frozenset({"str", "int", "float", "bool", "null", "timestamp", "binary", "map", "seq"})
 _TICKET_ID = re.compile(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})")
 _RANK = re.compile(r"[0-9a-f]{32}")
-_CHECKBOX = re.compile(r"^\[([ xX])\](?=[ \t\n]|$)")
+# Native Kiro Notes' checkbox line (see _todos), and the list lines that keep its indentation levels.
+_KIRO_CHECKBOX = re.compile(r"^(\s*)- \[( |x)\] (.*)$")
+_LIST_LINE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s")
 _DELIMITER = re.compile(r"---[ \t]*$")
 # Unparseable metadata can still say it is a ticket; such a note goes to the
 # board's repair lane instead of disappearing.
@@ -246,38 +248,45 @@ def _ticket_fields(source: _Source, note: Note) -> None:
 
 
 def _todos(source: _Source, note: Note, tokens) -> None:
-    depth, heading = 0, None
-    for index, token in enumerate(tokens):
-        if token.type == "heading_open" and token.level == 0:
-            heading = _inline_label(tokens[index + 1])
-        if token.type == "list_item_close":
-            depth -= 1
-        if token.type != "list_item_open":
+    """Checkboxes exactly as native Kiro Notes renders them, so both show the same TODOs.
+
+    Kiro Notes (kirocrew 0.10.0rc4, MdNotebookPage) checks each body line
+    against ``^(\\s*)- \\[( |x)\\] (.*)$`` and skips only lines inside
+    backtick fences: ``*``/``+``/numbered items, ``[X]``, quoted items and
+    ``~~~`` fences are not checkboxes there, while an indented line is one.
+    """
+    # Nearest preceding top-level heading, by body line.
+    headings = [(tokens[i].map[0], _inline_label(tokens[i + 1])) for i, token in enumerate(tokens)
+                if token.type == "heading_open" and token.level == 0 and token.map]
+    fenced, indents = False, []
+    for line in range(source.body_line, len(source.lines)):
+        text = source.lines[line].rstrip("\r\n")
+        bom = 1 if line == 0 and text.startswith("﻿") else 0
+        text = text[bom:]
+        if text.startswith("```"):
+            fenced = not fenced
             continue
-        depth += 1
-        if tokens[index + 1].type != "paragraph_open" or tokens[index + 2].type != "inline":
+        if fenced:
             continue
-        inline = tokens[index + 2]
-        match = _CHECKBOX.match(inline.content)
+        match = _KIRO_CHECKBOX.match(text)
         if not match:
+            if not _LIST_LINE.match(text):
+                indents = []
             continue
         if len(note.todos) >= MAX_TODOS_PER_NOTE:
             note.diagnose("todo_limit", f"only the first {MAX_TODOS_PER_NOTE} checkboxes are indexed")
             return
-        line = source.body_line + inline.map[0]
-        column = inline.meta["source_column"]
-        # A leading BOM is excluded from the parser but remains in the file.
-        if line == 0 and source.body_start == 1:
-            column += 1
+        indent = len(match[1])
+        while indents and indents[-1] >= indent:
+            indents.pop()
+        depth = len(indents)
+        indents.append(indent)
+        column = bom + indent + 2  # the '[' after "- "
         marker_byte = source.byte_offset(source.char_starts[line] + column)
-        if source.data[marker_byte:marker_byte + 3] != match.group(0).encode("ascii"):
-            # Never guess: a position that does not point at its marker hides every TODO of the note.
-            note.todos = []
-            note.diagnose("ambiguous_location", "a checkbox's source position could not be verified")
-            return
-        text = inline.content[3:].strip()
-        note.todos.append(Todo(marker_byte, line + 1, column + 1, match[1] != " ",
-                               text[:MAX_LABEL_CHARS], depth - 1, heading))
+        body_line = line - source.body_line
+        heading = next((h for start, h in reversed(headings) if start < body_line), None)
+        note.todos.append(Todo(marker_byte, line + 1, column + 1, match[2] == "x",
+                               match[3].strip()[:MAX_LABEL_CHARS], depth, heading))
 
 
 def parse_note(path: str, data: bytes) -> Note:

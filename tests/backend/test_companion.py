@@ -73,7 +73,7 @@ class BoardTests(IndexTestCase):
         ticket = tickets["ticket.md"]
         self.assertEqual((ticket["id"], ticket["title"], ticket["status"], ticket["lane"]),
                          (TICKET_ID, "Fix café login ☕", "ready", "ready"))
-        self.assertEqual(ticket["todos"], {"total": 4, "done": 2})
+        self.assertEqual(ticket["todos"], {"total": 3, "done": 0})
         self.assertEqual(tickets["bom-crlf.md"]["id"], BOM_ID)
         for path in ("diagnostics/invalid-yaml.md", "diagnostics/duplicate-key.md", "diagnostics/missing-fields.md"):
             with self.subTest(path=path):
@@ -118,19 +118,30 @@ class BoardTests(IndexTestCase):
 
 
 class TodoTests(IndexTestCase):
-    def test_each_real_checkbox_appears_once_with_its_source(self):
+    def test_checkboxes_are_the_ones_kiro_notes_shows(self):
         self.scan()
         texts = self.todo_texts()
-        self.assertEqual(texts["ticket.md"], ["Reproduce the timeout", "Check the logs", "Check the clock",
-                                              "Reproduce the timeout"])
-        self.assertEqual(texts["ordinary.md"], ["Ordered item", "Alternate ordered marker", "Quoted list item",
-                                                "Marker on the next line"])
+        # Kiro Notes only renders "- [ ]" / "- [x]" lines outside ``` fences: not "*", "+", "[X]" or fenced examples,
+        # but an indented "- [ ]" line, which CommonMark would call code.
+        self.assertEqual(texts["ticket.md"], ["Reproduce the timeout", "Reproduce the timeout", "An indented example"])
+        self.assertNotIn("ordinary.md", texts)
         self.assertEqual(texts["no-newline.md"], ["café", "café"])
         group = next(g for g in self.index.todos([self.ws], "all")["groups"] if g["path"] == "ticket.md")
         self.assertEqual((group["ticket"], group["ticketId"], group["title"]), (True, TICKET_ID, "Fix café login ☕"))
         first = group["items"][0]
         self.assertEqual((first["line"], first["column"], first["heading"], first["depth"]), (20, 3, "Reproduction", 0))
-        self.assertEqual([i["depth"] for i in group["items"]], [0, 1, 1, 0])
+        self.assertEqual([i["heading"] for i in group["items"]], ["Reproduction", "Reproduction", "Examples"])
+
+    def test_kiro_notes_line_rule(self):
+        self.put("rule.md", "\n".join((
+            "- [ ] open", "  - [x] nested done", "- [X] upper case", "* [ ] star", "+ [ ] plus", "1. [ ] numbered",
+            "> - [ ] quoted", "- [ ]no space", "~~~", "- [ ] tilde fence", "~~~", "```", "- [ ] backtick fence", "```",
+            "\ufeff", "- [x] after", "",
+        )).encode())
+        self.scan()
+        group = next(g for g in self.index.todos([self.ws], "all")["groups"] if g["path"] == "rule.md")
+        items = [(i["text"], i["checked"], i["depth"]) for i in group["items"]]
+        self.assertEqual(items, [("open", False, 0), ("nested done", True, 1), ("tilde fence", False, 0), ("after", True, 0)])
 
     def test_state_filter_and_counts(self):
         self.scan()
@@ -171,7 +182,7 @@ class ReconcileTests(IndexTestCase):
         os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
         self.scan()
         self.assertEqual(self.tickets()["ticket.md"]["status"], "done")
-        self.assertEqual(self.tickets()["ticket.md"]["todos"], {"total": 4, "done": 3})
+        self.assertEqual(self.tickets()["ticket.md"]["todos"], {"total": 3, "done": 1})
 
     def test_new_deleted_and_renamed_notes_follow_a_complete_scan(self):
         self.scan()
@@ -212,7 +223,7 @@ class ReconcileTests(IndexTestCase):
         ticket = self.tickets()["ticket.md"]
         self.assertEqual((ticket["status"], ticket["retained"]), ("ready", True))
         self.assertIn("unreadable", self.codes(ticket))
-        self.assertEqual(len(self.todo_texts()["ticket.md"]), 4)
+        self.assertEqual(len(self.todo_texts()["ticket.md"]), 3)
 
     def test_missing_root_keeps_the_previous_generation_and_reports_it(self):
         self.scan()
@@ -361,7 +372,7 @@ class CompanionHttpTests(unittest.TestCase):
         self.assertIn("ticket.md", {t["path"] for t in board["tickets"]})
         status, todos = self.call("GET", f"/api/companion/todos?workspace={self.ws_id}&state=all")
         self.assertEqual(status, 200, todos)
-        self.assertIn("ordinary.md", {g["path"] for g in todos["groups"]})
+        self.assertIn("ticket.md", {g["path"] for g in todos["groups"]})
         status, todos_all = self.call("GET", "/api/companion/todos")
         self.assertEqual((status, todos_all["counts"]["open"] > 0), (200, True))
         status, body = self.call("POST", "/api/companion/refresh", {"workspaceId": self.ws_id, "rebuild": True})

@@ -42,7 +42,7 @@ import db
 from workspace import ApiError, Registry, Workspace, open_dir_at, open_file_at, open_root, validate_relpath
 
 # Bump when parsing or the stored shape changes: older rows are then re-parsed.
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 NOTE_SUFFIX = ".md"
 MAX_SCAN_ENTRIES = 200_000
 MAX_NOTES = 50_000
