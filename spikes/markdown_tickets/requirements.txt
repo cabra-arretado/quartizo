@@ -1,0 +1,4 @@
+# Isolated format spike only; the running backend remains stdlib-only.
+ruamel.yaml==0.19.1
+markdown-it-py==4.0.0
+mdurl==0.1.2

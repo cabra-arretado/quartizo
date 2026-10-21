@@ -1,0 +1,28 @@
+{
+  "kirocrew_version": "0.10.0rc4",
+  "notes_source_sha256": "b7c9ada2cc28b78adb8ffbbd1d93655454412e228686c3a09b1056dbb22c20a1",
+  "scope": "installed backend save function; no browser/editor validation",
+  "advanced_mtime_stale_save": {
+    "status": 409,
+    "disk_preserved": true
+  },
+  "preserved_mtime_stale_save": {
+    "status": 200,
+    "external_status_preserved": false
+  },
+  "companion_write_gate": "blocked: native stale save can overwrite external metadata without a conflict",
+  "browser_verification": {
+    "shared_fixture_attached_in_both_apps": true,
+    "clean_buffer_refresh": "passed: status and checkbox updates appear automatically",
+    "dirty_buffer_with_new_mtime": "passed: draft retained, conflict shown, disk edit preserved",
+    "dirty_buffer_with_preserved_mtime": {
+      "prepared_external_status": "done",
+      "actual_saved_status": "in_progress",
+      "prepared_external_last_checkbox_checked": false,
+      "actual_last_checkbox_checked": true,
+      "native_draft_saved": true,
+      "conflict_alerts": 0
+    },
+    "navigation": "app route /md-notebook verified; exact file/line targeting not established"
+  }
+}
