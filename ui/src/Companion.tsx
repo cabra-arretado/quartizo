@@ -207,6 +207,17 @@ function CopyName({ path }: { path: string }) {
   )
 }
 
+/** The file name Kiro Notes lists the note under, when the title shown differs from it. */
+function FileName({ path, title }: { path: string; title: string }) {
+  const name = noteName(path)
+  if (name === title) return null
+  return (
+    <span className="text-sm text-muted" style={S.mono}>
+      {name}
+    </span>
+  )
+}
+
 function NoCompanions() {
   return <p className="text-sm text-muted">No folder is shared with Kiro Notes yet. Add one in Settings.</p>
 }
@@ -342,6 +353,7 @@ function TicketCard(props: { ticket: Ticket; lane: number; index: number; onOpen
         <span className="text-sm" style={{ fontWeight: 600 }}>
           {t.title}
         </span>
+        <FileName path={t.path} title={t.title} />
         {(t.todos.total > 0 || t.diagnostics.length > 0) && (
           <span style={S.row}>
             {t.todos.total > 0 && (
@@ -439,6 +451,7 @@ export function TodoView(props: { api: AppApi }) {
               {g.title}
               {g.ticket && g.status && <span className="text-muted" style={{ fontWeight: 400 }}>{` · ${STATUS_LABELS[g.status]}`}</span>}
             </strong>
+            <FileName path={g.path} title={g.title} />
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {g.items.map(item => (
                 <li key={item.ordinal} style={{ ...S.todoRow, paddingLeft: item.depth * 18 }}>

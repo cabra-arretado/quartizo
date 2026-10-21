@@ -187,6 +187,28 @@ class KiroNotesEdgeCaseTests(IndexTestCase):
         bom = self.items("bom.md", "\ufeff---\n- [ ] yaml\n---\n- [ ] body\n".encode())
         self.assertEqual([i[0] for i in bom], ["yaml", "body"])
 
+    def test_table_rows_are_not_checkboxes(self):
+        # Kiro Notes takes a header + matching delimiter row, then every non-blank line with a pipe, as a table.
+        data = b"| a | b |\n|---|:-:|\n| 1 | 2 |\n- [ ] use a|b pipe\n- [ ] after the table\n"
+        self.assertEqual([t[0] for t in self.items("table.md", data)], ["after the table"])
+        # A delimiter row with another cell count, or no pipe, makes no table; an escaped pipe is text.
+        data = b"| a | b |\n|---|\n- [ ] one|two\nx \\| y\n---\n- [ ] three\n"
+        self.assertEqual([t[0] for t in self.items("notable.md", data)], ["one|two", "three"])
+
+    def test_fences_hide_headings_and_mermaid_blocks(self):
+        data = b"# Top\n```mermaid\n# not a heading\n- [ ] hidden\n```\n- [ ] shown\n"
+        self.assertEqual(self.items("fence.md", data), [("shown", 6, 3, 0, "Top")])
+
+    def test_crlf_frontmatter_offsets(self):
+        self.assertEqual(self.items("crlffm.md", b"---\r\na: 1\r\n---\r\n- [ ] body\n"), [("body", 4, 3, 0, None)])
+
+    def test_only_ascii_digits_keep_the_list_rails(self):
+        # An Arabic-Indic "1." is not a list line for JavaScript, so it ends the rails; an ASCII one keeps them.
+        arabic = self.items("arabic.md", "- [ ] a\n\u0661. x\n  - [ ] b\n".encode())
+        ascii_ = self.items("ascii.md", b"- [ ] a\n1. x\n  - [ ] b\n")
+        self.assertEqual([(t, d) for t, _, _, d, _ in arabic], [("a", 0), ("b", 0)])
+        self.assertEqual([(t, d) for t, _, _, d, _ in ascii_], [("a", 0), ("b", 1)])
+
     def test_depth_follows_indentation_with_tab_stops_and_headings(self):
         data = b"# Top\n- [ ] a\n\t- [ ] b\n    - [ ] c\n  - [ ] d\n## Next\n- [x] e\n"
         self.assertEqual([(t, d, h) for t, _, _, d, h in self.items("depth.md", data)],
@@ -409,6 +431,8 @@ class CompanionHttpTests(unittest.TestCase):
         second = Path(self.tmp.name).resolve() / "second"
         second.mkdir()
         (second / "t.md").write_bytes(b"- [ ] one\n")
+        status, body = self.call("POST", "/api/workspaces", {"path": str(second), "companion": "true"})
+        self.assertEqual((status, body.get("code")), (400, "bad_companion"))
         status, body = self.call("POST", "/api/workspaces", {"path": str(second), "companion": True})
         self.assertEqual(status, 201, body)
         self.assertTrue(body["workspace"]["companion"])

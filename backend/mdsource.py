@@ -44,9 +44,11 @@ _RANK = re.compile(r"[0-9a-f]{32}")
 _JS_SPACE = "[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
 _JS_DOT = "[^\n\r\u2028\u2029]"
 _KIRO_FRONTMATTER = re.compile(r"---\r?\n[\s\S]*?\r?\n---[ \t]*(?:\r?\n|\Z)")  # FM_RE
-_KIRO_LIST = re.compile(rf"({_JS_SPACE}*)(- \[[ x]\] |[-*] |(\d+)\. )")  # LIST_MARKER_RE
+_KIRO_LIST = re.compile(rf"({_JS_SPACE}*)(- \[[ x]\] |[-*] |([0-9]+)\. )")  # LIST_MARKER_RE (JS \d is ASCII)
 _KIRO_CHECKBOX = re.compile(rf"({_JS_SPACE}*)- \[( |x)\] ({_JS_DOT}*)\Z")
 _KIRO_HEADING = re.compile(rf"(#{{1,6}}) ({_JS_DOT}*)\Z")
+_JS_TRIM = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+_TABLE_SEP_CELL = re.compile(r":?-+:?\Z")  # SEP_CELL_RE
 _TAB_STOP = 4
 _DELIMITER = re.compile(r"---[ \t]*$")
 # Unparseable metadata can still say it is a ticket; such a note goes to the
@@ -68,7 +70,7 @@ class Todo:
     checked: bool
     text: str  # raw inline Markdown label, trimmed and bounded
     depth: int  # 0 for a top-level list item
-    heading: str | None  # nearest preceding top-level heading
+    heading: str | None  # nearest preceding heading (any level), outside fences and tables
 
 
 @dataclass
@@ -229,22 +231,61 @@ def _ticket_fields(source: _Source, note: Note) -> None:
         note.order = None
 
 
+def _has_pipe(line: str) -> bool:
+    """Kiro Notes' hasPipe: a pipe that is not backslash-escaped."""
+    return "|" in line.replace("\\|", "")
+
+
+def _table_cells(line: str) -> list[str]:
+    """Kiro Notes' splitTableRow: cells split on unescaped pipes, edge pipes dropped, trimmed."""
+    cells = re.split(r"(?<!\\)\|", line)
+    if len(cells) > 1 and not cells[0].strip(_JS_TRIM):
+        cells.pop(0)
+    if len(cells) > 1 and not cells[-1].strip(_JS_TRIM):
+        cells.pop()
+    return [c.strip(_JS_TRIM) for c in cells]
+
+
+def _table_end(lines: list[str], start: int) -> int | None:
+    """Kiro Notes' parseTable: the last line of the table starting at *start*, or None."""
+    if start + 1 >= len(lines) or not _has_pipe(lines[start]) or not _has_pipe(lines[start + 1]):
+        return None
+    sep = _table_cells(lines[start + 1])
+    if len(sep) != len(_table_cells(lines[start])) or not all(_TABLE_SEP_CELL.match(c) for c in sep):
+        return None
+    end = start + 1
+    for i in range(start + 2, len(lines)):
+        if not lines[i].strip(_JS_TRIM) or not _has_pipe(lines[i]):
+            break
+        end = i
+    return end
+
+
 def _todos(source: _Source, note: Note) -> None:
     """Checkboxes exactly as native Kiro Notes renders them, so both show the same TODOs.
 
-    Like Kiro Notes: drop a frontmatter block that starts the file, split the
-    rest on ``\\n``, skip ```` ``` ```` fences, and take ``- [ ] text`` /
-    ``- [x] text`` lines at any indentation. ``*``/``+``/numbered items,
-    ``[X]``, quoted items, ``~~~`` fences and CRLF lines are not checkboxes
-    there, while an indented line is one. Depth follows its list rails: any
-    line that is not a list item ends the list.
+    Like Kiro Notes (Preview.tsx): drop a frontmatter block that starts the
+    file, split the rest on ``\\n``, and for each line, in this order: skip lines
+    a table already took, end the list rails on a line that is not a list item,
+    toggle ```` ``` ```` fences and skip their content, take a whole table (a
+    header and a matching delimiter row, then rows while they carry a pipe),
+    then match ``- [ ] text`` / ``- [x] text`` at any indentation, then
+    headings. ``*``/``+``/numbered items, ``[X]``, quoted items, ``~~~``
+    fences, table rows and CRLF lines are not checkboxes there, while an
+    indented line is one.
     """
     text = source.text
     frontmatter = _KIRO_FRONTMATTER.match(text)
     offset = frontmatter.end() if frontmatter else 0
-    fenced, heading, indents = False, None, []
-    for raw in text[offset:].split("\n"):
-        start, offset = offset, offset + len(raw) + 1
+    lines = text[offset:].split("\n")
+    starts = []
+    for raw in lines:
+        starts.append(offset)
+        offset += len(raw) + 1
+    fenced, heading, indents, skip_to = False, None, [], -1
+    for index, raw in enumerate(lines):
+        if index <= skip_to:
+            continue
         if not _KIRO_LIST.match(raw):
             indents = []
         if raw.startswith("```"):
@@ -252,12 +293,15 @@ def _todos(source: _Source, note: Note) -> None:
             continue
         if fenced:
             continue
-        head = _KIRO_HEADING.match(raw)
-        if head:
-            heading = head[2].strip() or None
+        table_end = _table_end(lines, index)
+        if table_end is not None:
+            skip_to = table_end
             continue
         match = _KIRO_CHECKBOX.match(raw)
         if not match:
+            head = _KIRO_HEADING.match(raw)
+            if head:
+                heading = head[2].strip() or None
             continue
         if len(note.todos) >= MAX_TODOS_PER_NOTE:
             note.diagnose("todo_limit", f"only the first {MAX_TODOS_PER_NOTE} checkboxes are indexed")
@@ -267,7 +311,7 @@ def _todos(source: _Source, note: Note) -> None:
             indents.pop()
         depth = len(indents)
         indents.append(indent)
-        marker = start + len(match[1]) + 2  # the '[' after "- "
+        marker = starts[index] + len(match[1]) + 2  # the '[' after "- "
         line, column = source.position(marker)
         note.todos.append(Todo(source.byte_offset(marker), line + 1, column + 1, match[2] == "x",
                                match[3].strip()[:MAX_LABEL_CHARS], depth, heading))

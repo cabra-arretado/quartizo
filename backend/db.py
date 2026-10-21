@@ -231,11 +231,17 @@ def new_uid() -> str:
     return secrets.token_hex(16)
 
 
-def insert_workspace(conn: sqlite3.Connection, name: str, path: str) -> tuple[int, str]:
+def insert_workspace(conn: sqlite3.Connection, name: str, path: str, companion: bool = False) -> tuple[int, str]:
     uid = new_uid()
-    cur = conn.execute("INSERT INTO workspaces (uid, name, path, created_at) VALUES (?, ?, ?, ?)",
-                       (uid, name, path, int(time.time())))
+    cur = conn.execute("INSERT INTO workspaces (uid, name, path, created_at, companion) VALUES (?, ?, ?, ?, ?)",
+                       (uid, name, path, int(time.time()), 1 if companion else 0))
     return int(cur.lastrowid), uid
+
+
+def old_task_counts(conn: sqlite3.Connection) -> dict[int, int]:
+    """Tasks left from the removed database board, per workspace id (only workspaces that have some)."""
+    return {r[0]: r[1] for r in conn.execute(
+        "SELECT w.id, COUNT(*) FROM tasks JOIN workspaces w ON w.uid = tasks.project_id GROUP BY w.id")}
 
 
 def delete_workspace(conn: sqlite3.Connection, workspace_id: int) -> bool:

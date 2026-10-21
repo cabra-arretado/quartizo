@@ -447,29 +447,30 @@ prevent that; it makes the transfer deliberate, visible and bounded.
 Native Kiro Notes 0.10.0rc4 decides whether a save is stale by mtime alone; an
 external edit that preserves the mtime is overwritten without a conflict
 ([phase 1 evidence](markdown-tickets-phase1.md#native-notes-verification)).
-Quartizo's own hash checks cannot strengthen another app's save guard, so the
-companion does not write:
+Quartizo's own hash checks cannot strengthen another app's save guard, so
+Quartizo does not write notes at all:
 
-- The four note write routes check `workspace.companion` first and answer 409
-  `companion_read_only` without opening any file. Reads still go through the
-  confined reader. No companion route accepts a write: the Board and TODO
-  routes are `GET`; `PUT .../companion` and `POST /companion/refresh` change
-  only app state (tested: the full vault snapshot, including mtimes and hidden
-  entries, is identical after enabling, browsing, refreshing and
-  rebuilding).
-- Scans reuse `open_root` / `open_dir_at` / `open_file_at` (no symlink is
-  followed, regular files only, owner-owned directories), skip hidden entries,
-  read at most 2 MiB + 1 byte per note and never decode file names the notes
-  API could not address.
-- Parsing treats every note as hostile input: frontmatter and Markdown limits
-  as above; YAML is composed into nodes with the safe loader (no object
-  construction) and anchors, aliases, merge keys and custom tags are refused;
-  a recursion error becomes a diagnostic. TODO labels are stored as raw text
-  (500 characters) and rendered by React as text, never as HTML.
-- The parsers are third-party code running in the backend. They are vendored
-  unchanged from hash-pinned wheels with a file manifest checked in CI, and
-  `vendored.py` refuses copies loaded from outside `backend/_vendor` or at
-  another version (the gateway's venv has a different markdown-it-py).
+- There is no route that writes a note, a ticket or a checkbox. The Board and
+  TODO routes are `GET`; `POST /workspaces`, `PUT .../companion`,
+  `DELETE /workspaces/{id}` and `POST /companion/refresh` change only app
+  state (tested: the full vault snapshot, including mtimes and hidden entries,
+  is identical after enabling, browsing, refreshing and rebuilding, and the old
+  note write routes answer 404).
+- Scans use `open_root` / `open_dir_at` / `open_file_at` (no symlink is
+  followed, regular files only, owner-owned directories), skip hidden entries
+  and names that are not safe relative paths, and read at most 2 MiB + 1 byte
+  per note.
+- Parsing treats every note as hostile input: frontmatter limits as above;
+  YAML is composed into nodes with the safe loader (no object construction) and
+  anchors, aliases, merge keys and custom tags are refused. Checkboxes and
+  headings come from line rules copied from Kiro Notes (no Markdown parser).
+  TODO labels are stored as raw text (500 characters) and rendered by React as
+  text, never as HTML.
+- ruamel.yaml is third-party code running in the backend. It is vendored
+  unchanged from a hash-pinned wheel with a file manifest checked in CI, and
+  `vendored.py` refuses a copy loaded from outside `backend/_vendor` or at
+  another version, since the gateway's interpreter may carry its own.
 - Queries bind every value; the interpolated identifiers are the fixed table
   names in `companion.py`.
-
+- Removing a folder that still has tasks from the removed database board is
+  refused (409 `has_old_tasks`) unless the owner confirmed deleting them.

@@ -110,6 +110,19 @@ class RegistrationTests(TmpTree):
         self.refused(self.registry.get, ws.id, status=404, code="workspace_not_found")
         self.refused(self.registry.unregister, ws.id, status=404)
 
+    def test_old_database_tasks_are_counted_and_deleted_only_when_confirmed(self):
+        ws = self.registry.register(str(self.a / "notes"))
+        with db.connect(self.registry.db_path) as conn:
+            for i in range(2):
+                conn.execute("INSERT INTO tasks (uid, project_id, title, status, sort_order, created_at, updated_at)"
+                             " VALUES (?, ?, 'old', 'ready', ?, 0, 0)", (f"{i:032x}", ws.uid, i))
+        self.assertEqual(self.registry.old_task_counts(), {ws.id: 2})
+        err = self.refused(self.registry.unregister, ws.id, status=409, code="has_old_tasks")
+        self.assertEqual(err.extra["taskCount"], 2)
+        self.assertEqual([w.id for w in self.registry.list()], [ws.id])
+        self.registry.unregister(ws.id, delete_old_tasks=True)
+        self.assertEqual((self.registry.list(), self.registry.old_task_counts()), ([], {}))
+
     def test_workspace_has_a_fresh_uid_and_ids_are_not_reused(self):
         ws = self.registry.register(str(self.a / "notes"))
         self.assertRegex(ws.uid, r"^[0-9a-f]{32}$")
@@ -362,7 +375,7 @@ class RegistryHttpTests(unittest.TestCase):
         ws = body["workspace"]
         self.assertEqual((ws["name"], ws["path"]), ("V", str(self.vault)))
         status, body = signed_json(self.port, "GET", "/api/workspaces")
-        self.assertIn(ws, body["workspaces"])
+        self.assertIn({**ws, "oldTasks": 0}, body["workspaces"])
         self.assertEqual(signed_json(self.port, "GET", f"/api/workspaces/{ws['id']}")[1]["workspace"], ws)
         status, body = signed_json(self.port, "POST", "/api/workspaces", {"path": str(self.vault)})
         self.assertEqual((status, body["code"]), (409, "root_overlaps"))

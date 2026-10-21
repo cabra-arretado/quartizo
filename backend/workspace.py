@@ -352,7 +352,10 @@ class Registry:
         """Validate a candidate root and return its realpath, or raise."""
         return canonical_root(raw, self.protected)
 
-    def register(self, raw_path: object, name: object = None) -> Workspace:
+    def register(self, raw_path: object, name: object = None, companion: object = False) -> Workspace:
+        """Register a root; *companion* also shares it with Kiro Notes, in the same insert."""
+        if not isinstance(companion, bool):
+            raise ApiError(400, "bad_companion", "companion must be true or false")
         real = self.canonical_root(raw_path)
         if name is None or name == "":
             label = os.path.basename(real)
@@ -365,11 +368,27 @@ class Registry:
                 if _overlaps(real, ws["path"]):
                     raise ApiError(409, "root_overlaps",
                                    f"overlaps the registered workspace {ws['name']!r}", workspaceId=ws["id"])
-            new_id, uid = db.insert_workspace(conn, label, real)
-        return Workspace(new_id, uid, label, real)
+            new_id, uid = db.insert_workspace(conn, label, real, companion)
+        return Workspace(new_id, uid, label, real, companion)
 
-    def unregister(self, workspace_id: int) -> None:
-        """Forget a root and its index (FK cascade, also old database tasks). Files are never touched."""
+    def old_task_counts(self) -> dict[int, int]:
+        with self._conn() as conn:
+            return db.old_task_counts(conn)
+
+    def unregister(self, workspace_id: int, *, delete_old_tasks: bool = False) -> None:
+        """Forget a root and its index. Files are never touched.
+
+        Tasks left from the removed database board go with it (FK cascade), so
+        a workspace that still has some is refused with 409 ``has_old_tasks``
+        (``taskCount``) unless the caller passed *delete_old_tasks* after the
+        owner confirmed. Count and delete happen in one transaction.
+        """
         with self._lock, self._conn() as conn, db.transaction(conn):
-            if not db.delete_workspace(conn, workspace_id):
+            if db.get_workspace(conn, workspace_id) is None:
                 raise ApiError(404, "workspace_not_found", "no such workspace")
+            count = db.old_task_counts(conn).get(workspace_id, 0)
+            if count and delete_old_tasks is not True:
+                raise ApiError(409, "has_old_tasks",
+                               f"this folder still has {count} task(s) from the old task board; removing it deletes them",
+                               taskCount=count)
+            db.delete_workspace(conn, workspace_id)

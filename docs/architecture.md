@@ -242,49 +242,44 @@ See [m5.md](m5.md) for the gateway routes and the permission decision.
 
 ## Kiro Notes companion, read only
 
-The first delivery of [the Markdown-ticket plan](markdown-tickets-plan.md):
-native Kiro Notes edits a shared folder, Quartizo shows a Board of its ticket
-notes and its TODOs. Format contracts: [phase 1](markdown-tickets-phase1.md).
+The first delivery of [the Markdown-ticket plan](markdown-tickets-plan.md),
+now the whole app: native Kiro Notes edits a shared folder, Quartizo shows a
+Board of its ticket notes and its TODOs. Format contracts:
+[phase 1](markdown-tickets-phase1.md).
 
 - **Read only, enforced in the backend.** Phase 1 reproduced native Notes
-  silently overwriting an external edit that kept the file's mtime, so this
-  delivery writes nothing to a companion folder: there is no ticket or
-  checkbox write route, and every existing note write route refuses a
-  companion workspace (409 `companion_read_only`) before reading anything.
-  The UI hides the editor's write actions there too, but the backend is what
-  decides. Only application state changes: the per-workspace
-  `companion` switch and the derived index.
-- **Per-workspace opt-in.** Turning the mode on is the "switch each workspace
-  explicitly" step of the plan; the database board of that workspace is kept,
-  untouched, and returns when the mode is switched off. Converting its cards to
-  ticket notes is the separate, explicit migration of phase 4 and is not
-  triggered by browsing.
+  silently overwriting an external edit that kept the file's mtime, so
+  Quartizo writes nothing to the folders: there is no note, ticket or checkbox
+  write route. Only application state changes: the registry, the
+  per-workspace `companion` switch and the derived index.
+- **Per-folder opt-in.** Settings adds a folder already shared (one insert);
+  unsharing drops its index, removing forgets it. A folder that still has
+  tasks from the removed database board shows their count, and removing it
+  deletes them only after that confirmation.
 - **Files are authoritative; the index is derived.** `companion.py` scans
-  with the same fd-relative, no-follow opens as the notes API, reads and hashes
-  every note on every scan (timestamps alone miss edits), re-parses only
-  changed hashes, and writes a new generation that replaces the active one in
-  one transaction. A failed root keeps the previous generation; an incomplete
-  scan or an unreadable note keeps last-known rows (`retained`), so nothing is
-  inferred deleted from damaged or missing input. Interrupted generations are
-  dropped at startup. Dropping every `companion_*` row and rebuilding gives
-  the same results (tested).
+  with fd-relative, no-follow opens, reads and hashes every note on every scan
+  (timestamps alone miss edits), re-parses only changed hashes, and writes a
+  new generation that replaces the active one in one transaction. A failed
+  root keeps the previous generation; an incomplete scan or an unreadable note
+  keeps last-known rows (`retained`), so nothing is inferred deleted from
+  damaged or missing input. Interrupted generations are dropped at startup.
+  Dropping every `companion_*` row and rebuilding gives the same results
+  (tested).
 - **One worker, throttled requests.** A single daemon thread scans one
-  workspace at a time. The views ask for a rescan when they open and every
-  30 s while visible; automatic requests within 10 s of the last scan are
-  skipped, Refresh and Rebuild are not. No filesystem watcher: the plan adds
-  one only if measured latency needs it.
-- **Parsing.** `mdsource.py` is the read half of the phase 1 spike: YAML nodes
-  (never reserialized) for frontmatter, a CommonMark block parse with the
-  pinned paragraph rule wrapped to record the physical column, and a byte
-  check that each recorded position really holds its `[ ]`/`[x]` marker (a
-  note whose positions do not verify gets an `ambiguous_location` diagnostic
-  and no TODOs). Unreadable metadata that still says `type: ticket` puts the
-  note in the repair lane instead of hiding it.
+  workspace at a time; a failure it cannot even record is logged, never fatal.
+  The views ask for a rescan when they open and every 30 s while visible;
+  automatic requests within 10 s of the last scan are skipped, Refresh and
+  Rebuild are not. No filesystem watcher.
+- **Parsing.** `mdsource.py` reads frontmatter as YAML nodes (never
+  reserialized) with Quartizo's own lenient delimiter rule, which also gives
+  the title (first `# ` heading, else the file name). Checkboxes and their
+  headings follow Kiro Notes' Preview rules line for line (frontmatter regex,
+  `\n` splitting, ``` fences, tables, `- [ ]`/`- [x]`, list rails with tab
+  stops), so both list the same TODOs. Unreadable metadata that still says
+  `type: ticket` puts the note in the repair lane instead of hiding it.
 - **Duplicates** are computed at query time over every companion workspace and
   reported on every copy; nothing is merged.
-- **Navigation adapter** (`noteNav.ts`). Board and TODOs call one function with
-  the source reference. Kiro Notes on 0.10.0rc4 can only be opened as an app
-  (`/md-notebook`), so the adapter promises that and nothing more, and the
-  views always show workspace, path, line/column and heading. Release 2 swaps
-  the adapter for Quartizo's own editor.
-
+- **Navigation.** Kiro Notes on 0.10.0rc4 can only be opened as an app
+  (`/md-notebook`), so clicking a card or TODO goes there, and every card and
+  TODO offers its note's file name to copy. Cards also show that file name
+  when their title differs from it.

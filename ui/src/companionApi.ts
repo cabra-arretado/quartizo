@@ -33,6 +33,8 @@ export interface Workspace {
   path: string
   /** Shared with Kiro Notes: indexed for the board and the TODO list. */
   companion?: boolean
+  /** Tasks left from the removed database board; removing the folder deletes them. */
+  oldTasks?: number
 }
 
 export interface ApiFailure {
@@ -91,9 +93,12 @@ export async function addWorkspace(api: AppApi, path: string, name?: string): Pr
   return res.workspace
 }
 
-/** Call only after the user confirmed in the UI. The folder and its files are not touched. */
-export async function removeWorkspace(api: AppApi, wsId: number): Promise<void> {
-  await api.del(`${BACKEND_BASE}/workspaces/${wsId}`)
+/**
+ * Call only after the user confirmed in the UI. The folder and its files are not touched. A folder
+ * with old database tasks is refused (409 `has_old_tasks`) unless `deleteOldTasks`, which deletes them.
+ */
+export async function removeWorkspace(api: AppApi, wsId: number, deleteOldTasks = false): Promise<void> {
+  await api.del(`${BACKEND_BASE}/workspaces/${wsId}${deleteOldTasks ? '?deleteOldTasks=1' : ''}`)
 }
 
 export interface Diagnostic {

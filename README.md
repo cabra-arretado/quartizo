@@ -156,17 +156,22 @@ network, sessionApproval or uploads). Earlier versions also asked for
    both flagged, never merged. Arrow keys move between cards.
 4. **TODOs** lists exactly the checkboxes Kiro Notes shows, grouped by note,
    open ones by default. Like Kiro Notes, Quartizo drops a frontmatter block
-   that starts the file, splits the rest on `\n` and skips ```` ``` ```` fences,
-   then takes lines `- [ ] text` / `- [x] text` (a `-` bullet, lower-case `x`,
-   any indentation). So `*`/`+`/numbered items, `[X]`, quoted items, `~~~`
-   fences and CRLF lines are not checkboxes, while an indented line is one.
+   that starts the file, splits the rest on `\n`, skips ```` ``` ```` fences
+   and tables (a header and a matching delimiter row, then every non-blank
+   line with a pipe), then takes lines `- [ ] text` / `- [x] text` (a `-`
+   bullet, lower-case `x`, any indentation). So `*`/`+`/numbered items, `[X]`,
+   quoted items, `~~~` fences, table rows and CRLF lines are not checkboxes,
+   while an indented line is one. A card or group whose title differs from the
+   file name also shows the file name, which is what Kiro Notes lists.
 5. The views rescan when they open, every 30 s while shown, and on
    **Refresh**; **Rebuild index** in Settings re-parses everything. Every scan
    reads and hashes every note, so an edit that kept the file's timestamp is
    still seen. An incomplete scan or an unreadable note is called out, and such
    notes keep their last known state instead of disappearing.
 6. Unticking **Shared with Kiro Notes** drops the folder's index; **Remove**
-   forgets the folder. Nothing on disk changes either way.
+   forgets the folder. Nothing on disk changes either way. A folder that still
+   has tasks from Quartizo's old database board says how many, and removing it
+   deletes them only once you confirm.
 
 **Why read only.** Native Kiro Notes (checked on 0.10.0rc4) guards its saves by
 timestamp only: an external edit that keeps the file's modification time can
@@ -194,10 +199,10 @@ Hidden folders (`.trash`, `.obsidian`, `.git`) and symlinks are skipped.
 | Route | Body / result |
 |---|---|
 | `GET /api/status` | app, version and the verified caller `{kind, ownerId}` |
-| `GET /api/workspaces` | `{workspaces: [{id, uid, name, path, companion}]}`. `id` is never reused; `uid` is 32 random hex chars per registration |
-| `POST /api/workspaces` | `{path, name?, companion?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, `/proc` `/sys` `/dev`, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`), a folder you do not own or that others can write. `companion: true` also shares it with Kiro Notes and queues a scan |
+| `GET /api/workspaces` | `{workspaces: [{id, uid, name, path, companion, oldTasks}]}`. `id` is never reused; `uid` is 32 random hex chars per registration; `oldTasks` counts tasks left from the removed database board |
+| `POST /api/workspaces` | `{path, name?, companion?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, `/proc` `/sys` `/dev`, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`), a folder you do not own or that others can write. `companion: true` also shares it with Kiro Notes (same insert) and queues a scan; a non-boolean is 400 `bad_companion` |
 | `GET /api/workspaces/{id}` | `{workspace}` or 404 `workspace_not_found` |
-| `DELETE /api/workspaces/{id}` | Forgets the folder and its index, and stops a running scan. Files are never touched |
+| `DELETE /api/workspaces/{id}[?deleteOldTasks=1]` | Forgets the folder and its index, and stops a running scan. Files are never touched. A folder with old database tasks is refused with 409 `has_old_tasks` (`taskCount`) unless `deleteOldTasks=1`, which deletes them in the same transaction |
 | `PUT /api/workspaces/{id}/companion` | `{enabled: true\|false}` -> `{workspace, index}`. On: queues a scan. Off: drops the derived index. 400 `bad_companion` |
 | `GET /api/companion` | `{available, error, workspaces: [{workspace, index}]}`. `available` is false (with `error`) when the vendored parser could not be loaded |
 | `POST /api/companion/refresh` | `{workspaceId?, rebuild?, manual?}` -> 202 `{requested, skipped}`. Without `workspaceId`: every companion folder. Automatic requests within 10 s of the last scan are skipped; `manual` or `rebuild` are not. `rebuild` re-parses every note |

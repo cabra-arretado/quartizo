@@ -43,7 +43,7 @@ import db
 from workspace import ApiError, Registry, Workspace, open_dir_at, open_file_at, open_root, validate_relpath
 
 # Bump when parsing or the stored shape changes: older rows are then re-parsed.
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 NOTE_SUFFIX = ".md"
 MAX_SCAN_ENTRIES = 200_000
 MAX_NOTES = 50_000
@@ -284,7 +284,7 @@ class CompanionIndex:
         """(relative path, fstat, bytes) for every addressable note; (path, None, None) if unreadable.
 
         Hidden entries (``.trash``, ``.git``, ``.obsidian``) and symlinks are
-        skipped, like the notes list. Every open is fd-relative with
+        skipped. Every open is fd-relative with
         O_NOFOLLOW (workspace.py), and at most one fd per directory level is
         held. Raises ApiError only for the root itself.
         """
@@ -323,7 +323,7 @@ class CompanionIndex:
             try:
                 validate_relpath(prefix + name)
             except ApiError:
-                continue  # a name the notes API could not address either
+                continue  # not a safe relative path (control characters, too long, ...)
             if is_dir:
                 subdirs.append(name)
             elif name.endswith(NOTE_SUFFIX) and len(name) > len(NOTE_SUFFIX):

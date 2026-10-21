@@ -52,7 +52,11 @@ export default function Settings(props: { api: AppApi }) {
   useEffect(() => {
     let cancelled = false
     listWorkspaces(api)
-      .then(value => !cancelled && setWorkspaces(value))
+      .then(value => {
+        if (cancelled) return
+        setWorkspaces(value)
+        setLoadFailure(null)
+      })
       .catch(err => !cancelled && setLoadFailure(toFailure(err)))
     return () => {
       cancelled = true
@@ -145,10 +149,17 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; onChanged: ()
       </div>
       {confirmRemove && (
         <div role="alertdialog" aria-label="Remove folder" style={S.notice}>
-          <span className="text-sm">Stop showing “{w.name}” in Quartizo? The folder and its files are not touched.</span>
+          <span className="text-sm">
+            Stop showing “{w.name}” in Quartizo? The folder and its files are not touched.
+            {!!w.oldTasks &&
+              ` It still has ${w.oldTasks} task(s) from Quartizo's old task board, which no view shows any more: removing the folder deletes them.`}
+          </span>
           <div style={S.row}>
-            <Btn onClick={() => void run(() => removeWorkspace(api, w.id)).then(ok => ok && props.onChanged())} disabled={busy}>
-              Remove
+            <Btn
+              onClick={() => void run(() => removeWorkspace(api, w.id, !!w.oldTasks)).then(ok => ok && props.onChanged())}
+              disabled={busy}
+            >
+              {w.oldTasks ? `Remove and delete ${w.oldTasks} task(s)` : 'Remove'}
             </Btn>
             <Btn onClick={() => setConfirmRemove(false)} disabled={busy}>
               Cancel

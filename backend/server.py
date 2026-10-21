@@ -296,12 +296,12 @@ class Handler(BaseHTTPRequestHandler):
             }
         if parts == ["api", "workspaces"]:
             if method == "GET":
-                return 200, {"workspaces": [w.to_json() for w in registry.list()]}
+                old = registry.old_task_counts()
+                return 200, {"workspaces": [{**w.to_json(), "oldTasks": old.get(w.id, 0)} for w in registry.list()]}
             if method == "POST":
                 body = self._json_body()
-                ws = registry.register(body.get("path"), body.get("name"))
-                if body.get("companion") is True:
-                    ws = registry.set_companion(ws.id, True)
+                ws = registry.register(body.get("path"), body.get("name"), body.get("companion", False))
+                if ws.companion:
                     self.server.companion.request(ws, manual=True)  # type: ignore[attr-defined]
                 return 201, {"workspace": ws.to_json()}
             return None
@@ -315,9 +315,10 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "GET":
                     return 200, {"workspace": registry.get(ws_id).to_json()}
                 if method == "DELETE":
-                    # Its index and any tasks it still had in the database go with it; the folder is untouched.
+                    # Its index goes with it, and its old database tasks only with ?deleteOldTasks=1
+                    # (409 has_old_tasks otherwise). The folder is untouched.
                     uid = registry.get(ws_id).uid
-                    registry.unregister(ws_id)
+                    registry.unregister(ws_id, delete_old_tasks=_q(query, "deleteOldTasks") == "1")
                     self.server.companion.cancel(uid)  # type: ignore[attr-defined]
                     return 200, {"ok": True}
                 return None

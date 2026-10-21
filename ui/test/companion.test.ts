@@ -66,12 +66,13 @@ describe('workspace API client', () => {
     await addWorkspace(api, '/home/u/notes')
     await addWorkspace(api, '/home/u/notes', 'Vault')
     await removeWorkspace(api, 3)
+    await removeWorkspace(api, 4, true)
     expect(get).toHaveBeenCalledWith(`${B}/workspaces`)
     expect(post.mock.calls).toEqual([
       [`${B}/workspaces`, { path: '/home/u/notes', companion: true }],
       [`${B}/workspaces`, { path: '/home/u/notes', name: 'Vault', companion: true }],
     ])
-    expect(del).toHaveBeenCalledWith(`${B}/workspaces/3`)
+    expect(del.mock.calls).toEqual([[`${B}/workspaces/3`], [`${B}/workspaces/4?deleteOldTasks=1`]])
   })
 
   it('percent-encodes query values (a raw + would read as a space)', () => {
