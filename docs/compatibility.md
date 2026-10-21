@@ -1,5 +1,11 @@
 # Compatibility
 
+> Measured while Quartizo still had its notes editor, chat, Git and agent
+> views. Rows about those features are history; the gateway, proxy-signing,
+> backend, install/trust and Kiro Notes rows still apply. Since then the app
+> requests only `/apps/quartizo/api` and vendors only ruamel.yaml.
+
+
 ## Compatibility matrix (0.0.1)
 
 Only what the sections below record. "Live" means exercised against a running

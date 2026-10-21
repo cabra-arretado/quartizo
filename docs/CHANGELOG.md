@@ -2,6 +2,36 @@
 
 ## Unreleased
 
+### Changed: Quartizo is now only a read-only Kiro Notes companion
+
+- **Three tabs:** Tasks (the board of ticket notes), TODOs and Settings.
+  Clicking a card or TODO opens Kiro Notes; each has a **Copy name** button.
+  Settings adds a folder already shared with Kiro Notes (one request), can
+  unshare it, rebuild its index or remove it.
+- **TODOs follow native Kiro Notes' rules** line for line (its frontmatter
+  regex, `\n` splitting, `- [ ]`/`- [x]` only, ``` fences), so both list the
+  same checkboxes. `*`/`+`/numbered items, `[X]`, `~~~` fences and CRLF lines
+  are no longer TODOs; an indented `- [ ]` line now is. Index version 3
+  re-parses existing indexes.
+- **Removed:** the notes editor and preview, database task board, Chat tab,
+  Git view and Agents monitor, with their backend routes (`/note`, `/rename`,
+  `/delete`, `/notes`, `/tasks*`, `/repos*`, `/slots`). The database keeps the
+  old tables (nothing is dropped); removing a folder simply cascades.
+- **Permissions:** `app.json` no longer requests `/api/chat`.
+- **Dependencies:** markdown-it-py and mdurl are no longer vendored (only
+  ruamel.yaml); the UI no longer depends on markdown-it, and its bundle has no
+  third-party code.
+- Request bodies are capped at 64 KiB.
+
+### Fixed
+
+- The companion scan worker no longer dies when recording a failed scan also
+  fails (views stayed "scanning" forever).
+- Adding a folder can no longer leave it registered but hidden.
+- Removing a folder stops its running scan; unexpected backend errors answer a
+  JSON 500 instead of dropping the connection.
+- macOS CI: a spike test used a non-canonical temp path (`/var` is a symlink).
+
 ### Added
 
 - **Kiro Notes companion, read only** (release 1's first delivery,

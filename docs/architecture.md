@@ -1,59 +1,44 @@
-# Architecture (M1-M5, Kiro Notes companion)
+# Architecture
 
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
-  App.tsx        PageHeader + in-page tabs: Notes | Tasks | TODOs | Agents | Git | Chat; cross-tab links + Back trail
-  Notes.tsx      workspace picker/registration, note list + search, editor, preview
-  Tasks.tsx      Kanban board of the selected workspace, task details, links (M3)
-  tasksApi.ts    typed client for .../workspaces/{id}/tasks
-  board.ts       column grouping, move/reindex mirror, keyboard moves, drop index
-  taskContext.ts bounded task context block for an agent prompt
-  Companion.tsx  read-only Board of ticket notes + TODOs of Kiro Notes companion folders
-  companionApi.ts typed client for .../companion and .../board, lanes, index status wording
-  noteNav.ts     note-navigation adapter: Kiro Notes app only, source path/line fallback
-  Agents.tsx     read-only session / tool / subagent monitor, bounded polling (M5)
-  agentsModel.ts     slot rows, visibility classification, status, transcript summary, links
-  freshness.ts   poll cadence, backoff, stale-since, restart detection
-  Git.tsx        repo picker/registration, changed-files list, virtualized diff viewer (M4)
-  gitApi.ts      typed client for .../repos (ids, a path and a mode only)
-  gitList.ts     entry badges, diff modes, changed-files keyboard handling
-  diffView.ts    unified diff -> classified lines, virtual-list window
-  Chat.tsx       the QTZ-003 ChatEmbed session (mounted on first visit, then kept)
-  notesApi.ts    typed client for /apps/quartizo/api/workspaces/... (useAppApi)
-  editorDoc.ts   open-note state: dirty, save base hash, 409 conflict rules
-  lineEndings.ts LF editor text <-> the file's own line endings
-  markdown.ts    untrusted Markdown -> sanitized HTML
-  listNav.ts     keyboard navigation for the note list
+  App.tsx          PageHeader + in-page tabs: Tasks | TODOs | Settings (arrow keys switch)
+  Companion.tsx    read-only Board of ticket notes and the TODO list; Copy name buttons
+  Settings.tsx     add / share / rebuild / remove folders
+  companionApi.ts  typed client for the backend, failures, timeouts, lanes, index wording
+  noteNav.ts       the Kiro Notes route and a note's name
+  ui.tsx           shared styles, ErrorLine, storage
         |
         | same-origin fetch, owner cookie (gateway signs + forwards)
         v
-backend (python3 -I backend/server.py: stdlib + parsers vendored in backend/_vendor)
+backend (python3 -I backend/server.py: stdlib + ruamel.yaml vendored in backend/_vendor)
   server.py      HMAC + signed principal (owner-session only), routing
   workspace.py   root registry, path validation, fd-based no-follow opens
-  notes.py       list/search, read, atomic create/update/rename, trash-delete
-  tasks.py       task CRUD, ordered moves, version checks, JSON import/export (M3)
-  gitrepo.py     repo registry, hardened git runner, status/diff parsing (M4)
   companion.py   read-only scan worker + rebuildable ticket/TODO index (generations)
-  mdsource.py    one note -> ticket fields, title, checkboxes with source positions
-  vendored.py    loads ruamel.yaml / markdown-it-py / mdurl from backend/_vendor only
-  db.py          sqlite3 registry + tasks + repos + companion index + migrations ($KIROCREW_HOME/apps/quartizo/data)
+  mdsource.py    one note -> ticket fields, title, checkboxes (Kiro Notes' line rules)
+  vendored.py    loads ruamel.yaml from backend/_vendor only
+  db.py          sqlite3 registry + companion index + migrations ($KIROCREW_HOME/apps/quartizo/data)
         |
         v
-plain .md files in the registered folders (readable by Obsidian or any editor)
-registered Git repositories, read through `git` (never written)
+plain .md files in the registered folders, written by Kiro Notes, only read here
 ```
 
-Testable logic lives in the plain `.ts` modules and has vitest suites. The
-`.tsx` components only wire state to elements.
+Each view mounts when its tab opens, so it re-reads its data then (Settings
+changes show up right away) and polls only while shown.
+
+> **History.** Quartizo started as a notes editor with a database task board,
+> a chat tab, a Git view and an agent monitor (M1-M5). Those were removed when
+> it became a read-only Kiro Notes companion; the sections below from "Editor"
+> to "Agents" describe that removed design and are kept for the record. The
+> current design is "Pages and routing" and "Kiro Notes companion, read only".
 
 ## Pages and routing
 
 `app.json` keeps its single `ui.pages` entry (`/apps/quartizo`). Every
 builtin app in 0.10.0rc4 declares exactly one page. Extra pages would each
 add a sidebar entry, and the host's handling of sub-routes was not verified.
-So Notes, Tasks and Chat are **in-page tabs** (`role="tablist"`, arrow keys switch).
-No manifest change and no new permission was needed: the notes routes sit
-under the already-granted `/apps/quartizo/api`.
+So Tasks, TODOs and Settings are **in-page tabs** (`role="tablist"`, arrow
+keys switch). The only grant is `/apps/quartizo/api`, the app's own backend.
 
 ## Editor: plain `<textarea>` (not CodeMirror 6)
 

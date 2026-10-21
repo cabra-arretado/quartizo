@@ -1,41 +1,32 @@
 # Threat model
 
-Status: consolidated for 0.0.1 (M6). The summary and the residual risks come
-first; sections 1-9 below are the detail.
-Chat context is covered in [m2.md](m2.md).
+Status: revised when Quartizo became a read-only Kiro Notes companion. The
+summary and residual risks below are current. Sections 1, 2 (opens), 7 and 10
+are current detail; sections 3-6, 8 and 9, and the write paths in section 2,
+describe features that have been removed (the note editor, database tasks, Git,
+chat context and recorded sessions) and are kept for the record.
 
 ## Summary
 
 | # | Threat | Mitigations (detail) | Tests |
 |---|---|---|---|
-| T1 | **Root confinement.** The backend reads or writes outside the folders the owner registered | Opt-in registration; root policy (not `/`, not `$HOME`, not KiroCrew/data dirs, no overlaps, owner-owned, not writable by others); relative-path rules; hidden segments unreachable ([§1](#1-workspace-confinement)) | `tests/backend/test_workspace.py`, `test_hardening.py`, `test_notes.py`, `test_git.py` (same policy) |
-| T2 | **Symlinks and TOCTOU.** A link or a swapped directory redirects an access | No path is resolved then reopened: fd-relative `openat` with `O_NOFOLLOW` from the root; regular-file check on the fd; atomic temp+`link`/`replace` writes; `renameat2(NOREPLACE)` with a verified fallback ([§2](#2-symlinks-and-toctou)) | `test_workspace.py` (fd confinement, `root_changed`), `test_hardening.py` (race injections, fallback rollback), `test_notes.py` (conflicts, atomicity) |
-| T3 | **Auth replay and forgery.** A request is forged, tampered with or replayed to the loopback backend | Body-bound `X-KiroCrew-Proxy` HMAC (constant-time, +/-60 s), signed principal claim bound to method/target/body, one-time request ids in a bounded cache that fails closed, owner-only routes, fail closed with no secret, `127.0.0.1` bind ([§7](#7-auth-replay-and-forgery)) | `test_proxy_auth.py` (incl. upstream-signed vectors), `test_http.py`, `tests/integration/test_gateway.py` (live, when configured) |
-| T4 | **Prompt-context leakage.** Note or task text sent to an agent leaks more than the owner chose, or is read as instructions | Nothing is attached or sent automatically; only an explicit selection/whole note/task block, previewed, capped at 8 KB, fenced, framed as quoted data, header values sanitized; full-chat handoff is a draft (`autoSend: false`); sessions Quartizo did not record are never read ([§8](#8-prompt-context-leakage)) | `ui/test/context.test.ts`, `taskContext.test.ts`, `slots.test.ts`, `agents.test.ts` |
-| T5 | **Untrusted Markdown.** Hostile note text runs script or loads resources in the dashboard | markdown-it with `html: false`, URL allowlist, images never loaded, `rel="noopener noreferrer nofollow"`, React text for names ([§3](#3-untrusted-markdown)) | `ui/test/markdown.test.ts` (30 payloads, allowlist checks) |
-| T6 | **Git outputs and hostile config.** Repo config, attributes or output make Quartizo run code, hang, exhaust memory or mutate the repo | Fixed argv, config/env neutralized, filter drivers blanked, no-spawn `RLIMIT_NPROC` trampoline (fails closed), heap and output caps, timeout, plumbing for diffs, no git stderr to the page, React text rendering ([§5](#5-git-read-only-m4)) | `test_git.py` (hostile config per layer, argv injection, caps, not-mutated snapshot), `ui/test/diffView.test.ts` |
-| T7 | **Command injection.** A request field reaches a shell, an option parser or SQL | The only subprocess is `git`, as an argv list with no shell and server-built flags, paths after `--` as `:(literal)`; SQL values are always bound parameters and the few interpolated identifiers come from fixed in-code lists; no `eval`/`exec`/`os.system` ([§9](#9-command-injection)) | `test_git.py` (argv injection), `test_tasks.py`, `test_slots.py` (key patterns), `test_notes.py`/`test_workspace.py` (path rules) |
-| T8 | **Shared-folder writes.** Quartizo and native Kiro Notes both write a companion folder and one silently overwrites the other | Companion mode writes nothing: no ticket/checkbox write route, every note write route refuses companion workspaces before reading, the index lives only in the app DB; scans open with the same no-follow fd rules and only read ([§10](#10-kiro-notes-companion-read-only)) | `tests/backend/test_companion.py` (409 refusals, vault byte/mtime snapshot unchanged after browse, refresh and rebuild) |
-| T9 | **Hostile or damaged Markdown/YAML** exhausts the parser or makes the index lie | 2 MiB per note, 64 KiB / 8,192 events / 64 levels of frontmatter, safe node composition without object construction, anchors/aliases/custom tags refused, markdown-it nesting limit, recursion caught, every checkbox position byte-verified, scan entry/note/depth limits; parsers vendored at pinned versions and refused from anywhere else ([§10](#10-kiro-notes-companion-read-only)) | `test_companion.py`, `test_vendor.py`, `spikes/markdown_tickets/test_source.py` |
+| T1 | **Root confinement.** The backend reads outside the folders the owner registered | Opt-in registration; root policy (not `/`, not `$HOME`, not KiroCrew/data dirs, not `/proc` `/sys` `/dev`, no overlaps, owner-owned, not writable by others); relative-path rules; hidden segments skipped ([§1](#1-workspace-confinement)) | `tests/backend/test_workspace.py`, `test_hardening.py` |
+| T2 | **Symlinks and TOCTOU.** A link or a swapped directory redirects a read | No path is resolved then reopened: fd-relative `openat` with `O_NOFOLLOW` from the root, ownership checked per directory, regular-file check on the fd ([§2](#2-symlinks-and-toctou)) | `test_workspace.py` (fd confinement, `root_changed`), `test_hardening.py`, `test_companion.py` |
+| T3 | **Auth replay and forgery.** A request is forged, tampered with or replayed to the loopback backend | Body-bound `X-KiroCrew-Proxy` HMAC (constant-time, +/-60 s), signed principal claim bound to method/target/body, one-time request ids in a bounded cache that fails closed, owner-only routes, fail closed with no secret, `127.0.0.1` bind, 64 KiB bodies refused before reading ([§7](#7-auth-replay-and-forgery)) | `test_proxy_auth.py`, `test_http.py`, `test_hardening.py`, `tests/integration/test_gateway.py` (live, when configured) |
+| T4 | **Shared-folder writes.** Quartizo and Kiro Notes both write a folder and one silently overwrites the other | Quartizo has no route that writes a note, a ticket or a checkbox; the index lives only in the app DB ([§10](#10-kiro-notes-companion-read-only)) | `test_companion.py` (no write route, vault byte/mtime snapshot unchanged after browse, refresh and rebuild) |
+| T5 | **Hostile or damaged Markdown/YAML** exhausts the parser or makes the index lie | 2 MiB per note, 64 KiB / 8,192 events / 64 levels of frontmatter, safe node composition without object construction, anchors/aliases/custom tags refused; checkboxes found by a line rule (no Markdown parser); scan entry/note/depth limits; ruamel.yaml vendored at a pinned version and refused from anywhere else ([§10](#10-kiro-notes-companion-read-only)) | `test_companion.py`, `test_vendor.py` |
+| T6 | **Untrusted text in the page.** Note titles, paths or checkbox labels run script | Everything is rendered as React text; no Markdown or HTML is rendered | `ui/test/companion.test.ts` (labels kept raw) |
 
 ## Residual risks
 
-Each is accepted for 0.0.1 and explained in the section named.
-
-1. **Update race** (microseconds between the last hash check and `os.replace`): an external write there is overwritten ([§2](#2-symlinks-and-toctou)).
-2. **Move fallback window** where `renameat2` is unavailable (macOS, some filesystems): two syscalls wide ([§2](#2-symlinks-and-toctou)). CI runs the fallback on macOS.
-3. **Root renamed to a real directory** is served as the registered path; bind mounts and hard links inside a root are not detected ([§2](#2-symlinks-and-toctou)).
-4. **Sanitizer is a single layer** (markdown-it escaping plus renderer rules, no DOMPurify pass) ([§3](#3-untrusted-markdown)).
-5. **Git root-swap race** between the fd check and git's `chdir`; `gitdir:` files are trusted; `RLIMIT_NPROC` does not bind root (Quartizo then refuses to run git); the `RLIMIT_DATA` heap cap is applied on Linux only (macOS rejects the call, so there the 10 s timeout and output caps are the bound and the bomb tests are skipped); on macOS `/usr/bin/git` is an Xcode shim that needs to spawn, so the real git is located with `xcrun --find git` ([§5](#5-git-read-only-m4)).
-6. **Owner-level compromise is out of scope.** Anything running as the owner (or the owner's page) can read the SQLite DB, call the owner-only API and add session records ([§4](#4-task-metadata-m3), [§6](#6-recorded-sessions-m5-review)).
-7. **Loopback exposure.** The backend listens on `127.0.0.1`; other local processes can reach the port but cannot produce a valid signature without the app secret. The secret file is as private as the owner's account ([§7](#7-auth-replay-and-forgery)).
-8. **Prompt injection is not solved, only framed.** Text the owner sends to an agent can still contain instructions the model follows; the fence and framing line reduce, not remove, that ([§8](#8-prompt-context-leakage)).
-9. **Duplicate context on an ambiguous retry** (response lost after the gateway accepted the send) ([m2.md](m2.md)).
-10. **Platform.** POSIX only (Windows unsupported); sandbox coverage beyond the owner's home was not mapped; Unicode normalization is not applied, so lookalike names can appear twice ([§1](#1-workspace-confinement)).
-11. **Dependencies.** No known advisory affects the shipped runtime (`npm audit --omit=dev`: 0), but the dev toolchain has open advisories ([dependencies.md](dependencies.md)).
-12. **Unverified live:** the git sandbox under the gateway's OS sandbox, and macOS behaviour beyond CI ([compatibility.md](compatibility.md)).
-13. **Companion mode relies on the owner's switch.** Quartizo refuses its own writes in a companion folder, but cannot stop other tools, or Quartizo running an older version against the same DB, from writing there; and a folder attached in Kiro Notes but not switched to companion mode is still editable in Quartizo ([§10](#10-kiro-notes-companion-read-only)).
-14. **Index freshness is bounded, not live.** Between scans (30 s while a view is shown, otherwise on demand) the views can show an older state; they say when it was indexed ([§10](#10-kiro-notes-companion-read-only)).
+1. **Root renamed to a real directory** is served as the registered path; bind mounts and hard links inside a root are not detected ([§2](#2-symlinks-and-toctou)).
+2. **Owner-level compromise is out of scope.** Anything running as the owner (or the owner's page) can read the SQLite DB and call the owner-only API.
+3. **Loopback exposure.** The backend listens on `127.0.0.1`; other local processes can reach the port but cannot produce a valid signature without the app secret. The secret file is as private as the owner's account ([§7](#7-auth-replay-and-forgery)).
+4. **Platform.** POSIX only (Windows unsupported); Unicode normalization is not applied, so lookalike names can appear twice ([§1](#1-workspace-confinement)).
+5. **Dependencies.** No known advisory affects the shipped runtime, but the dev toolchain has open advisories ([dependencies.md](dependencies.md)).
+6. **Other writers.** Quartizo writes nothing, but cannot stop other tools from writing a shared folder behind Kiro Notes' back ([§10](#10-kiro-notes-companion-read-only)).
+7. **Index freshness is bounded, not live.** Between scans (30 s while a view is shown, otherwise on demand) the views can show an older state; they say when it was indexed ([§10](#10-kiro-notes-companion-read-only)).
+8. **Line-rule drift.** The TODO rules copy Kiro Notes 0.10.0rc4; if a later Kiro Notes renders checkboxes differently, the lists can disagree until Quartizo follows.
 
 ## Assets and actors
 
