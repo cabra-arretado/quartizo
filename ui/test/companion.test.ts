@@ -4,7 +4,7 @@ import {
   ago, companionStatus, describeIndex, filterTodos, groupLanes, indexWarning, LANES, loadBoard, loadTodos,
   requestRefresh, setCompanion, type Ticket, type TodoGroup, todoLabel,
 } from '../src/companionApi'
-import { describeSource, KIRO_NOTES, KIRO_NOTES_ROUTE, openInKiroNotes } from '../src/noteNav'
+import { describeSource, KIRO_NOTES, KIRO_NOTES_ROUTE, noteName, openInKiroNotes } from '../src/noteNav'
 
 const B = '/apps/quartizo/api'
 
@@ -141,5 +141,13 @@ describe('note navigation adapter', () => {
     expect(describeSource({ workspaceId: 1, workspaceName: 'Vault', path: 'a/b.md', line: 12, column: 3, heading: 'Plan' }))
       .toBe('Vault › a/b.md · line 12, column 3 · under “Plan”')
     expect(describeSource({ workspaceId: 1, workspaceName: 'Vault', path: 'b.md' })).toBe('Vault › b.md')
+  })
+})
+
+describe('note name', () => {
+  it('is the file name without .md, as Kiro Notes lists it', () => {
+    expect(noteName('tickets/ticket copy.md')).toBe('ticket copy')
+    expect(noteName('Plan.MD')).toBe('Plan')
+    expect(noteName('a/b/readme.markdown')).toBe('readme.markdown')
   })
 })

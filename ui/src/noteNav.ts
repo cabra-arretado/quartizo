@@ -49,6 +49,11 @@ export function openInKiroNotes(navigate: (path: string) => void, ref: NoteRef, 
     : { message: `Opened Kiro Notes. Select ${ref.path} there (Kiro Notes cannot be told which note to open).`, exact: false }
 }
 
+/** The note's name as Kiro Notes lists it: the file name without `.md`. */
+export function noteName(path: string): string {
+  return (path.split('/').pop() ?? path).replace(/\.md$/i, '')
+}
+
 /** "Workspace › folder/note.md · line 12, column 3 · under “Heading”". */
 export function describeSource(ref: NoteRef): string {
   const parts = [`${ref.workspaceName} › ${ref.path}`]
