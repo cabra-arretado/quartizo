@@ -287,6 +287,10 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.Error:
             self._json(500, {"error": "database error", "code": "db_error"})
             return
+        except Exception as err:  # never echo the message: it may name a path
+            sys.stderr.write(f"{APP_NAME}: unexpected {type(err).__name__}\n")
+            self._json(500, {"error": "internal error", "code": "internal"})
+            return
         if result is None:
             self._json(404, {"error": "not found"})
         else:
@@ -312,7 +316,11 @@ class Handler(BaseHTTPRequestHandler):
                 return 200, {"workspaces": [w.to_json() for w in registry.list()]}
             if method == "POST":
                 body = self._json_body()
-                return 201, {"workspace": registry.register(body.get("path"), body.get("name")).to_json()}
+                ws = registry.register(body.get("path"), body.get("name"))
+                if body.get("companion") is True:
+                    ws = registry.set_companion(ws.id, True)
+                    self.server.companion.request(ws, manual=True)  # type: ignore[attr-defined]
+                return 201, {"workspace": ws.to_json()}
             return None
         if parts[:2] == ["api", "repos"]:
             return self._handle_repos(parts[2:], query)
@@ -328,7 +336,9 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "DELETE":
                     # A workspace is also a task project: its tasks go with it,
                     # so that needs ?deleteTasks=1 (409 project_has_tasks otherwise).
+                    uid = registry.get(ws_id).uid
                     registry.unregister(ws_id, delete_tasks=_q(query, "deleteTasks") == "1")
+                    self.server.companion.cancel(uid)  # type: ignore[attr-defined]
                     return 200, {"ok": True}
                 return None
             if parts[3] == "tasks":

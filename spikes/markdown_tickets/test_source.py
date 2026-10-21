@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from dataclasses import replace
@@ -200,7 +201,8 @@ class SourceTests(unittest.TestCase):
         import notes
         from workspace import ApiError
 
-        with tempfile.TemporaryDirectory(prefix="quartizo-format-") as root:
+        with tempfile.TemporaryDirectory(prefix="quartizo-format-") as tmp:
+            root = os.path.realpath(tmp)  # macOS: /var is a symlink, and roots must be canonical
             raw = self.files["bom-crlf.md"]
             notes.create_note(root, "ticket.md", raw.decode())
             changed = update_status(raw, "done", digest(raw))

@@ -1,17 +1,18 @@
-import { jsx as r, jsxs as p, Fragment as j } from "react/jsx-runtime";
-import { useNavigate as q, useAppApi as te } from "@kirocrew/app-sdk";
-import { Btn as A, PageHeader as ne } from "@kirocrew/app-sdk/ui";
-import { useState as g, useEffect as C, useMemo as H, useRef as L, useCallback as re } from "react";
+import { jsx as r, jsxs as p, Fragment as M } from "react/jsx-runtime";
+import { useNavigate as j, useAppApi as ee } from "@kirocrew/app-sdk";
+import { Btn as A, PageHeader as te } from "@kirocrew/app-sdk/ui";
+import { useState as g, useEffect as C, useMemo as H, useRef as L, useCallback as ne } from "react";
 const R = "/apps/quartizo/api";
-function ae(t) {
+function re(t) {
   const e = Object.entries(t).filter((n) => n[1] !== void 0 && n[1] !== "").map(([n, a]) => `${encodeURIComponent(n)}=${encodeURIComponent(a)}`);
   return e.length ? `?${e.join("&")}` : "";
 }
-async function oe(t) {
+async function ae(t) {
   return (await t.get(`${R}/workspaces`)).workspaces;
 }
-async function ie(t, e, n) {
-  return (await t.post(`${R}/workspaces`, n ? { path: e, name: n } : { path: e })).workspace;
+async function oe(t, e, n, a = !1) {
+  const o = n ? { path: e, name: n } : { path: e };
+  return a && (o.companion = !0), (await t.post(`${R}/workspaces`, o)).workspace;
 }
 function T(t) {
   const e = t;
@@ -32,17 +33,17 @@ function T(t) {
   }
   return m;
 }
-const se = ["backlog", "ready", "in_progress", "review", "done"], P = {
+const ie = ["backlog", "ready", "in_progress", "review", "done"], P = {
   backlog: "Backlog",
   ready: "Ready",
   in_progress: "In Progress",
   review: "Review",
   done: "Done"
 };
-async function le(t, e, n = !1) {
+async function se(t, e, n = !1) {
   await t.del(`${R}/workspaces/${e}${n ? "?deleteTasks=1" : ""}`);
 }
-function ce(t) {
+function le(t) {
   const e = T(t), n = t == null ? void 0 : t.body;
   if (typeof n != "string") return e;
   try {
@@ -53,10 +54,10 @@ function ce(t) {
   return e;
 }
 const _ = `${R}/companion`;
-function de(t) {
+function ce(t) {
   return t.get(_);
 }
-function U(t, e, n) {
+function de(t, e, n) {
   return t.put(`${R}/workspaces/${e}/companion`, { enabled: n });
 }
 function z(t, e = {}) {
@@ -67,11 +68,11 @@ function ue(t, e) {
   return t.get(`${R}/workspaces/${e}/board`);
 }
 function pe(t, e, n) {
-  return t.get(`${_}/todos${ae({ workspace: n === void 0 ? void 0 : String(n), state: e })}`);
+  return t.get(`${_}/todos${re({ workspace: n === void 0 ? void 0 : String(n), state: e })}`);
 }
-const Q = [...se, "repair"], B = { ...P, repair: "Needs repair" };
+const U = [...ie, "repair"], B = { ...P, repair: "Needs repair" };
 function me(t) {
-  const e = Object.fromEntries(Q.map((n) => [n, []]));
+  const e = Object.fromEntries(U.map((n) => [n, []]));
   for (const n of t) (e[n.lane] ?? e.repair).push(n);
   return e;
 }
@@ -132,11 +133,11 @@ function W(t, e = be) {
   });
   return Promise.race([t, a]).finally(() => clearTimeout(n));
 }
-const V = "/md-notebook";
+const Q = "/md-notebook";
 function xe(t) {
   return (t.split("/").pop() ?? t).replace(/\.md$/i, "");
 }
-const we = 1500, ve = 3e4, F = "quartizo:workspace", h = {
+const we = 1500, ve = 3e4, q = "quartizo:workspace", h = {
   column: { display: "flex", flexDirection: "column", gap: 8, minHeight: 0, minWidth: 0 },
   row: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" },
   input: { padding: "4px 6px", border: "1px solid rgba(128,128,128,.4)", borderRadius: 4, background: "transparent", color: "inherit" },
@@ -151,7 +152,7 @@ const we = 1500, ve = 3e4, F = "quartizo:workspace", h = {
   todoRow: { display: "flex", gap: 6, alignItems: "baseline" },
   copy: { flex: "none", fontSize: 11, padding: "1px 6px", borderRadius: 3, border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit", cursor: "pointer" }
 };
-function M() {
+function F() {
   try {
     return window.localStorage;
   } catch {
@@ -168,19 +169,19 @@ function ke() {
     return document.addEventListener("visibilitychange", n), () => document.removeEventListener("visibilitychange", n);
   }, []), t;
 }
-function G(t, e) {
+function V(t, e) {
   const [n, a] = g(null), [o, i] = g(null);
   return C(() => {
     if (!e) return;
     let m = !1;
-    return de(t).then((c) => {
+    return ce(t).then((c) => {
       m || (a(c.workspaces.filter((u) => u.workspace.companion)), i(c.available ? null : { message: c.error ?? "The Markdown index is unavailable." }));
     }).catch((c) => !m && i(T(c))), () => {
       m = !0;
     };
   }, [t, e]), { companions: n, failure: o };
 }
-function J(t, e, n, a, o) {
+function G(t, e, n, a, o) {
   const i = ke(), [m, c] = g(null), [u, f] = g(null), [v, w] = g(0), [$, l] = g(!1), x = L(null), d = L(n), y = L(a);
   d.current = n, y.current = a, C(() => {
     x.current = null, c(null), f(null);
@@ -202,7 +203,7 @@ function J(t, e, n, a, o) {
       s = !0, clearTimeout(b);
     };
   }, [t, i, e, v]);
-  const k = re(async () => {
+  const k = ne(async () => {
     l(!0);
     try {
       await W(y.current(!0)), f(null), w((s) => s + 1);
@@ -214,9 +215,9 @@ function J(t, e, n, a, o) {
   }, []);
   return { data: m, failure: u, busy: $, refresh: k };
 }
-function X(t) {
+function J(t) {
   const e = Date.now(), n = t.statuses.map((o) => he(o, e)).filter(Boolean), a = t.statuses.map((o) => fe(o)).filter((o) => !!o);
-  return /* @__PURE__ */ p(j, { children: [
+  return /* @__PURE__ */ p(M, { children: [
     /* @__PURE__ */ p("div", { style: h.row, children: [
       /* @__PURE__ */ r("span", { className: "text-sm text-muted", role: "status", "aria-live": "polite", children: n.join(" · ") }),
       /* @__PURE__ */ r(A, { onClick: t.onRefresh, disabled: t.busy, children: "Refresh" })
@@ -224,7 +225,7 @@ function X(t) {
     a.map((o) => /* @__PURE__ */ r("div", { role: "note", className: "text-sm", style: h.notice, children: o }, o))
   ] });
 }
-function Y({ path: t }) {
+function X({ path: t }) {
   const e = xe(t), [n, a] = g("idle");
   C(() => {
     if (n === "idle") return;
@@ -240,20 +241,20 @@ function Y({ path: t }) {
   };
   return /* @__PURE__ */ r("button", { type: "button", onClick: () => void o(), "aria-label": `Copy note name “${e}”`, title: e, style: h.copy, children: n === "copied" ? "Copied" : n === "failed" ? "Failed" : "Copy name" });
 }
-function Z() {
+function Y() {
   return /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "No folder is shared with Kiro Notes yet. Add one in Settings." });
 }
 function Ne(t) {
   var m, c;
-  const { companions: e, failure: n } = G(t.api, t.active), [a, o] = g(() => {
+  const { companions: e, failure: n } = V(t.api, t.active), [a, o] = g(() => {
     var f;
-    const u = Number((f = M()) == null ? void 0 : f.getItem(F));
+    const u = Number((f = F()) == null ? void 0 : f.getItem(q));
     return Number.isInteger(u) && u > 0 ? u : null;
   }), i = ((m = e == null ? void 0 : e.find((u) => u.workspace.id === a)) == null ? void 0 : m.workspace) ?? ((c = e == null ? void 0 : e[0]) == null ? void 0 : c.workspace) ?? null;
   return C(() => {
     var u;
     try {
-      i && ((u = M()) == null || u.setItem(F, String(i.id)));
+      i && ((u = F()) == null || u.setItem(q, String(i.id)));
     } catch {
     }
   }, [i]), n ? /* @__PURE__ */ r(E, { failure: n }) : e ? i ? /* @__PURE__ */ p("div", { style: { ...h.column, flex: 1 }, children: [
@@ -262,24 +263,24 @@ function Ne(t) {
       /* @__PURE__ */ r("select", { id: "qz-board-ws", value: i.id, onChange: (u) => o(Number(u.target.value)), style: h.input, children: e.map((u) => /* @__PURE__ */ r("option", { value: u.workspace.id, children: u.workspace.name }, u.workspace.id)) })
     ] }),
     /* @__PURE__ */ r($e, { api: t.api, workspace: i, active: t.active }, i.id)
-  ] }) : /* @__PURE__ */ r(Z, {}) : /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading…" });
+  ] }) : /* @__PURE__ */ r(Y, {}) : /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading…" });
 }
 function $e(t) {
-  const { api: e, workspace: n } = t, a = n.id, o = q(), { data: i, failure: m, busy: c, refresh: u } = J(
+  const { api: e, workspace: n } = t, a = n.id, o = j(), { data: i, failure: m, busy: c, refresh: u } = G(
     t.active,
     String(a),
     () => ue(e, a),
     (l) => z(e, { workspaceId: a, manual: l }),
     (l) => l.index.state === "scanning"
-  ), f = H(() => me((i == null ? void 0 : i.tickets) ?? []), [i]), v = Q.filter((l) => l !== "repair" || f.repair.length > 0), w = L(null), $ = (l) => {
+  ), f = H(() => me((i == null ? void 0 : i.tickets) ?? []), [i]), v = U.filter((l) => l !== "repair" || f.repair.length > 0), w = L(null), $ = (l) => {
     var I, S;
     const x = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"], d = l.target, y = Number(d.dataset.lane), k = Number(d.dataset.index);
     if (!x.includes(l.key) || Number.isNaN(y) || Number.isNaN(k)) return;
     let s = y, b = k;
     if (l.key === "ArrowUp" && (b = Math.max(0, k - 1)), l.key === "ArrowDown" && (b = k + 1), l.key === "Home" && (b = 0), l.key === "End" && (b = Number.MAX_SAFE_INTEGER), l.key === "ArrowLeft" || l.key === "ArrowRight") {
-      const ee = l.key === "ArrowLeft" ? -1 : 1;
+      const Z = l.key === "ArrowLeft" ? -1 : 1;
       do
-        s += ee;
+        s += Z;
       while (s >= 0 && s < v.length && f[v[s]].length === 0);
       if (s < 0 || s >= v.length) return;
     }
@@ -287,7 +288,7 @@ function $e(t) {
     b = Math.min(b, O.length - 1), l.preventDefault(), (S = (I = w.current) == null ? void 0 : I.querySelector(`[data-lane="${s}"][data-index="${b}"]`)) == null || S.focus();
   };
   return /* @__PURE__ */ p("div", { style: { ...h.column, flex: 1 }, children: [
-    /* @__PURE__ */ r(X, { statuses: i ? [i.index] : [], busy: c, onRefresh: () => void u() }),
+    /* @__PURE__ */ r(J, { statuses: i ? [i.index] : [], busy: c, onRefresh: () => void u() }),
     /* @__PURE__ */ r(E, { failure: m }),
     !i && !m && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading the board…" }),
     i && i.tickets.length === 0 && i.index.state !== "scanning" && /* @__PURE__ */ p("p", { className: "text-sm text-muted", children: [
@@ -311,7 +312,7 @@ function $e(t) {
         f[l].length,
         ")"
       ] }),
-      /* @__PURE__ */ r("ul", { style: h.cards, children: f[l].map((d, y) => /* @__PURE__ */ r("li", { children: /* @__PURE__ */ r(Ce, { ticket: d, lane: x, index: y, onOpen: () => o(V) }) }, d.path)) })
+      /* @__PURE__ */ r("ul", { style: h.cards, children: f[l].map((d, y) => /* @__PURE__ */ r("li", { children: /* @__PURE__ */ r(Ce, { ticket: d, lane: x, index: y, onOpen: () => o(Q) }) }, d.path)) })
     ] }, l)) })
   ] });
 }
@@ -341,22 +342,22 @@ function Ce(t) {
         ]
       }
     ),
-    /* @__PURE__ */ r(Y, { path: e.path })
+    /* @__PURE__ */ r(X, { path: e.path })
   ] });
 }
 function Se(t) {
-  const { api: e } = t, n = q(), { companions: a, failure: o } = G(e, t.active), [i, m] = g("all"), [c, u] = g("open"), [f, v] = g("");
+  const { api: e } = t, n = j(), { companions: a, failure: o } = V(e, t.active), [i, m] = g("all"), [c, u] = g("open"), [f, v] = g("");
   C(() => {
     a && i !== "all" && !a.some((s) => s.workspace.id === i) && m("all");
   }, [a, i]);
-  const w = i === "all" ? void 0 : i, $ = t.active && !!a && a.length > 0, { data: l, failure: x, busy: d, refresh: y } = J(
+  const w = i === "all" ? void 0 : i, $ = t.active && !!a && a.length > 0, { data: l, failure: x, busy: d, refresh: y } = G(
     $,
     `${i}:${c}`,
     () => pe(e, c, w),
     (s) => z(e, { workspaceId: w, manual: s }),
     (s) => Object.values(s.index).some((b) => b.state === "scanning")
   ), k = H(() => ye((l == null ? void 0 : l.groups) ?? [], f), [l, f]);
-  return o ? /* @__PURE__ */ r(E, { failure: o }) : a ? a.length === 0 ? /* @__PURE__ */ r(Z, {}) : /* @__PURE__ */ p("div", { style: { ...h.column, flex: 1 }, children: [
+  return o ? /* @__PURE__ */ r(E, { failure: o }) : a ? a.length === 0 ? /* @__PURE__ */ r(Y, {}) : /* @__PURE__ */ p("div", { style: { ...h.column, flex: 1 }, children: [
     /* @__PURE__ */ p("div", { style: h.row, children: [
       a.length > 1 && /* @__PURE__ */ p(
         "select",
@@ -387,7 +388,7 @@ function Se(t) {
         }
       )
     ] }),
-    /* @__PURE__ */ r(X, { statuses: l ? Object.values(l.index) : [], busy: d, onRefresh: () => void y() }),
+    /* @__PURE__ */ r(J, { statuses: l ? Object.values(l.index) : [], busy: d, onRefresh: () => void y() }),
     /* @__PURE__ */ r(E, { failure: x }),
     (l == null ? void 0 : l.truncated) && /* @__PURE__ */ r("div", { role: "note", className: "text-sm", style: h.notice, children: "Only the first items are listed. Narrow it down by workspace, state or filter." }),
     !l && !x && /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading TODOs…" }),
@@ -403,7 +404,7 @@ function Se(t) {
           {
             type: "button",
             "aria-label": `Open Kiro Notes: ${K(b.text)}`,
-            onClick: () => n(V),
+            onClick: () => n(Q),
             style: { ...h.open, flexDirection: "row", gap: 6 },
             children: [
               /* @__PURE__ */ r("span", { "aria-hidden": "true", children: b.checked ? "☑" : "☐" }),
@@ -411,7 +412,7 @@ function Se(t) {
             ]
           }
         ),
-        /* @__PURE__ */ r(Y, { path: s.path })
+        /* @__PURE__ */ r(X, { path: s.path })
       ] }, b.ordinal)) })
     ] }, `${s.workspaceId}:${s.path}`)) })
   ] }) : /* @__PURE__ */ r("p", { className: "text-sm text-muted", children: "Loading…" });
@@ -429,15 +430,14 @@ function Te(t) {
   C(() => {
     if (!t.active) return;
     let d = !1;
-    return oe(e).then((y) => !d && a(y)).catch((y) => !d && i(T(y))), () => {
+    return ae(e).then((y) => !d && a(y)).catch((y) => !d && i(T(y))), () => {
       d = !0;
     };
   }, [e, t.active, m]);
   const x = async () => {
     l(!0), i(null);
     try {
-      const d = await ie(e, u.trim(), v.trim() || void 0);
-      await U(e, d.id, !0), f(""), w(""), c((y) => y + 1);
+      await oe(e, u.trim(), v.trim() || void 0, !0), f(""), w(""), c((d) => d + 1);
     } catch (d) {
       i(T(d));
     } finally {
@@ -480,9 +480,9 @@ function Ae(t) {
   }, x = async (d = !1) => {
     o(!0), m(null);
     try {
-      await le(e, n.id, d), t.onChanged();
+      await se(e, n.id, d), t.onChanged();
     } catch (y) {
-      const k = ce(y);
+      const k = le(y);
       k.code === "project_has_tasks" && !d ? $(k.taskCount ?? 0) : m(k);
     } finally {
       o(!1);
@@ -501,13 +501,13 @@ function Ae(t) {
             type: "checkbox",
             checked: !!n.companion,
             disabled: a,
-            onChange: () => void l(() => U(e, n.id, !n.companion)).then((d) => d && t.onChanged())
+            onChange: () => void l(() => de(e, n.id, !n.companion)).then((d) => d && t.onChanged())
           }
         ),
         "Shared with Kiro Notes"
       ] }),
       /* @__PURE__ */ r("span", { style: { flex: 1 } }),
-      n.companion && /* @__PURE__ */ r(A, { onClick: () => void l(() => z(e, { workspaceId: n.id, manual: !0, rebuild: !0 }), "Rebuilding the index…"), disabled: a, children: "Rebuild index" }),
+      n.companion && /* @__PURE__ */ r(A, { onClick: () => void l(() => z(e, { workspaceId: n.id, manual: !0, rebuild: !0 }), "Rebuild requested."), disabled: a, children: "Rebuild index" }),
       !f && /* @__PURE__ */ r(A, { onClick: () => v(!0), disabled: a, children: "Remove…" })
     ] }),
     f && /* @__PURE__ */ p("div", { role: "alertdialog", "aria-label": "Remove folder", style: N.notice, children: [
@@ -536,9 +536,9 @@ const D = [
   { id: "settings", label: "Settings" }
 ];
 function Le() {
-  const t = te(), [e, n] = g("tasks");
-  return /* @__PURE__ */ p(j, { children: [
-    /* @__PURE__ */ r(ne, { title: "Quartizo", subtitle: "Kiro Notes board and TODOs" }),
+  const t = ee(), [e, n] = g("tasks");
+  return /* @__PURE__ */ p(M, { children: [
+    /* @__PURE__ */ r(te, { title: "Quartizo", subtitle: "Kiro Notes board and TODOs" }),
     /* @__PURE__ */ p("div", { className: "px-6 pb-8 flex-1 min-h-0 flex flex-col gap-3", children: [
       /* @__PURE__ */ r("div", { role: "tablist", "aria-label": "Quartizo", onKeyDown: (o) => {
         var c;

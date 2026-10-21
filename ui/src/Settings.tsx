@@ -43,8 +43,7 @@ export default function Settings(props: { api: AppApi; active: boolean }) {
     setBusy(true)
     setFailure(null)
     try {
-      const ws = await registerWorkspace(api, path.trim(), name.trim() || undefined)
-      await setCompanion(api, ws.id, true)
+      await registerWorkspace(api, path.trim(), name.trim() || undefined, true)
       setPath('')
       setName('')
       setReload(n => n + 1)
@@ -146,7 +145,7 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; onChanged: ()
         </label>
         <span style={{ flex: 1 }} />
         {w.companion && (
-          <Btn onClick={() => void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true }), 'Rebuilding the index…')} disabled={busy}>
+          <Btn onClick={() => void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true }), 'Rebuild requested.')} disabled={busy}>
             Rebuild index
           </Btn>
         )}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -323,6 +324,20 @@ class ReconcileTests(IndexTestCase):
         self.assertEqual(ctx.exception.status, 503)
 
 
+class WorkerTests(IndexTestCase):
+    def test_a_failure_that_cannot_be_recorded_does_not_stop_the_worker(self):
+        broken = mock.patch.object(self.index, "scan", side_effect=RuntimeError("boom"))
+        unrecorded = mock.patch.object(self.index, "_record_failure", side_effect=sqlite3.OperationalError("locked"))
+        self.index.start()
+        with broken, unrecorded:
+            self.index.request(self.ws, manual=True)
+            self.assertTrue(self.index.wait_idle(10))
+        # The worker is still alive: the next request is scanned.
+        self.index.request(self.ws, manual=True)
+        self.assertTrue(self.index.wait_idle(10))
+        self.assertEqual(self.tickets()["ticket.md"]["status"], "ready")
+
+
 class CompanionHttpTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -361,6 +376,16 @@ class CompanionHttpTests(unittest.TestCase):
                 return index
             time.sleep(0.05)
         self.fail(f"index not ready: {index}")
+
+    def test_a_folder_can_be_added_already_shared_with_kiro_notes(self):
+        second = Path(self.tmp.name).resolve() / "second"
+        second.mkdir()
+        (second / "t.md").write_bytes(b"- [ ] one\n")
+        status, body = self.call("POST", "/api/workspaces", {"path": str(second), "companion": True})
+        self.assertEqual(status, 201, body)
+        self.assertTrue(body["workspace"]["companion"])
+        status, _ = self.call("DELETE", f"/api/workspaces/{body['workspace']['id']}")
+        self.assertEqual(status, 200)
 
     def test_companion_mode_is_read_only_end_to_end(self):
         before = snapshot(self.vault)

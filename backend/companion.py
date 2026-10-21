@@ -32,6 +32,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import sys
 import threading
 import time
 from collections import defaultdict
@@ -166,7 +167,10 @@ class CompanionIndex:
                 if ws is not None and ws.companion:
                     self.scan(ws, scan)
             except Exception as err:  # never let one workspace stop the worker
-                self._record_failure(uid, "scan_failed", f"the scan failed ({type(err).__name__})")
+                try:
+                    self._record_failure(uid, "scan_failed", f"the scan failed ({type(err).__name__})")
+                except Exception as failure:  # e.g. the database stayed locked: log it, keep working
+                    sys.stderr.write(f"quartizo: could not record a scan failure ({type(failure).__name__})\n")
             finally:
                 with self._cv:
                     self._running.pop(uid, None)

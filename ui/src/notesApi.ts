@@ -65,8 +65,10 @@ export async function listWorkspaces(api: AppApi): Promise<Workspace[]> {
   return res.workspaces
 }
 
-export async function registerWorkspace(api: AppApi, path: string, name?: string): Promise<Workspace> {
-  const res = await api.post<{ workspace: Workspace }>(`${BACKEND_BASE}/workspaces`, name ? { path, name } : { path })
+export async function registerWorkspace(api: AppApi, path: string, name?: string, companion = false): Promise<Workspace> {
+  const body: Record<string, unknown> = name ? { path, name } : { path }
+  if (companion) body.companion = true
+  const res = await api.post<{ workspace: Workspace }>(`${BACKEND_BASE}/workspaces`, body)
   return res.workspace
 }
 
