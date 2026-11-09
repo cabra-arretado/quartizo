@@ -3,7 +3,7 @@
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
   App.tsx          PageHeader + in-page tabs: Tasks | TODOs | Settings (arrow keys switch)
-  Companion.tsx    read-only Board of ticket notes and the TODO list; Copy name buttons
+  Companion.tsx    editable Board of ticket notes and the TODO list; Copy name buttons
   Settings.tsx     add / share / rebuild / remove folders
   companionApi.ts  typed client for the backend, failures, timeouts, lanes, index wording
   noteNav.ts       the Kiro Notes route and a note's name
@@ -14,13 +14,15 @@ dashboard page (ui/dist/index.mjs, rendered by the host)
 backend (python3 -I backend/server.py: stdlib + ruamel.yaml vendored in backend/_vendor)
   server.py      HMAC + signed principal (owner-session only), routing
   workspace.py   root registry, path validation, fd-based no-follow opens
-  companion.py   read-only scan worker + rebuildable ticket/TODO index (generations)
+  companion.py   scan worker + rebuildable ticket/TODO index (generations)
+  companion_write.py  shared write lock, exact byte patches, atomic publication, rank journals
+  legacy_migration.py preview and snapshot verification, backups, resumable conversion journals
   mdsource.py    one note -> ticket fields, title, checkboxes (Kiro Notes' line rules)
   vendored.py    loads ruamel.yaml from backend/_vendor only
   db.py          sqlite3 registry + companion index + migrations ($KIROCREW_HOME/apps/quartizo/data)
         |
         v
-plain .md files in the registered folders, written by Kiro Notes, only read here
+plain .md files in registered folders, shared with Kiro Notes
 ```
 
 Each view mounts when its tab opens, so it re-reads its data then (Settings
@@ -30,7 +32,9 @@ changes show up right away) and polls only while shown.
 > a chat tab, a Git view and an agent monitor (M1-M5). Those were removed when
 > it became a read-only Kiro Notes companion; the sections below from "Editor"
 > to "Agents" describe that removed design and are kept for the record. The
-> current design is "Pages and routing" and "Kiro Notes companion, read only".
+> current design is "Pages and routing" and "Kiro Notes companion". The
+> companion's metadata/checkbox writes resume the original release 1 scope;
+> they do not restore the removed editor, Git, chat or agent interfaces.
 
 ## Pages and routing
 
@@ -240,18 +244,57 @@ See [m5.md](m5.md) for the gateway routes and the permission decision.
   Notes still owns the workspace selection; opening a task in another
   workspace asks Notes to switch first.
 
-## Kiro Notes companion, read only
+## Kiro Notes companion
 
 The first delivery of [the Markdown-ticket plan](markdown-tickets-plan.md),
-now the whole app: native Kiro Notes edits a shared folder, Quartizo shows a
-Board of its ticket notes and its TODOs. Format contracts:
+now the whole app: native Kiro Notes edits a shared folder, Quartizo changes
+ticket metadata and TODO markers in those same files. Format contracts:
 [phase 1](markdown-tickets-phase1.md).
 
-- **Read only, enforced in the backend.** Phase 1 reproduced native Notes
-  silently overwriting an external edit that kept the file's mtime, so
-  Quartizo writes nothing to the folders: there is no note, ticket or checkbox
-  write route. Only application state changes: the registry, the
-  per-workspace `companion` switch and the derived index.
+- **Shared writes.** The original read-only delivery waited for native Notes'
+  content-hash conflict guard. With that upstream fix merged, the editable
+  companion uses source hashes, exact byte patches, confined file replacement,
+  and serialization of its own writes. Native Notes remains an independent
+  writer; its unsaved buffers are not accessible to Quartizo. File conflicts
+  require a refresh rather than an automatic overwrite. The historical native
+  failure is retained in phase 1 evidence.
+- **Write service.** `CompanionWriter` serializes Quartizo mutations through
+  one reentrant lock. Target hashes are checked before preparing a patch and
+  immediately before atomic replacement; moves also recheck destination
+  hashes. New files use no-clobber linking. Identity checks scan live files
+  across all companion folders, fail closed on incomplete inventories, and
+  retain only note metadata rather than the vault's contents. Duplicate lookup
+  uses an inventory counter. YAML patches use parser node byte spans, and TODO
+  toggles reparse the production native grammar before replacing one byte.
+  Folder registration, unsharing and removal use the same lock as writes;
+  publication and queued migrations also refresh their scope authorization.
+  The production server checks the installed host package version with
+  prerelease-aware comparison before enabling writes, independently of the
+  gateway's permissive manifest check. Unknown or unfixed versions stay
+  browsable with `writeBlocked` surfaced in status and controls.
+  Fresh byte hashes can reuse a bounded identity metadata cache or a matching
+  current-version index row. Cache misses parse metadata only. A five-second
+  cold-inventory budget defers to background indexing before publication.
+- **Durable maintenance.** Rank exhaustion is explicit. Column rebalancing
+  records each path, identity, before/after hash and proposed rank under
+  `data/ticket-maintenance/`. A restart recognizes already-applied hashes.
+  Conflicting external edits pause the journal; explicit reconciliation keeps
+  the current contents and changes only the planned ordering scalar. The
+  journal is removed only after all resulting files are verified.
+  Journal paths are reconciled by unique persistent IDs after a rename;
+  duplicate identities refuse recovery rather than guessing a file.
+- **Legacy migration.** Preview derives a plan hash from full legacy rows.
+  A SQLite backup and JSON export precede all note creation. Each old card
+  becomes a separate deterministic note preserving its UID, status, relative
+  order, description, linked note and session. `data/migration-<uid>.json`
+  records planned hashes and verified steps. Legacy rows are never deleted;
+  incomplete conversion disables ordinary writes. Retry creates no duplicate
+  files, and completed conversion never rewrites a later user edit. Recovery
+  journals and backups are application state, separate from `companion_*`.
+  Preview uses the same ID resolution as execution so renamed, edited outputs
+  expose the required consent. Generated notes consistently use LF and must
+  pass production parsing; normalization is disclosed and backups retain the
+  original database strings.
 - **Per-folder opt-in.** Settings adds a folder already shared (one insert);
   unsharing drops its index, removing forgets it. A folder that still has
   tasks from the removed database board shows their count, and removing it

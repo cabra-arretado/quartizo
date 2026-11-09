@@ -3,9 +3,7 @@
  * /apps/quartizo/api/...; wire shapes in backend/server.py and
  * backend/companion.py) and the pure rules the views apply to its answers.
  *
- * Nothing here writes a note: the calls that change anything change
- * application state only (the registered folders, their companion switch and
- * a request to rescan).
+ * Mutations carry file hashes and source snapshots; files remain authoritative.
  */
 import type { AppApi } from '@kirocrew/app-sdk'
 
@@ -123,6 +121,9 @@ export interface IndexStatus {
   retained?: number
   error?: { code: string; message: string; at: number | null } | string | null
   outdated?: boolean
+  maintenance?: TaskStatus[]
+  migrationPending?: boolean
+  writeBlocked?: ApiFailure | null
 }
 
 export interface CompanionWorkspace {
@@ -133,6 +134,7 @@ export interface CompanionWorkspace {
 export interface CompanionStatus {
   available: boolean
   error: string | null
+  writeBlocked?: ApiFailure | null
   workspaces: CompanionWorkspace[]
 }
 
@@ -163,6 +165,7 @@ export interface BoardData {
 }
 
 export interface TodoItem {
+  markerStart?: number
   ordinal: number
   line: number
   column: number
@@ -182,6 +185,7 @@ export interface TodoGroup {
   status: TaskStatus | null
   hash: string | null
   retained: boolean
+  diagnostics?: Diagnostic[]
   items: TodoItem[]
 }
 
@@ -237,6 +241,7 @@ export function groupLanes(tickets: readonly Ticket[]): Record<Lane, Ticket[]> {
 /** Whether the status should be called out next to the data (not "ready"). */
 export function indexWarning(index: IndexStatus | undefined): string | null {
   if (!index) return null
+  if (index.writeBlocked) return index.writeBlocked.message
   switch (index.state) {
     case 'off':
       return 'This workspace is not in Kiro Notes companion mode.'
@@ -255,6 +260,8 @@ export function indexWarning(index: IndexStatus | undefined): string | null {
       break
   }
   const parts: string[] = []
+  if (index.migrationPending) parts.push('Old task migration is unfinished. Resume it in Settings before editing this workspace.')
+  if (index.maintenance?.length) parts.push('Some columns have unfinished ordering maintenance. Resume it in Tasks before editing those tickets.')
   if (index.complete === false) parts.push('The last scan was incomplete (a limit was reached or a folder could not be read): notes it did not reach are shown as last indexed, and none were treated as deleted.')
   else if (index.retained) parts.push(`${index.retained} note(s) could not be read and are shown as last indexed.`)
   if (index.outdated) parts.push('This index was built by an older version; refresh to update it.')
@@ -296,4 +303,93 @@ export function filterTodos(groups: readonly TodoGroup[], needle: string): TodoG
 /** A readable label for a checkbox's raw inline Markdown (shown as text, never rendered). */
 export function todoLabel(text: string): string {
   return text.trim() || '(empty)'
+}
+
+export interface SourceNote { path: string; hash: string; content: string }
+export interface MutationResult { path: string; hash: string; id?: string; status?: TaskStatus; order?: string }
+export interface NoteSnapshot { path: string; hash: string }
+export interface MoveRequest {
+  path: string
+  expectedHash: string
+  status: TaskStatus
+  /** Previous and next destination neighbours, after removing the moving card. */
+  before?: NoteSnapshot
+  after?: NoteSnapshot
+}
+
+function workspacePath(wsId: number, action: string): string {
+  return `${BACKEND_BASE}/workspaces/${wsId}/${action}`
+}
+
+export function readSource(api: AppApi, wsId: number, path: string): Promise<SourceNote> {
+  return api.get(workspacePath(wsId, 'source') + query({ path }))
+}
+export function createTicket(api: AppApi, wsId: number, body: { path: string; title: string; body?: string; status?: TaskStatus }): Promise<MutationResult> {
+  return api.post(workspacePath(wsId, 'tickets'), body)
+}
+export function promoteNote(api: AppApi, wsId: number, note: SourceNote): Promise<MutationResult> {
+  return api.post(workspacePath(wsId, 'tickets/promote'), { path: note.path, expectedHash: note.hash })
+}
+export function moveTicket(api: AppApi, wsId: number, body: MoveRequest): Promise<MutationResult> {
+  return api.post(workspacePath(wsId, 'tickets/move'), body)
+}
+export function toggleTodo(api: AppApi, group: TodoGroup, item: TodoItem, checked: boolean): Promise<MutationResult> {
+  return api.post(workspacePath(group.workspaceId, 'todos/toggle'), {
+    path: group.path, expectedHash: group.hash, markerStart: item.markerStart,
+    line: item.line, column: item.column, checked,
+  })
+}
+export function rebalanceTickets(api: AppApi, wsId: number, status: TaskStatus, reconcile = false): Promise<unknown> {
+  return api.post(workspacePath(wsId, 'tickets/rebalance'), { status, confirm: true, reconcile })
+}
+
+/** Writes require a complete current snapshot; last-known rows remain browsable. */
+export function mutationProblem(index: IndexStatus | undefined, note?: { hash: string | null; retained: boolean; diagnostics?: Diagnostic[]; status?: TaskStatus | null }): string | null {
+  if (index?.writeBlocked) return index.writeBlocked.message
+  if (index?.migrationPending) return 'Finish the old task migration in Settings before editing this workspace.'
+  if (!index || index.state !== 'ready' || index.complete !== true || !!index.retained || index.outdated || index.error) {
+    return 'Wait for a complete, current index before editing. Refresh if needed.'
+  }
+  if (note?.status && index.maintenance?.includes(note.status)) return 'This column has unfinished order maintenance. Resume maintenance before moving cards.'
+  if (note && (!note.hash || note.retained || note.diagnostics?.length)) return 'Repair or refresh this note before editing it.'
+  return null
+}
+
+/** Build a move against the displayed source hashes, never JavaScript-number ranks. */
+export function planMove(tickets: readonly Ticket[], ticket: Ticket, status: TaskStatus, position?: number): MoveRequest {
+  if (!ticket.hash) throw new Error('Refresh this ticket before moving it.')
+  const destination = tickets.filter(t => t.path !== ticket.path && t.lane === status)
+  if (position !== undefined && (!Number.isInteger(position) || position < 0 || position > destination.length)) {
+    throw new Error('The destination card changed. Refresh before moving this ticket.')
+  }
+  const at = position ?? destination.length
+  const previous = destination[at - 1]
+  const next = destination[at]
+  const snapshot = (t: Ticket): NoteSnapshot => {
+    if (!t.hash || t.retained || t.diagnostics.length || !t.id || !t.order) throw new Error('Refresh or repair the destination column before moving cards.')
+    return { path: t.path, hash: t.hash }
+  }
+  return {
+    path: ticket.path, expectedHash: ticket.hash, status,
+    ...(previous ? { before: snapshot(previous) } : {}),
+    ...(next ? { after: snapshot(next) } : {}),
+  }
+}
+
+export interface MigrationTask { id: number; uid: string; title: string; status: TaskStatus; path: string; noteRef: string | null; slotId: string | null; migrated?: boolean; changed?: boolean }
+export interface MigrationPreview { workspace: Workspace; planHash: string; tasks: MigrationTask[]; warnings: string[]; backupRequired: boolean; complete?: boolean; backup?: MigrationBackup | null }
+export interface MigrationBackup { directory: string; database: string; export: string }
+export interface MigrationResult { backup: MigrationBackup; migrated: { uid: string; path: string }[]; remaining: number; complete: boolean }
+export function previewMigration(api: AppApi, wsId: number): Promise<MigrationPreview> {
+  return api.get(workspacePath(wsId, 'migration'))
+}
+export function migrateTasks(api: AppApi, wsId: number, planHash: string, acceptCurrent = false): Promise<MigrationResult> {
+  return api.post(workspacePath(wsId, 'migration'), { planHash, confirm: true, ...(acceptCurrent ? { acceptCurrent: true } : {}) })
+}
+export function exportLegacyTasks(api: AppApi, wsId: number): Promise<unknown> {
+  return api.get(workspacePath(wsId, 'legacy-tasks'))
+}
+
+export function demoteTicket(api: AppApi, wsId: number, ticket: Ticket): Promise<MutationResult> {
+  return api.post(workspacePath(wsId, 'tickets/demote'), { path: ticket.path, expectedHash: ticket.hash })
 }

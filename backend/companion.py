@@ -77,6 +77,9 @@ class _Scan:
 class CompanionIndex:
     def __init__(self, registry: Registry) -> None:
         self.registry = registry
+        # The production server always sets this from its own runtime. A
+        # standalone index can still be used in pure file/parser tests.
+        self.write_blocked: dict | None = None
         try:
             import mdsource
         except ImportError as err:
@@ -462,8 +465,17 @@ class CompanionIndex:
             "state": "scanning" if running or queued else "ready",
             "queued": queued,
             "progress": progress,
+            "writeBlocked": self.write_blocked,
             "indexedAt": None, "complete": False, "files": 0, "retained": 0, "error": None,
+            "maintenance": [s for s in ("backlog", "ready", "in_progress", "review", "done")
+                            if (self.registry.data_dir / "ticket-maintenance" / f"{ws.uid}-{s}.json").exists()],
         }
+        migration_path = self.registry.data_dir / f"migration-{ws.uid}.json"
+        try:
+            out["migrationPending"] = (json.loads(migration_path.read_text(encoding="utf-8")).get("complete")
+                                       is not True) if migration_path.exists() else False
+        except (OSError, ValueError, AttributeError):
+            out["migrationPending"] = True
         if row is None or row["generation"] is None:
             if not running and not queued:
                 out["state"] = "error" if row is not None and row["error_code"] else "unindexed"
@@ -483,6 +495,11 @@ class CompanionIndex:
             raise ApiError(503, "parsers_unavailable", self.unavailable)
         if not ws.companion:
             raise ApiError(409, "not_companion", "this workspace is not in Kiro Notes companion mode")
+
+    def require_writes(self, ws: Workspace) -> None:
+        self._require(ws)
+        if self.write_blocked:
+            raise ApiError(409, self.write_blocked["code"], self.write_blocked["message"])
 
     def _duplicates(self, conn) -> dict[str, list[dict]]:
         """Every ticket ID used by more than one note, over all companion workspaces."""
@@ -553,7 +570,7 @@ class CompanionIndex:
                     counts["done" if c["checked"] else "open"] += c["n"]
                 where = {"open": " AND t.checked = 0", "done": " AND t.checked = 1", "all": ""}[state]
                 rows = conn.execute(
-                    "SELECT t.*, n.title, n.ticket, n.ticket_id, n.status, n.hash, n.retained FROM companion_todos t"
+                    "SELECT t.*, n.title, n.ticket, n.ticket_id, n.status, n.hash, n.retained, n.diagnostics FROM companion_todos t"
                     " JOIN companion_notes n ON n.workspace_uid = t.workspace_uid AND n.generation = t.generation AND"
                     f" n.path = t.path WHERE t.workspace_uid = ? AND t.generation IS ?{where}"
                     " ORDER BY t.path, t.ordinal LIMIT ?", (ws.uid, gen, MAX_TODO_RESULTS - returned + 1)).fetchall()
@@ -565,10 +582,11 @@ class CompanionIndex:
                     if current is None or current["path"] != r["path"]:
                         current = {"workspaceId": ws.id, "workspace": ws.name, "path": r["path"], "title": r["title"],
                                    "ticket": bool(r["ticket"]), "ticketId": r["ticket_id"], "status": r["status"],
-                                   "hash": r["hash"], "retained": bool(r["retained"]), "items": []}
+                                   "hash": r["hash"], "retained": bool(r["retained"]),
+                                   "diagnostics": json.loads(r["diagnostics"]), "items": []}
                         groups.append(current)
                     current["items"].append({
-                        "ordinal": r["ordinal"], "line": r["line"], "column": r["col"], "checked": bool(r["checked"]),
+                        "ordinal": r["ordinal"], "markerStart": r["marker_start"], "line": r["line"], "column": r["col"], "checked": bool(r["checked"]),
                         "text": r["text"], "depth": r["depth"], "heading": r["heading"],
                     })
                     returned += 1

@@ -21,8 +21,8 @@ Only ``GET /health`` is unsigned (the gateway probes it directly). Every other
 request must carry both valid headers, or it is refused before routing, and
 every route is dashboard-owner only (``owner-session`` principal).
 
-Quartizo never writes a note: the Board/TODOs index only reads the registered
-folders (companion.py). The routes change application state only.
+The index reads registered folders; explicit owner actions write narrowly
+scoped ticket properties and checkboxes through companion_write.py.
 
 Workspace registry state lives in ``<KIROCREW_HOME>/apps/<KIROCREW_APP_NAME>/data``
 (the gateway injects both; ``manager.py::app_data_dir`` in 0.10.0rc4).
@@ -50,6 +50,9 @@ from urllib.parse import parse_qs, urlsplit
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import companion  # noqa: E402
+import companion_write  # noqa: E402
+import host_compat  # noqa: E402
+import legacy_migration  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
 
 APP_NAME = "quartizo"
@@ -293,6 +296,8 @@ class Handler(BaseHTTPRequestHandler):
                 "app": APP_NAME,
                 "version": APP_VERSION,
                 "principal": {"kind": principal.kind, "ownerId": principal.owner_id},
+                "hostVersion": self.server.host_version,  # type: ignore[attr-defined]
+                "writeBlocked": self.server.companion.write_blocked,  # type: ignore[attr-defined]
             }
         if parts == ["api", "workspaces"]:
             if method == "GET":
@@ -300,7 +305,8 @@ class Handler(BaseHTTPRequestHandler):
                 return 200, {"workspaces": [{**w.to_json(), "oldTasks": old.get(w.id, 0)} for w in registry.list()]}
             if method == "POST":
                 body = self._json_body()
-                ws = registry.register(body.get("path"), body.get("name"), body.get("companion", False))
+                with self.server.writer.lock:  # type: ignore[attr-defined]
+                    ws = registry.register(body.get("path"), body.get("name"), body.get("companion", False))
                 if ws.companion:
                     self.server.companion.request(ws, manual=True)  # type: ignore[attr-defined]
                 return 201, {"workspace": ws.to_json()}
@@ -317,21 +323,60 @@ class Handler(BaseHTTPRequestHandler):
                 if method == "DELETE":
                     # Its index goes with it, and its old database tasks only with ?deleteOldTasks=1
                     # (409 has_old_tasks otherwise). The folder is untouched.
-                    uid = registry.get(ws_id).uid
-                    registry.unregister(ws_id, delete_old_tasks=_q(query, "deleteOldTasks") == "1")
-                    self.server.companion.cancel(uid)  # type: ignore[attr-defined]
+                    with self.server.writer.lock:  # type: ignore[attr-defined]
+                        uid = registry.get(ws_id).uid
+                        registry.unregister(ws_id, delete_old_tasks=_q(query, "deleteOldTasks") == "1")
+                        self.server.companion.cancel(uid)  # type: ignore[attr-defined]
                     return 200, {"ok": True}
                 return None
             index: companion.CompanionIndex = self.server.companion  # type: ignore[attr-defined]
             if parts[3:] == ["companion"] and method == "PUT":
-                ws = registry.set_companion(ws_id, self._json_body().get("enabled"))
-                if ws.companion:
-                    index.request(ws, manual=True)
-                else:
-                    index.forget(ws.uid)  # derived rows only; the folder is untouched
+                enabled = self._json_body().get("enabled")
+                with self.server.writer.lock:  # type: ignore[attr-defined]
+                    ws = registry.set_companion(ws_id, enabled)
+                    if ws.companion:
+                        index.request(ws, manual=True)
+                    else:
+                        index.forget(ws.uid)  # derived rows only; the folder is untouched
                 return 200, {"workspace": ws.to_json(), "index": index.status(ws)}
             if parts[3:] == ["board"] and method == "GET":
                 return 200, index.board(registry.get(ws_id))
+            return self._handle_writes(registry, ws_id, parts[3:], query)
+        return None
+
+    def _handle_writes(self, registry: Registry, ws_id: int, rest: list[str], query: dict) -> tuple[int, dict] | None:
+        writer: companion_write.CompanionWriter = self.server.writer  # type: ignore[attr-defined]
+        migration: legacy_migration.LegacyMigration = self.server.migration  # type: ignore[attr-defined]
+        ws = registry.get(ws_id)
+        if rest == ["source"] and self.command == "GET":
+            writer.index._require(ws)
+            path = _q(query, "path", None)
+            data = companion_write.read_note(ws, path)
+            try:
+                content = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise ApiError(415, "not_utf8", "this note is not valid UTF-8") from None
+            return 200, {"path": path, "hash": companion_write.digest(data), "content": content}
+        if rest == ["legacy-tasks"] and self.command == "GET":
+            return 200, migration.export(ws)
+        if rest == ["migration"]:
+            if self.command == "GET":
+                return 200, migration.preview(ws)
+            if self.command == "POST":
+                return 200, migration.run(ws, self._json_body())
+        if self.command != "POST":
+            return None
+        operations = {
+            ("tickets",): writer.create,
+            ("tickets", "promote"): writer.promote,
+            ("tickets", "demote"): writer.demote,
+            ("tickets", "move"): writer.move,
+            ("tickets", "rebalance"): writer.rebalance,
+            ("todos", "toggle"): writer.toggle,
+        }
+        operation = operations.get(tuple(rest))
+        if operation is not None:
+            return (201 if rest == ["tickets"] else 200), operation(ws, self._json_body())
         return None
 
     def _handle_companion(self, registry: Registry, rest: list[str], query: dict) -> tuple[int, dict] | None:
@@ -342,6 +387,7 @@ class Handler(BaseHTTPRequestHandler):
             return 200, {
                 "available": index.unavailable is None,
                 "error": index.unavailable,
+                "writeBlocked": index.write_blocked,
                 "workspaces": [{"workspace": w.to_json(), "index": index.status(w)} for w in registry.list()],
             }
         if rest == ["refresh"] and method == "POST":
@@ -470,12 +516,16 @@ def data_dir() -> Path:
     return kirocrew_home() / "apps" / name / "data"
 
 
-def make_server(port: int, secret: str, registry: Registry) -> Server:
+def make_server(port: int, secret: str, registry: Registry, *, host_version: str | None = None) -> Server:
     server = Server(("127.0.0.1", port), Handler)
     server.proxy_secret = secret  # type: ignore[attr-defined]
     server.replay_cache = ReplayCache()  # type: ignore[attr-defined]
     server.registry = registry  # type: ignore[attr-defined]
     server.companion = companion.CompanionIndex(registry)  # type: ignore[attr-defined]
+    server.host_version = host_version if host_version is not None else host_compat.detect_host_version()  # type: ignore[attr-defined]
+    server.companion.write_blocked = host_compat.write_blocked(server.host_version)  # type: ignore[attr-defined]
+    server.writer = companion_write.CompanionWriter(registry, server.companion)  # type: ignore[attr-defined]
+    server.migration = legacy_migration.LegacyMigration(registry, server.writer)  # type: ignore[attr-defined]
     server.companion.start()  # type: ignore[attr-defined]
     return server
 

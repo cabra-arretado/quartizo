@@ -1,11 +1,16 @@
 # Quartizo: Kiro Notes companion, then a unified workspace
 
-Status: the read-only companion delivery (see the 2026-10-20 update at the
-end) is implemented: per-workspace companion mode, the rebuildable index,
-read-only Board and TODOs, and the navigation fallback. Shared-folder writes
-remain blocked: timestamp-preserving external edits can be silently
-overwritten by Notes autosave, so phase 1 acceptance for writes is pending a
-native fix; see the phase 1 evidence. Format contracts are in
+The editable Release 1 implementation now includes ticket creation/promotion,
+file-backed moves and ordering, exact TODO toggles, resumable maintenance, and
+previewed/backed-up legacy conversion. See the
+[2026-11-06 verification](compatibility.md#editable-companion-verification-2026-11-06)
+for passed repository/browser checks and the separate native-host limits.
+
+Status: editable release 1 implementation resumed on 2026-11-06 after the
+upstream Notes save fix merged. The October read-only delivery and its test
+evidence below are historical; the November update at the end defines the
+current scope. Local verification against fixed Notes remains a separate
+acceptance check. Format contracts are in
 [markdown-tickets-phase1.md](markdown-tickets-phase1.md).
 
 Date: 2026-10-20
@@ -212,8 +217,8 @@ smaller read-only delivery separately.
 Implemented in `backend/companion.py`, `backend/mdsource.py`,
 `ui/src/Companion.tsx`, `ui/src/companionApi.ts` and `ui/src/noteNav.ts`; usage
 in the README ("Using the Kiro Notes companion"), design in
-[architecture](architecture.md#kiro-notes-companion-read-only), risks in
-[threat model §10](threat-model.md#10-kiro-notes-companion-read-only).
+[architecture](architecture.md#kiro-notes-companion), risks in
+[threat model §10](threat-model.md#10-kiro-notes-companion).
 
 | Decision | Choice |
 |---|---|
@@ -235,4 +240,49 @@ and left the fixture vault byte-identical
 **Not yet done:** the rendered Board/TODOs in the dashboard and reconciliation
 against real native Notes edits, sync and restarts; the isolated gateway's
 setup gate needs a signed-in `kiro-cli`.
+
+## Update — 2026-11-06: resume the editable companion
+
+The user requested the original writable release 1 now that KiroCrew has fixed
+the save conflict bug. [KiroCrew PR #22790](https://github.com/kirodotdev/KiroCrew/pull/22790)
+merged on November 4 and adds content-hash freshness checks to Notes saves.
+This update supersedes the October read-only restriction for the current
+implementation; the old reproduction remains evidence about 0.10.0rc4.
+
+Continue from `feat/kiro-notes-companion`, preserving its native Notes
+integration, Tasks/TODOs/Settings interface, confined scanner, and rebuildable
+index. Native Kiro Notes remains the writing interface. The separate October
+21 Notes-port draft was an alternative workaround, not a prerequisite for
+this companion release. A full integrated Notes clone remains release 2.
+
+The writable release includes:
+
+1. Create a ticket note, explicitly promote an ordinary note after property
+   collision checks, and remove the ticket marker without deleting the note.
+2. Move and order cards through exact frontmatter patches. Validate both the
+   source hash and destination neighbours; persist and resume a rebalance
+   when the fixed-width rank space between neighbours is exhausted.
+3. Toggle the exact indexed TODO marker through a validated one-byte patch.
+   Ticket status and checkbox completion remain independent.
+4. Serialize Quartizo writes, reread before replacement, reject stale or
+   ambiguous sources, and reconcile successful writes into the index.
+5. Offer explicit legacy-card migration with a preview, backup/export,
+   collision-safe destinations, retained original rows, durable progress,
+   verification, and no duplicate files on retry. Browsing never migrates.
+6. Keep navigation honest: show the source path/heading and open Kiro Notes;
+   exact note/line targeting needs a supported upstream contract.
+
+The production parser intentionally follows native Notes' checkbox grammar,
+which replaced the broader CommonMark spike after the original plan. Use
+`backend/mdsource.py`'s current parsed TODO snapshots for both display and
+mutation. Do not use the spike's broader TODO set to choose a production
+write target. The YAML node-span, hash, identity, rank, byte-preservation,
+diagnostic and incomplete-scan contracts continue to apply.
+
+Run focused mutation/migration tests, the existing authentication and
+confinement checks, UI checks, and the built-bundle verification. Repeat the
+timestamp-preserving dirty-buffer scenario with fixed native Notes on a
+disposable shared vault, then rename, refresh, and restart checks. Record
+unavailable host checks explicitly; a merged upstream fix does not establish
+which version is installed locally.
 

@@ -64,6 +64,13 @@ jobs:
         run: npm test
         working-directory: ui
 
+      - name: Browser regression tests (one Linux/Python combination)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser
+        working-directory: ui
+
       - name: Committed ui/dist matches a fresh build
         run: |
           git diff --exit-code -- ui/dist

@@ -25,6 +25,7 @@ async def probe() -> dict:
         "kirocrew_version": version("kirocrew"),
         "notes_source_sha256": hashlib.sha256(source_path.read_bytes()).hexdigest(),
         "scope": "installed backend save function; no browser/editor validation",
+        "hash_guard_supported": "base_hash" in inspect.signature(server._save_note_contents).parameters,
     }
     with tempfile.TemporaryDirectory(prefix="quartizo-native-probe-") as directory:
         root = Path(directory) / "vault"
@@ -35,6 +36,7 @@ async def probe() -> dict:
         original = "---\ntype: ticket\nstatus: ready\n---\n# Original\n- [ ] Keep me\n"
         external = original.replace("status: ready", "status: done")
         stale_buffer = original + "\nUnsaved editor text\n"
+        freshness = {"base_hash": hashlib.sha256(original.encode("utf-8")).hexdigest()} if report["hash_guard_supported"] else {}
         try:
             target.write_text(original, encoding="utf-8")
             initial = target.stat()
@@ -42,7 +44,7 @@ async def probe() -> dict:
             target.write_text(external, encoding="utf-8")
             os.utime(target, ns=(initial.st_atime_ns, initial.st_mtime_ns + 10_000_000))
             try:
-                await server._save_note_contents(vault, target, "ticket.md", stale_buffer, base_mtime)
+                await server._save_note_contents(vault, target, "ticket.md", stale_buffer, base_mtime, **freshness)
             except server.ApiError as err:
                 report["advanced_mtime_stale_save"] = {"status": err.status, "disk_preserved": target.read_text() == external}
             else:
@@ -53,7 +55,7 @@ async def probe() -> dict:
             target.write_text(external, encoding="utf-8")
             os.utime(target, ns=(initial.st_atime_ns, initial.st_mtime_ns))
             try:
-                await server._save_note_contents(vault, target, "ticket.md", stale_buffer, base_mtime)
+                await server._save_note_contents(vault, target, "ticket.md", stale_buffer, base_mtime, **freshness)
             except server.ApiError as err:
                 report["preserved_mtime_stale_save"] = {"status": err.status, "external_status_preserved": target.read_text() == external}
             else:

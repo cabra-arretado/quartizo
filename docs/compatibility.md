@@ -1,5 +1,40 @@
 # Compatibility
 
+## Editable companion verification (2026-11-06)
+
+The current manifest declares **KiroCrew 0.12.0** as its minimum. Shared
+editing depends on [the native Notes content-hash save fix](https://github.com/kirodotdev/KiroCrew/pull/22790).
+Reload Notes after upgrading: a page still running the old editor sends only
+the backwards-compatible timestamp token.
+The backend also applies a prerelease-aware runtime prerequisite independent
+of the gateway's manifest check. Unknown versions and `0.12.0rc6` refuse
+writes; `0.12.0rc7` and newer pass. Read-only browsing remains available.
+
+| Check | Evidence and limits |
+|---|---|
+| Backend and signed HTTP boundary | 180 tests, 177 passed and 3 expected skips (2 live-gateway tests without their explicit environment and 1 Linux `/proc` case on macOS). Includes runtime prerequisites, concurrent scope revocation, mutation auth, stale timestamp-preserving edits, confined writes, duplicates, byte preservation, ordering recovery after renames, migration backups/crash recovery/final verification and index rebuilding |
+| Format spike | 22 tests passed; historical CommonMark experiment, separate from production native checkbox grammar |
+| UI | Strict typecheck, build and 25 Vitest tests passed. Bundle rebuilt and a second build reproduces it |
+| Rendered browser workflows | Headless Chrome, desktop and 390 px viewport, production UI bundle with an SDK test wrapper and the real signed Quartizo HTTP backend on a disposable vault. Creation, promotion preview, status changes, up/down reordering, drag/drop, TODO completion, stale conflict, demotion, legacy conversion, keyboard navigation, native-app navigation fallback and inert hostile HTML passed; no page errors |
+| Fixed native Notes save function | Existing editable KiroCrew source checkout at `4cc1950d8bdc1c604e7a35905f31dbffa2ed2316`, distribution metadata `0.11.0` (a patched source checkout, **not** an unmodified release). With `base_hash`, both changed-mtime and preserved-mtime stale saves returned 409 and kept external bytes. [Recorded probe](markdown-tickets-fixed-native-probe.json) |
+| Native checkbox grammar | Compared with `v0.12.0` [`utils.ts`](https://github.com/kirodotdev/KiroCrew/blob/v0.12.0/website/src/apps/md-notebook/utils.ts) and [`Preview.tsx`](https://github.com/kirodotdev/KiroCrew/blob/v0.12.0/website/src/apps/md-notebook/Preview.tsx); retained the production native line rules |
+| Committed browser regressions | `npm run test:browser`: five groups passed with the production bundle and real signed disposable backend. Drafts survive tabs/modes/workspaces and pending writes; real mouse self-drops issue no mutation; exhausted creation/promotion can rebalance and retry; renamed/edited interrupted migration exposes consent and resumes; RC6 keeps all file mutation controls disabled while browsing works |
+| Independent performance replay | 150 valid 1,500-key notes, about 6.3 MB. Cold inventory refused with `index_not_ready` in 5.081 s, no file publication, and background scan requested. After indexing (15.999 s), first creation took 0.027 s with no repeated metadata parsing. A preserved-mtime duplicate injected afterward was still refused |
+
+The final checks and browser groups were repeated by a separate verifier
+after the implementation agents finished. It also independently replayed
+explicit YAML terminator promotion/demotion with LF/CRLF/BOM preservation,
+host-environment override attempts, and the cold/indexed performance cases.
+These are local regression results, not a native dashboard/sync release gate.
+
+Environment: macOS, Python 3.12.13 for repository checks, Python 3.14.7 for
+the source-native probe, Node 26.12.0. No user vault or installed app was
+modified by verification. Full native dirty-buffer/browser concurrency,
+native sync and real-gateway restart scenarios have **not** been repeated for
+this build. The SDK wrapper browser run is not a real KiroCrew dashboard run.
+The remaining sections are historical measurements and do not override this
+minimum or imply that the removed editor/chat/Git/Agents features returned.
+
 > Measured while Quartizo still had its notes editor, chat, Git and agent
 > views. Rows about those features are history; the gateway, proxy-signing,
 > backend, install/trust and Kiro Notes rows still apply. Since then the app

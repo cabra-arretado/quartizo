@@ -23,7 +23,14 @@ vendored.activate()
 
 from ruamel.yaml import YAML  # noqa: E402
 from ruamel.yaml.error import YAMLError  # noqa: E402
-from ruamel.yaml.events import AliasEvent, MappingEndEvent, MappingStartEvent, SequenceEndEvent, SequenceStartEvent  # noqa: E402
+from ruamel.yaml.events import (  # noqa: E402
+    AliasEvent,
+    DocumentEndEvent,
+    MappingEndEvent,
+    MappingStartEvent,
+    SequenceEndEvent,
+    SequenceStartEvent,
+)
 from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode  # noqa: E402
 
 STATUSES = ("backlog", "ready", "in_progress", "review", "done")
@@ -128,6 +135,10 @@ class _Source:
             note.diagnose("mixed_endings", "mixed line endings")
         self.body_line = 0
         self.body_start = 1 if text.startswith("﻿") else 0
+        self.yaml_start: int | None = None
+        self.yaml_end: int | None = None
+        self.yaml_document_end: int | None = None
+        self.flow_mapping = False
         self.fields: dict[str, object] = {}
         self._frontmatter()
 
@@ -141,9 +152,11 @@ class _Source:
         if not self.lines or not _DELIMITER.fullmatch(self.lines[0].lstrip("﻿").rstrip("\r\n")):
             return
         yaml_start, yaml_end = self.char_starts[1], None
+        self.yaml_start = yaml_start
         for index, line in enumerate(self.lines[1:], 1):
             if _DELIMITER.fullmatch(line.rstrip("\r\n")):
                 yaml_end = self.char_starts[index]
+                self.yaml_end = yaml_end
                 self.body_line = index + 1
                 self.body_start = self.char_starts[index + 1]
                 break
@@ -165,6 +178,8 @@ class _Source:
                     raise _Refused("yaml_limit", "frontmatter contains too many YAML events")
                 if isinstance(event, AliasEvent) or getattr(event, "anchor", None) is not None:
                     raise _Refused("yaml_reference", "YAML anchors and aliases need repair before Quartizo can use this metadata")
+                if isinstance(event, DocumentEndEvent) and event.explicit:
+                    self.yaml_document_end = yaml_start + event.start_mark.index
                 if isinstance(event, (MappingStartEvent, SequenceStartEvent)):
                     depth += 1
                     if depth > MAX_YAML_DEPTH:
@@ -177,6 +192,7 @@ class _Source:
             self._validate_yaml(node)
             if not isinstance(node, MappingNode):
                 raise _Refused("metadata_not_mapping", "frontmatter must be a YAML mapping")
+            self.flow_mapping = bool(node.flow_style)
             self.fields = {key.value: value for key, value in node.value}
         except _Refused as err:
             self.note.diagnose(err.code, str(err))
@@ -344,4 +360,24 @@ def parse_note(path: str, data: bytes) -> Note:
     _ticket_fields(source, note)
     note.title = _title(source) or note.title
     _todos(source, note)
+    return note
+
+
+def parse_metadata(data: bytes) -> Note:
+    """Validate identity metadata without extracting body headings or TODOs.
+
+    Writers still hash the live complete file. This lightweight result may be
+    reused only while that complete-file hash and parser version match.
+    """
+    note = Note(hash=hashlib.sha256(data).hexdigest(), size=len(data), title="")
+    if len(data) > MAX_FILE_BYTES:
+        note.diagnose("too_large", "note exceeds 2 MiB and is not indexed")
+        return note
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        note.diagnose("not_utf8", "note is not valid UTF-8 and is not indexed")
+        return note
+    source = _Source(data, text, note)
+    _ticket_fields(source, note)
     return note

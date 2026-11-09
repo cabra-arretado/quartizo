@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+### Fixed after editable-companion review
+
+- Enforce the native save-guard runtime prerequisite with prerelease-aware
+  version checks; unknown/old hosts remain readable and refuse writes.
+- Preserve explicit YAML document terminators during promotion and validate
+  transformed metadata before publication.
+- Serialize folder sharing/removal with mutations and revalidate queued
+  migrations and publication against current registration.
+- Validate migration output using uniform LF notes, with previewed
+  normalization and unchanged legacy backups. Preview and rank maintenance
+  resolve renamed files by persistent IDs for resumable recovery.
+- Preserve per-workspace drafts across tabs and form modes; reject self-drops
+  and make ordering maintenance available after creation/promotion exhaustion.
+- Reuse hash-checked identity metadata and defer expensive cold inventories
+  before publication. Add committed browser regressions alongside unit tests.
+
+### Added: editable Kiro Notes companion (2026-11-06)
+
+- Create ticket notes, promote existing notes after a source preview, move
+  cards by status or position, and remove ticket properties while keeping the
+  note. TODO controls update their exact source checkbox independently.
+- Whole-file hash checks, byte-preserving YAML edits, live cross-vault
+  duplicate checks, confined atomic writes and stale/incomplete-state refusals.
+- Durable resumable ordering maintenance, including explicit reconciliation
+  that preserves intervening external note edits.
+- Previewable legacy-card conversion with SQLite/JSON backups, preserved
+  identities and links, crash recovery and final verification. Legacy rows
+  and linked notes are retained.
+- `minKiroCrewVersion: 0.12.0`; native Notes needs its content-hash save fix
+  and a reloaded editor page. Rebuilt UI bundle. The following read-only
+  delivery notes describe the preceding implementation.
+
 ### Changed: Quartizo is now only a read-only Kiro Notes companion
 
 - **Three tabs:** Tasks (the board of ticket notes), TODOs and Settings.

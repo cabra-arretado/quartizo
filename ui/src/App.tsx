@@ -56,14 +56,17 @@ export default function Quartizo() {
             </button>
           ))}
         </div>
-        {/* One view at a time: each re-reads its data when shown, so Settings changes show up right away. */}
+        {/* Keep Tasks mounted so drafts and in-flight writes survive tab navigation.
+            Its inactive views pause polling and refresh their registrations when shown. */}
         <div
           id="qz-panel"
           role="tabpanel"
           aria-labelledby={`qz-tab-${tab}`}
           style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
         >
-          {tab === 'tasks' && <TasksView api={api} />}
+          <div hidden={tab !== 'tasks'} style={{ display: tab === 'tasks' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
+            <TasksView api={api} active={tab === 'tasks'} />
+          </div>
           {tab === 'todos' && <TodoView api={api} />}
           {tab === 'settings' && <Settings api={api} />}
         </div>

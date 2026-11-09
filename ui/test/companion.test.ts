@@ -3,7 +3,8 @@ import type { AppApi } from '@kirocrew/app-sdk'
 import {
   addWorkspace, ago, companionStatus, describeIndex, filterTodos, groupLanes, indexWarning, LANES, listWorkspaces, loadBoard,
   loadTodos, query, removeWorkspace, REQUEST_TIMEOUT_MS, requestRefresh, setCompanion, type Ticket, type TodoGroup, todoLabel,
-  toFailure, withTimeout,
+  toFailure, withTimeout, createTicket, moveTicket, mutationProblem, planMove, promoteNote, readSource,
+  toggleTodo, previewMigration, migrateTasks, exportLegacyTasks,
 } from '../src/companionApi'
 import { noteName } from '../src/noteNav'
 
@@ -191,5 +192,82 @@ describe('note name', () => {
     expect(noteName('tickets/ticket copy.md')).toBe('ticket copy')
     expect(noteName('Plan.MD')).toBe('Plan')
     expect(noteName('a/b/readme.markdown')).toBe('readme.markdown')
+  })
+})
+
+describe('writable file views', () => {
+  const hash = 'a'.repeat(64)
+  const fresh = { state: 'ready' as const, complete: true, retained: 0, maintenance: [] }
+  const note = (path: string): Ticket => ({ ...ticket(path, 'ready'), id: path, status: 'ready', hash, order: '7'.repeat(32) })
+
+  it('disables unsafe mutations while leaving other maintained columns usable', () => {
+    expect(mutationProblem(fresh, note('a'))).toBeNull()
+    for (const index of [undefined, { ...fresh, state: 'scanning' as const }, { ...fresh, complete: false }, { ...fresh, retained: 1 }, { ...fresh, outdated: true }]) {
+      expect(mutationProblem(index, note('a'))).toMatch(/index/)
+    }
+    expect(mutationProblem(fresh, { ...note('a'), retained: true })).toMatch(/Repair or refresh/)
+    expect(mutationProblem(fresh, { ...note('a'), diagnostics: [{ code: 'duplicate_id', message: 'duplicate' }] })).toMatch(/Repair or refresh/)
+    expect(mutationProblem({ ...fresh, maintenance: ['ready'] }, note('a'))).toMatch(/maintenance/)
+    expect(mutationProblem({ ...fresh, maintenance: ['done'] }, note('a'))).toBeNull()
+    expect(mutationProblem({ ...fresh, migrationPending: true }, note('a'))).toMatch(/migration/)
+    expect(mutationProblem({ ...fresh, writeBlocked: { code: 'host_upgrade_required', message: 'Upgrade KiroCrew.' } }, note('a'))).toBe('Upgrade KiroCrew.')
+    expect(indexWarning({ ...fresh, writeBlocked: { code: 'host_upgrade_required', message: 'Upgrade KiroCrew.' } })).toBe('Upgrade KiroCrew.')
+  })
+
+  it('moves down within a column after removing the moving card from its neighbors', () => {
+    const cards = ['a', 'b', 'c'].map(note)
+    expect(planMove(cards, cards[0], 'ready', 1)).toEqual({
+      path: 'a', expectedHash: hash, status: 'ready', before: { path: 'b', hash }, after: { path: 'c', hash },
+    })
+    expect(planMove(cards, cards[2], 'ready', 0)).toEqual({
+      path: 'c', expectedHash: hash, status: 'ready', after: { path: 'a', hash },
+    })
+    expect(planMove(cards, cards[0], 'done', 0)).toEqual({ path: 'a', expectedHash: hash, status: 'done' })
+    expect(planMove(cards, cards[0], 'ready')).toEqual({ path: 'a', expectedHash: hash, status: 'ready', before: { path: 'c', hash } })
+  })
+
+  it('rejects stale drop positions instead of treating them as a move to the beginning', () => {
+    const cards = ['a', 'b', 'c'].map(note)
+    for (const position of [-1, 3, 0.5, Number.NaN]) {
+      expect(() => planMove(cards, cards[0], 'ready', position)).toThrow(/destination card changed/)
+    }
+  })
+
+  it('refuses a move with missing or unsafe destination snapshots', () => {
+    const a = note('a'), b = { ...note('b'), hash: null }
+    expect(() => planMove([a, b], a, 'ready')).toThrow(/Refresh or repair/)
+    expect(() => planMove([a], { ...a, hash: null }, 'done')).toThrow(/Refresh this ticket/)
+  })
+
+  it('uses the exact source hash and byte position when toggling a checkbox', async () => {
+    const { api, post } = mockApi()
+    const group: TodoGroup = { workspaceId: 4, workspace: 'W', path: 'Ü + test.md', title: 'T', ticket: false, ticketId: null, status: null, hash, retained: false, items: [] }
+    const item = { ordinal: 2, markerStart: 81, line: 7, column: 3, checked: false, text: 'repeated', depth: 0, heading: null }
+    await toggleTodo(api, group, item, true)
+    expect(post).toHaveBeenCalledWith(`${B}/workspaces/4/todos/toggle`, {
+      path: group.path, expectedHash: hash, markerStart: 81, line: 7, column: 3, checked: true,
+    })
+  })
+
+  it('promotes the preview snapshot and uses a separate confirmed migration plan', async () => {
+    const { api, get, post } = mockApi()
+    const source = { path: 'existing + note.md', hash, content: '# Existing' }
+    await readSource(api, 4, source.path)
+    await promoteNote(api, 4, source)
+    await createTicket(api, 4, { path: 'new.md', title: 'New', body: '- [ ] Work', status: 'ready' })
+    await moveTicket(api, 4, planMove([note('a')], note('a'), 'done'))
+    await previewMigration(api, 4)
+    await migrateTasks(api, 4, 'reviewed-plan')
+    await exportLegacyTasks(api, 4)
+    expect(get.mock.calls).toEqual([
+      [`${B}/workspaces/4/source?path=existing%20%2B%20note.md`],
+      [`${B}/workspaces/4/migration`], [`${B}/workspaces/4/legacy-tasks`],
+    ])
+    expect(post.mock.calls).toEqual([
+      [`${B}/workspaces/4/tickets/promote`, { path: source.path, expectedHash: hash }],
+      [`${B}/workspaces/4/tickets`, { path: 'new.md', title: 'New', body: '- [ ] Work', status: 'ready' }],
+      [`${B}/workspaces/4/tickets/move`, { path: 'a', expectedHash: hash, status: 'done' }],
+      [`${B}/workspaces/4/migration`, { planHash: 'reviewed-plan', confirm: true }],
+    ])
   })
 })

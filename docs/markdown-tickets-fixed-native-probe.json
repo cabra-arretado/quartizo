@@ -1,0 +1,18 @@
+{
+  "date": "2026-11-06",
+  "scope": "fixed native Notes source save function on disposable files; no live gateway or editor-buffer validation",
+  "source_commit": "4cc1950d8bdc1c604e7a35905f31dbffa2ed2316",
+  "distribution_version": "0.11.0",
+  "distribution_note": "The existing local editable KiroCrew checkout contains the PR fix; this is not evidence of an unmodified 0.11.0 release having it.",
+  "notes_server_sha256": "fca8b09e794fc591401d3014fac112223f5683a1af96c65c11fed280b744f246",
+  "hash_guard_supported": true,
+  "advanced_mtime_stale_save": {
+    "status": 409,
+    "disk_preserved": true
+  },
+  "preserved_mtime_stale_save": {
+    "status": 409,
+    "external_status_preserved": true
+  },
+  "result": "backend probe passed; native browser, vault sync and live gateway checks remain separate"
+}

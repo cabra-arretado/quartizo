@@ -32,7 +32,7 @@ def _stop(proc) -> None:
         proc.communicate()
 
 
-def _start(secret: str | None, home: str | None = None):
+def _start(secret: str | None, home: str | None = None, *, host_version: str | None = "0.12.0"):
     """Start the backend; its KIROCREW_HOME is *home* or a fresh temp dir, never the real one."""
     port = _free_port()
     env = {k: v for k, v in os.environ.items() if k != "KIROCREW_PROXY_SECRET"}
@@ -43,7 +43,11 @@ def _start(secret: str | None, home: str | None = None):
     env["QUARTIZO_EXIT_WITH_PARENT"] = "1"  # never outlive a killed test run
     if secret is not None:
         env["KIROCREW_PROXY_SECRET"] = secret
-    proc = subprocess.Popen([sys.executable, "-I", str(SERVER_PY)], env=env,
+    # Isolate the host prerequisite fixture here, without adding a production
+    # environment variable or request parameter that could bypass it.
+    launcher = (f"import sys; sys.path.insert(0, {str(SERVER_PY.parent)!r}); "
+                f"import server; server.host_compat.detect_host_version = lambda: {host_version!r}; server.main()")
+    proc = subprocess.Popen([sys.executable, "-I", "-c", launcher], env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     deadline = time.time() + 10
     proc.tmp_home = tmp  # removed when the process object is collected

@@ -1,6 +1,7 @@
 {
   "name": "quartizo",
   "version": "0.0.1",
+  "minKiroCrewVersion": "0.12.0",
   "displayName": "Quartizo",
   "description": "A Kiro Crew app: Quartizo",
   "author": "felipe",

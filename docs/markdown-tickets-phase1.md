@@ -1,10 +1,18 @@
 # Markdown tickets: phase 1 contracts and evidence
 
-Date: 2026-10-20. Implements the format spike in
-[the release plan](markdown-tickets-plan.md). The application still uses its
-existing database board; these experiments are not imported by the backend.
+Current implementation and 2026-11-06 verification are recorded in
+[compatibility.md](compatibility.md#editable-companion-verification-2026-11-06).
+The fixed native save function now passes the preserved-mtime backend probe
+with a hash token; the historical browser failure below remains the record
+of the original blocker. This does not claim a repeated live native-browser
+or sync test.
 
-## Current state
+Historical experiment date: 2026-10-20. Implements the format spike in
+[the release plan](markdown-tickets-plan.md). These experiments are not
+imported by the backend. The production companion now has its own parser and
+index; see the November update below for the writable resumption.
+
+## October 20 experiment state
 
 | Acceptance check | Evidence | State |
 |---|---|---|
@@ -14,8 +22,9 @@ existing database board; these experiments are not imported by the backend.
 | Pin parser dependencies and finalize ordering | Isolated requirements, rank tests, and contracts below | Passed |
 | Native Notes navigation and concurrent editing | Shared fixture attached in both apps; normal refresh/conflicts pass; real Notes editor silently overwrites timestamp-preserving edits | Blocked |
 
-Phase 2 shared-write integration must wait for the native gate or an explicit
-reduced write workflow. Do not describe phase 1 as accepted yet.
+At the time, phase 2 shared-write integration was blocked by the native save
+bug. The evidence below records that old version's behavior, not the status
+of newer KiroCrew releases.
 
 ## Run the experiment
 
@@ -257,11 +266,13 @@ was changed to work around either environment restriction.
 
 Pin `ruamel.yaml==0.19.1`, `markdown-it-py==4.0.0`, and its transitive
 `mdurl==0.1.2` in `spikes/markdown_tickets/requirements.txt` for the spike.
-The production backend now uses the same versions, vendored unchanged from
-hash-pinned wheels in `backend/_vendor/` (decided for the read-only companion;
-see [dependencies](dependencies.md)). Its read-only parser
-(`backend/mdsource.py`) reproduces this spike's ticket, diagnostic and TODO
-results on the fixture vault; the spike keeps the mutation prototypes.
+The production backend uses only ruamel.yaml 0.19.1, vendored unchanged from
+its hash-pinned wheel in `backend/_vendor/`; markdown-it-py and mdurl remain
+isolated spike dependencies (see [dependencies](dependencies.md)). After the
+spike, `backend/mdsource.py` adopted native Kiro Notes' line rules for TODOs
+rather than CommonMark. Its display and mutation targets must agree with
+that production grammar. The spike retains the broader parsing experiment
+and mutation prototypes.
 
 The [ruamel.yaml API](https://yaml.dev/doc/ruamel.yaml/api/) provides safe
 loading, and its [round-trip documentation](https://yaml.dev/doc/ruamel.yaml/detail/)
@@ -269,3 +280,17 @@ explicitly describes formatting normalization. This is why exact node-span
 patching is required. The [Markdown token documentation](https://markdown-it-py.readthedocs.io/en/latest/api/markdown_it.token.html)
 defines line maps; column capture additionally depends on the pinned paragraph
 rule and is verified by the fixture tests.
+
+## November 6 resumption
+
+The Notes content-hash guard in [KiroCrew PR #22790](https://github.com/kirodotdev/KiroCrew/pull/22790)
+merged on November 4. The user authorized the original editable companion
+on November 6. The current release scope and acceptance checks are in the
+[plan update](markdown-tickets-plan.md#update--2026-11-06-resume-the-editable-companion).
+
+Preserve the historical failure report. Do not present its 0.10.0rc4 result
+as a current failure, and do not claim local native acceptance solely from
+the upstream merge. Verify the fixed installed Notes editor with a
+disposable vault, including a timestamp-preserving external edit before a
+dirty buffer autosaves. The expected result is a conflict that preserves
+the external bytes until the user resolves it.

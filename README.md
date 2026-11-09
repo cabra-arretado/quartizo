@@ -1,16 +1,17 @@
 # Quartizo
 
 A third-party [KiroCrew](https://github.com/kirodotdev/KiroCrew) App Kit app:
-a read-only companion to native **Kiro Notes**. You keep writing in Kiro
-Notes; Quartizo reads the same folder and shows
+an editable task companion to native **Kiro Notes**. You keep writing in Kiro
+Notes; Quartizo shares the same folder and provides
 
-- **Tasks**: a Kanban board of the folder's ticket notes, by status;
-- **TODOs**: every checkbox Kiro Notes shows, grouped by note;
+- **Tasks**: a Kanban board whose card moves update the ticket notes;
+- **TODOs**: checkboxes grouped by note, with completion saved in the source;
 - **Settings**: the folders Quartizo reads.
 
 Clicking a card or a TODO opens Kiro Notes. Kiro Notes cannot be told which
 note to open, so every card and TODO has a **Copy name** button: paste the
-name into Kiro Notes' search. Quartizo never writes a note.
+name into Kiro Notes' search. Ticket metadata and checkbox completion remain
+in your Markdown files; SQLite is a rebuildable view of that data.
 
 A Python backend (standard library, plus ruamel.yaml vendored in
 `backend/_vendor/`) verifies the gateway's signed proxy requests and keeps a
@@ -19,8 +20,12 @@ refusing opens confined to the registered roots.
 
 Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
 (after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
-gateway. See [docs/compatibility.md](docs/compatibility.md) for what was
-measured and what is not verified.
+gateway for the original read-only release. Shared editing needs the native
+Notes content-hash save guard from
+[KiroCrew PR #22790](https://github.com/kirodotdev/KiroCrew/pull/22790), merged
+November 4. See [docs/compatibility.md](docs/compatibility.md) for historical
+measurements and the [current plan](docs/markdown-tickets-plan.md) for shared
+editing acceptance checks.
 
 **License: MIT.** See [LICENSE](LICENSE). Bundled third-party code is listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
@@ -33,7 +38,9 @@ assets/icon.png       512x512 opaque placeholder (same as `kirocrew app init`)
 backend/server.py     HTTP backend (stdlib): auth, routing
 backend/workspace.py  folder registry + fd-based path confinement
 backend/db.py         sqlite3 DB (registry + index) with a migrations table
-backend/companion.py  read-only scan and the rebuildable ticket/TODO index
+backend/companion.py  bounded scan and the rebuildable ticket/TODO index
+backend/companion_write.py  source-preserving ticket/TODO writes and durable ordering maintenance
+backend/legacy_migration.py preview, backups and resumable old-card conversion
 backend/mdsource.py   parsing of one note: ticket frontmatter, title, checkboxes
 backend/vendored.py   loads the vendored parser (pinned version, from _vendor only)
 backend/_vendor/      ruamel.yaml copied from its hash-pinned wheel
@@ -53,7 +60,12 @@ Makefile, pyproject.toml, .github/workflows/ci.yml   quality gates
 - Node 22.12+ and npm (to build the UI; CI uses 22).
 - Python 3.10+ (nothing to install; CI tests 3.12 and 3.13).
 - macOS or Linux. Windows is unsupported.
-- A running KiroCrew gateway to actually use the app (not needed for tests).
+- KiroCrew **0.12.0 stable or newer**, with the Notes content-hash save guard
+  (not needed for repository tests). The manifest declares `minKiroCrewVersion`.
+  Reload native Notes after upgrading so its editor sends the new hash token.
+  The backend separately checks its installed KiroCrew package version,
+  including prereleases: `0.12.0rc6` and unknown versions keep browsing
+  available but refuse file writes; `0.12.0rc7` and newer pass this check.
 
 ## Build, lint, test
 
@@ -63,7 +75,11 @@ make check                 # lint + test + test-formats + dist-check: what CI ru
 make lint                  # ruff check . and tsc --noEmit (strict)
 make test                  # backend unittest, then `npm test` (builds, then vitest)
 make build                 # rebuild ui/dist/index.mjs
+make test-browser PYTHON=.venv/bin/python  # real signed backend + disposable-vault browser regressions
 ```
+
+See [browser test setup](ui/test/browser/README.md) for the Chromium install
+and interpreter options. CI runs these regressions on Linux with Python 3.12.
 
 React and the SDK are **not bundled**: they are Rollup externals that the host
 resolves through its import map (`HOST_MODULES` in `ui/vite.config.ts`).
@@ -112,8 +128,10 @@ Outside the install root the gateway asks the operator to run it with
 
 **Data** lives in `$KIROCREW_HOME/apps/quartizo/data/` (default
 `~/.kiro/crew/apps/quartizo/data/`): `quartizo.sqlite3` holds the folder
-registry and the derived index. Your notes are never there and Quartizo never
-writes to your folders; deleting the data directory only forgets registrations.
+registry, derived index, and application migration/maintenance records. Your
+notes remain in the registered folders. Back up application data before
+upgrades or legacy-card conversion; deleting only the derived index is safe,
+while deleting the data directory also loses registrations and audit state.
 
 ## Permissions
 
@@ -154,6 +172,11 @@ network, sessionApproval or uploads). Earlier versions also asked for
    safely (invalid YAML, duplicate keys, anchors), go to a **Needs repair**
    lane; the badge says why. Two notes with the same `id` are both shown and
    both flagged, never merged. Arrow keys move between cards.
+   **New ticket** creates a Markdown note; **Use existing note** previews a
+   note before adding ticket properties. Change the status selector, drag a
+   card into a column or before another card, or use its up/down buttons.
+   **Remove ticket…** removes ticket properties and keeps the note and TODOs.
+   Native Notes remains the editor for its title and body.
 4. **TODOs** lists exactly the checkboxes Kiro Notes shows, grouped by note,
    open ones by default. Like Kiro Notes, Quartizo drops a frontmatter block
    that starts the file, splits the rest on `\n`, skips ```` ``` ```` fences
@@ -163,6 +186,7 @@ network, sessionApproval or uploads). Earlier versions also asked for
    quoted items, `~~~` fences, table rows and CRLF lines are not checkboxes,
    while an indented line is one. A card or group whose title differs from the
    file name also shows the file name, which is what Kiro Notes lists.
+   Check or uncheck an item here to update that exact source marker.
 5. The views rescan when they open, every 30 s while shown, and on
    **Refresh**; **Rebuild index** in Settings re-parses everything. Every scan
    reads and hashes every note, so an edit that kept the file's timestamp is
@@ -173,16 +197,59 @@ network, sessionApproval or uploads). Earlier versions also asked for
    has tasks from Quartizo's old database board says how many, and removing it
    deletes them only once you confirm.
 
-**Why read only.** Native Kiro Notes (checked on 0.10.0rc4) guards its saves by
-timestamp only: an external edit that keeps the file's modification time can
-be silently overwritten by its autosave
-([evidence](docs/markdown-tickets-phase1.md#native-notes-verification)). So
-Quartizo does not write to these folders at all: no moving cards, no checking
-boxes.
+**Shared editing.** Use native Notes with the content-hash save fix. The old
+0.10.0rc4 timestamp-only guard could silently overwrite companion changes
+([historical evidence](docs/markdown-tickets-phase1.md#native-notes-verification)).
+Quartizo write requests carry the hash of the note shown in the view; an
+external edit requires refreshing before retrying. Malformed metadata,
+duplicate ticket IDs, and mixed line endings stay visible with diagnostics
+and refuse mutation until repaired. Moving a card changes ticket metadata;
+checking a TODO changes only its source marker. Neither operation changes
+the other's state.
 
 Limits: 200,000 directory entries, 50,000 notes, 32 folder levels, 2 MiB per
 note, 2,000 checkboxes per note; the TODO list returns at most 5,000 items.
 Hidden folders (`.trash`, `.obsidian`, `.git`) and symlinks are skipped.
+
+### Legacy cards and ordering recovery
+
+In **Settings**, a folder with old database cards offers **Export old tasks**
+and **Preview migration**. The preview lists each new path, status and existing
+note/session links. **Back up and migrate** creates a database backup and JSON
+export under the app's data directory before writing any ticket notes.
+Each card gets its own `Quartizo tickets/<legacy-uid>.md`; linked notes stay
+untouched. Legacy database rows remain preserved.
+Newly generated notes use LF throughout, including converted descriptions;
+the preview names any line-ending normalization, and the original database
+strings and backup remain unchanged. Generated notes must pass production
+parsing before conversion can be verified.
+
+Migration progress is saved in `migration-<workspace-uid>.json`, outside the
+derived index. After an interruption, preview again and choose **Resume and
+verify migration**. Existing files are never overwritten. Newer edits to an
+already-converted note pause verification; review them in Notes, then explicitly
+choose to keep their latest contents when resuming. An identity collision must
+be repaired before proceeding. Edits to the workspace remain paused until the
+conversion is verified. The backup location is shown after completion.
+
+If repeated insertions exhaust the 128-bit ordering gap, **Rebalance…** updates
+one column with progress saved under `ticket-maintenance/`. Resume it after an
+interruption; an external edit stops it. The confirmation can explicitly keep
+the latest note contents and continue changing only ordering. This is a series
+of individual file writes; other editors can see intermediate progress.
+Maintenance remains available directly in Tasks, including when a creation or
+promotion runs out of rank space. Recovery follows persistent ticket IDs after
+external renames and refuses ambiguous duplicate IDs.
+
+New-ticket drafts stay in memory per workspace across tab and form-mode
+changes. **Cancel** clears that form's draft; reloading the whole browser page
+still discards in-memory drafts. A self-drop never changes card ordering.
+
+Keep the application data directory when rebuilding the index: it contains
+registrations, backups and recovery journals. For a downgrade to the old
+database-board application, restore its pre-migration application backup with
+the app stopped. Preserve the converted notes and any later edits separately;
+Quartizo never deletes them as an automatic rollback.
 
 ## Backend contract
 
@@ -207,10 +274,20 @@ Hidden folders (`.trash`, `.obsidian`, `.git`) and symlinks are skipped.
 | `GET /api/companion` | `{available, error, workspaces: [{workspace, index}]}`. `available` is false (with `error`) when the vendored parser could not be loaded |
 | `POST /api/companion/refresh` | `{workspaceId?, rebuild?, manual?}` -> 202 `{requested, skipped}`. Without `workspaceId`: every companion folder. Automatic requests within 10 s of the last scan are skipped; `manual` or `rebuild` are not. `rebuild` re-parses every note |
 | `GET /api/workspaces/{id}/board` | `{workspace, index, tickets, notes}`. A ticket is `{path, title, id, status, order, lane, todos: {total, done}, diagnostics, retained, hash, mtimeMs}`; `lane` is its status, or `repair`. 409 `not_companion`, 503 `parsers_unavailable` |
-| `GET /api/companion/todos?workspace=&state=` | `{groups: [{workspaceId, workspace, path, title, ticket, ticketId, status, hash, retained, items}], counts: {open, done}, truncated, index}`. An item is `{ordinal, line, column, checked, text, depth, heading}` (one-based line and column). `state` is `open` (default), `done` or `all` |
+| `GET /api/companion/todos?workspace=&state=` | `{groups: [{workspaceId, workspace, path, title, ticket, ticketId, status, hash, retained, diagnostics, items}], counts: {open, done}, truncated, index}`. An item is `{ordinal, markerStart, line, column, checked, text, depth, heading}` (`markerStart` is a UTF-8 byte offset; line and column are one-based). `state` is `open` (default), `done` or `all` |
+| `GET /api/workspaces/{id}/source?path=` | `{path, hash, content}` for an addressable UTF-8 note in a companion folder; used for explicit promotion preview |
+| `POST /api/workspaces/{id}/tickets` | `{path, title, body?, status?}` creates a ticket with a new UUID and appended rank; existing files are never replaced |
+| `POST /api/workspaces/{id}/tickets/promote` | `{path, expectedHash}` adds ticket fields; pre-existing reserved properties refuse promotion |
+| `POST /api/workspaces/{id}/tickets/demote` | `{path, expectedHash}` removes ticket fields, preserving the file and body |
+| `POST /api/workspaces/{id}/tickets/move` | `{path, expectedHash, status, before?: {path, hash}, after?: {path, hash}}`; `before` is the preceding destination neighbor, `after` the following one. Both omitted appends. Neighbor hashes and adjacency are checked |
+| `POST /api/workspaces/{id}/todos/toggle` | `{path, expectedHash, markerStart, line, column, checked}` validates the parsed marker and changes one byte; repeated target state is idempotent |
+| `POST /api/workspaces/{id}/tickets/rebalance` | `{status, reconcile?: boolean}` runs/resumes durable column maintenance. Explicit `reconcile: true` preserves newer note contents while applying the planned ranks |
+| `GET /api/workspaces/{id}/legacy-tasks` | Full preserved legacy-card JSON export |
+| `GET /api/workspaces/{id}/migration` | `{workspace, planHash, tasks, warnings, backupRequired, complete, backup}`; each planned task includes destination, order and relationships |
+| `POST /api/workspaces/{id}/migration` | `{planHash, confirm: true, acceptCurrent?: boolean}` backs up and resumes conversion; returns `{backup: {directory, database, export}, migrated, remaining, complete}` |
 
 `index` is `{state, queued, progress, indexedAt, complete, files, retained,
-error}`: `state` is `off`, `unavailable`, `unindexed`, `scanning`, `ready`,
+error, maintenance, migrationPending, writeBlocked}`: `state` is `off`, `unavailable`, `unindexed`, `scanning`, `ready`,
 `stale` (the last scan failed; the previous one is shown) or `error`. The files
 are authoritative: deleting every `companion_*` row and rescanning gives the
 same results. Diagnostic codes are in
@@ -218,3 +295,11 @@ same results. Diagnostic codes are in
 
 See [docs/threat-model.md](docs/threat-model.md) for path confinement (no `..`,
 no hidden segments, no symlinks followed, fd-relative opens).
+
+`writeBlocked` is null or `{code, message}` and is also returned by
+`GET /api/companion`. A failed native-version prerequisite disables mutation
+controls and the backend refuses file writes with `host_upgrade_required`.
+Registry sharing/removal and mutation publication use the same lock. Identity
+inventories still read and hash live files, but reuse metadata for unchanged
+hashes; cold inventory work exceeding five seconds queues a background scan
+and returns `index_not_ready` without publishing a file.

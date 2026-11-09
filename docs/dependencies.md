@@ -49,6 +49,17 @@ versions inlined markdown-it for the removed note preview.)
 Listed by `npm ls --omit=dev`, none shipped: react 18.3.1, react-dom 18.3.1
 (host-provided), and loose-envify, js-tokens, scheduler (used only by them).
 
+## Browser regression tooling (2026-11-06)
+
+The browser harness pins Playwright 1.65.0 and explicitly lists the existing
+esbuild 0.21.5 as development dependencies. Neither enters the app bundle or
+backend runtime. `npm run test:browser` builds the production bundle, replaces
+only its host SDK/navigation shell, and runs it against the real signed
+backend with temporary vaults. Chromium is test tooling, installed separately
+on Linux; an existing Chrome can be used on macOS. Setup and coverage are in
+[`ui/test/browser/README.md`](../ui/test/browser/README.md). The audit results
+below are the original dated audit, not a fresh audit of the added tooling.
+
 ## `npm audit --omit=dev`
 
 ```

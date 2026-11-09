@@ -4,7 +4,7 @@
 RUFF ?= ruff
 PYTHON ?= python3
 
-.PHONY: check lint test test-formats build dist-check
+.PHONY: check lint test test-formats test-browser build dist-check
 
 check: lint test test-formats dist-check  ## everything
 
@@ -18,6 +18,9 @@ test:  ## backend unittest (gateway tests skip without env) + UI build and vites
 
 test-formats:  ## isolated phase 1 spike; install spikes/markdown_tickets/requirements.txt first
 	$(PYTHON) -m unittest spikes.markdown_tickets.test_source spikes.markdown_tickets.test_ranks -v
+
+test-browser:  ## Playwright + production bundle + signed backend in a disposable vault
+	cd ui && PYTHON="$(if $(findstring /,$(PYTHON)),$(abspath $(PYTHON)),$(PYTHON))" npm run test:browser
 
 build:  ## rebuild ui/dist/index.mjs (commit it)
 	cd ui && npm run build
