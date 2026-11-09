@@ -1,6 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.0.2-rc.0 - 2026-11-09
+
+### Updated interface
+
+- The Tasks board shows column counts, checklist progress and a compact menu
+  for reordering cards, copying note names and removing tickets.
+- TODOs groups tasks by note, with search and completion filters at the top.
+  Click a TODO's label to update its checkbox in the source note.
+- Settings separates connected folders from the add-folder form. All three
+  views adapt to narrow layouts and KiroCrew's light and dark themes.
+- Cancelling a pending note preview discards its response.
 
 ### Fixed after editable-companion review
 

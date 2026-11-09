@@ -487,6 +487,8 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
     }
   }, [action.failure, props.mode, props.onMaintenanceNeeded, status])
   const discard = () => {
+    previewVersion.current++
+    setPreviewBusy(false)
     setPath(''); setTitle(''); setBody(''); setSource(null); setPreviewFailure(null)
     props.onClose()
   }

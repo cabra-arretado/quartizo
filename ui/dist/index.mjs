@@ -1,6 +1,6 @@
 import { jsx as e, jsxs as r, Fragment as j } from "react/jsx-runtime";
 import { useNavigate as ve, useAppApi as Le } from "@kirocrew/app-sdk";
-import { useState as m, useEffect as O, useRef as D, useMemo as xe, useCallback as te } from "react";
+import { useState as g, useEffect as O, useRef as D, useMemo as xe, useCallback as te } from "react";
 const V = "/apps/quartizo/api", De = 15e3, Y = ["backlog", "ready", "in_progress", "review", "done"], G = {
   backlog: "Backlog",
   ready: "Ready",
@@ -248,14 +248,14 @@ function fe() {
 }
 const st = 1500, ot = 3e4, be = "quartizo:workspace";
 function lt() {
-  const [t, n] = m(() => typeof document > "u" || document.visibilityState !== "hidden");
+  const [t, n] = g(() => typeof document > "u" || document.visibilityState !== "hidden");
   return O(() => {
     const a = () => n(document.visibilityState !== "hidden");
     return document.addEventListener("visibilitychange", a), () => document.removeEventListener("visibilitychange", a);
   }, []), t;
 }
 function Ce(t, n = !0) {
-  const [a, s] = m(null), [c, u] = m(null);
+  const [a, s] = g(null), [c, u] = g(null);
   return O(() => {
     if (!n) return;
     let i = !1;
@@ -267,22 +267,22 @@ function Ce(t, n = !0) {
   }, [t, n]), { companions: a, failure: c };
 }
 function Te(t, n, a, s, c) {
-  const u = lt(), [i, h] = m(null), [q, o] = m(null), [z, f] = m(0), [w, S] = m(!1), g = D(null), C = D(a), x = D(s), p = D(c);
-  C.current = a, x.current = s, p.current = c, O(() => {
-    g.current = null, h(null), o(null);
+  const u = lt(), [i, h] = g(null), [q, o] = g(null), [z, f] = g(0), [w, S] = g(!1), m = D(null), y = D(a), x = D(s), p = D(c);
+  y.current = a, x.current = s, p.current = c, O(() => {
+    m.current = null, h(null), o(null);
   }, [n]), O(() => {
     if (!t || !u) return;
     let $ = !1, M, A = !0;
     const _ = async () => {
       try {
-        (A || !g.current || !p.current(g.current)) && await Z(x.current(!1));
-        const d = await Z(C.current());
+        (A || !m.current || !p.current(m.current)) && await Z(x.current(!1));
+        const d = await Z(y.current());
         if ($) return;
-        g.current = d, h(d), o(null), S(!1);
+        m.current = d, h(d), o(null), S(!1);
       } catch (d) {
         $ || (o(Q(d)), S(!1));
       }
-      A = !1, $ || (M = setTimeout(_, g.current && p.current(g.current) ? st : ot));
+      A = !1, $ || (M = setTimeout(_, m.current && p.current(m.current) ? st : ot));
     };
     return _(), () => {
       $ = !0, clearTimeout(M);
@@ -297,10 +297,10 @@ function Te(t, n, a, s, c) {
     } finally {
       S(!1);
     }
-  }, []), y = te(() => {
-    g.current = null, S(!0), f(($) => $ + 1);
+  }, []), N = te(() => {
+    m.current = null, S(!0), f(($) => $ + 1);
   }, []);
-  return { data: i, failure: q, busy: w, refresh: b, reload: y };
+  return { data: i, failure: q, busy: w, refresh: b, reload: N };
 }
 function Se({ statuses: t }) {
   const n = Date.now(), a = t.map((s) => Ue(s, n)).filter(Boolean);
@@ -314,7 +314,7 @@ function $e({ statuses: t }) {
   return /* @__PURE__ */ e(j, { children: [...n].map((a) => /* @__PURE__ */ e("div", { role: "note", className: "qz-notice", children: a }, a)) });
 }
 function Me({ path: t, compact: n = !1 }) {
-  const a = it(t), [s, c] = m("idle");
+  const a = it(t), [s, c] = g("idle");
   O(() => {
     if (s === "idle") return;
     const i = setTimeout(() => c("idle"), 1500);
@@ -356,7 +356,7 @@ function Re({ onSettings: t }) {
 }
 function ct(t) {
   var h, q;
-  const n = t.active ?? !0, { companions: a, failure: s } = Ce(t.api, n), [c, u] = m(() => {
+  const n = t.active ?? !0, { companions: a, failure: s } = Ce(t.api, n), [c, u] = g(() => {
     var z;
     const o = Number((z = fe()) == null ? void 0 : z.getItem(be));
     return Number.isInteger(o) && o > 0 ? o : null;
@@ -384,7 +384,7 @@ function ct(t) {
   ] }) : /* @__PURE__ */ e(Re, { onSettings: t.onSettings }) : /* @__PURE__ */ e("p", { className: "qz-empty", role: "status", children: "Loading workspaces…" });
 }
 function ie(t) {
-  const [n, a] = m(!1), [s, c] = m(null), u = D(!0), i = D(!1);
+  const [n, a] = g(!1), [s, c] = g(null), u = D(!0), i = D(!1);
   return O(() => (u.current = !0, () => {
     u.current = !1;
   }), []), { pending: n, failure: s, run: async (q) => {
@@ -411,18 +411,18 @@ function dt(t) {
     () => Fe(n, c),
     (l) => ae(n, { workspaceId: c, manual: l }),
     (l) => l.index.state === "scanning"
-  ), f = ie(z), w = xe(() => Ke((i == null ? void 0 : i.tickets) ?? []), [i]), S = ye.filter((l) => l !== "repair" || w.repair.length > 0), g = D(null), C = D(null), [x, p] = m(null), b = D(null);
+  ), f = ie(z), w = xe(() => Ke((i == null ? void 0 : i.tickets) ?? []), [i]), S = ye.filter((l) => l !== "repair" || w.repair.length > 0), m = D(null), y = D(null), [x, p] = g(null), b = D(null);
   O(() => {
     var l;
     x && ((l = b.current) == null || l.focus());
   }, [x]);
-  const [y, $] = m(!1), M = !s || !!h || q || f.pending || y || !!W(i == null ? void 0 : i.index), [A, _] = m("backlog"), [d, k] = m(!1), [K, N] = m(!1), [U, se] = m(!1), oe = i ? [i.index] : [], Oe = te((l) => {
+  const [N, $] = g(!1), M = !s || !!h || q || f.pending || N || !!W(i == null ? void 0 : i.index), [A, _] = g("backlog"), [d, k] = g(!1), [K, C] = g(!1), [U, se] = g(!1), oe = i ? [i.index] : [], Oe = te((l) => {
     _(l), se(!0);
-  }, []), [X, le] = m(null);
+  }, []), [X, le] = g(null);
   O(() => {
     var B;
     if (!X || M || !i) return;
-    const l = Array.from(((B = g.current) == null ? void 0 : B.querySelectorAll("[data-note-path]")) ?? []).find((v) => v.dataset.notePath === X);
+    const l = Array.from(((B = m.current) == null ? void 0 : B.querySelectorAll("[data-note-path]")) ?? []).find((v) => v.dataset.notePath === X);
     l == null || l.focus(), le(null);
   }, [X, M, i]);
   const ce = (l, B, v) => {
@@ -432,8 +432,8 @@ function dt(t) {
     });
   }, de = (l, B, v) => {
     l.preventDefault(), l.stopPropagation();
-    const E = C.current;
-    if (C.current = null, !E || (v == null ? void 0 : v.path) === E.path) return;
+    const E = y.current;
+    if (y.current = null, !E || (v == null ? void 0 : v.path) === E.path) return;
     const R = w[B].filter((P) => P.path !== E.path), I = v ? R.findIndex((P) => P.path === v.path) : void 0;
     I !== void 0 && I < 0 || ce(E, B, I);
   }, Ae = (l) => {
@@ -450,7 +450,7 @@ function dt(t) {
       while (I >= 0 && I < S.length && w[S[I]].length === 0);
       if (I < 0 || I >= S.length) return;
     }
-    P = Math.min(P, w[S[I]].length - 1), l.preventDefault(), (ze = (ge = g.current) == null ? void 0 : ge.querySelector(`[data-lane="${I}"][data-index="${P}"]`)) == null || ze.focus();
+    P = Math.min(P, w[S[I]].length - 1), l.preventDefault(), (ze = (ge = m.current) == null ? void 0 : ge.querySelector(`[data-lane="${I}"][data-index="${P}"]`)) == null || ze.focus();
   };
   return /* @__PURE__ */ r("div", { className: "qz-stack", children: [
     /* @__PURE__ */ r("div", { className: "qz-toolbar", children: [
@@ -463,7 +463,7 @@ function dt(t) {
             "data-variant": "primary",
             "aria-expanded": x === "create",
             onClick: () => p(x === "create" ? null : "create"),
-            disabled: f.pending || y,
+            disabled: f.pending || N,
             children: [
               /* @__PURE__ */ e(T, { name: "plus" }),
               "New ticket"
@@ -477,7 +477,7 @@ function dt(t) {
             className: "qz-button",
             "aria-expanded": x === "promote",
             onClick: () => p(x === "promote" ? null : "promote"),
-            disabled: f.pending || y,
+            disabled: f.pending || N,
             children: [
               /* @__PURE__ */ e(T, { name: "note" }),
               "Use existing note"
@@ -532,12 +532,12 @@ function dt(t) {
       d && /* @__PURE__ */ r("div", { className: "qz-stack", role: "alertdialog", "aria-label": "Rebalance column", children: [
         /* @__PURE__ */ e("p", { children: "Update ordering in each note of this column? Other editors may see progress before all files finish." }),
         !!((me = i == null ? void 0 : i.index.maintenance) != null && me.includes(A)) && /* @__PURE__ */ r("label", { className: "qz-check-label", children: [
-          /* @__PURE__ */ e("input", { type: "checkbox", checked: K, onChange: (l) => N(l.target.checked), disabled: f.pending }),
+          /* @__PURE__ */ e("input", { type: "checkbox", checked: K, onChange: (l) => C(l.target.checked), disabled: f.pending }),
           "Keep the latest note contents and resume ordering after an external edit"
         ] }),
         /* @__PURE__ */ r("div", { className: "qz-actions", children: [
           /* @__PURE__ */ e("button", { type: "button", className: "qz-button", disabled: !s || f.pending || !!(i != null && i.index.writeBlocked), onClick: () => void f.run(() => Ye(n, c, A, K)).then((l) => {
-            l && (k(!1), N(!1));
+            l && (k(!1), C(!1));
           }), children: "Rebalance column" }),
           /* @__PURE__ */ e("button", { type: "button", className: "qz-button", "data-variant": "quiet", disabled: f.pending, onClick: () => k(!1), children: "Cancel" })
         ] })
@@ -549,7 +549,7 @@ function dt(t) {
       a.name,
       "” yet. Create a ticket or use an existing note."
     ] }),
-    i && /* @__PURE__ */ e("div", { ref: g, className: "qz-board", tabIndex: 0, onKeyDown: Ae, "aria-label": `Board of ${a.name}`, role: "group", children: S.map((l, B) => /* @__PURE__ */ r(
+    i && /* @__PURE__ */ e("div", { ref: m, className: "qz-board", tabIndex: 0, onKeyDown: Ae, "aria-label": `Board of ${a.name}`, role: "group", children: S.map((l, B) => /* @__PURE__ */ r(
       "section",
       {
         "aria-label": qe[l],
@@ -573,10 +573,10 @@ function dt(t) {
             {
               draggable: !M && !W(i.index, v),
               onDragStart: (R) => {
-                C.current = v, R.dataTransfer.setData("text/plain", v.path), R.dataTransfer.effectAllowed = "move";
+                y.current = v, R.dataTransfer.setData("text/plain", v.path), R.dataTransfer.effectAllowed = "move";
               },
               onDragEnd: () => {
-                C.current = null;
+                y.current = null;
               },
               onDragOver: (R) => {
                 !M && l !== "repair" && R.preventDefault();
@@ -610,41 +610,41 @@ function dt(t) {
   ] });
 }
 function ut(t) {
-  const [n, a] = m(""), [s, c] = m(""), [u, i] = m(""), [h, q] = m("backlog"), [o, z] = m(null), [f, w] = m(null), [S, g] = m(!1), C = D(0), x = D(!0);
+  const [n, a] = g(""), [s, c] = g(""), [u, i] = g(""), [h, q] = g("backlog"), [o, z] = g(null), [f, w] = g(null), [S, m] = g(!1), y = D(0), x = D(!0);
   O(() => (x.current = !0, () => {
-    x.current = !1, C.current++;
+    x.current = !1, y.current++;
   }), []);
   const p = ie(t.onChanged);
   O(() => (t.onBusy(p.pending), () => t.onBusy(!1)), [p.pending, t.onBusy]);
-  const b = t.disabled || p.pending || S, y = t.maintenance.includes(t.mode === "promote" ? "backlog" : h);
+  const b = t.disabled || p.pending || S, N = t.maintenance.includes(t.mode === "promote" ? "backlog" : h);
   O(() => {
-    var N, U;
-    (((N = p.failure) == null ? void 0 : N.code) === "rank_exhausted" || ((U = p.failure) == null ? void 0 : U.code) === "maintenance_pending") && t.onMaintenanceNeeded(t.mode === "promote" ? "backlog" : h);
+    var C, U;
+    (((C = p.failure) == null ? void 0 : C.code) === "rank_exhausted" || ((U = p.failure) == null ? void 0 : U.code) === "maintenance_pending") && t.onMaintenanceNeeded(t.mode === "promote" ? "backlog" : h);
   }, [p.failure, t.mode, t.onMaintenanceNeeded, h]);
   const $ = () => {
-    a(""), c(""), i(""), z(null), w(null), t.onClose();
+    y.current++, m(!1), a(""), c(""), i(""), z(null), w(null), t.onClose();
   }, M = n.trim().endsWith(".md") ? n.trim() : `${n.trim()}.md`, A = async () => {
-    const N = ++C.current;
-    g(!0), w(null), z(null);
+    const C = ++y.current;
+    m(!0), w(null), z(null);
     try {
       const U = await Z(Qe(t.api, t.workspace.id, M));
-      x.current && N === C.current && z(U);
+      x.current && C === y.current && z(U);
     } catch (U) {
-      x.current && N === C.current && w(Q(U));
+      x.current && C === y.current && w(Q(U));
     } finally {
-      x.current && N === C.current && g(!1);
+      x.current && C === y.current && m(!1);
     }
   }, _ = async () => {
     await p.run(() => t.mode === "create" ? Ve(t.api, t.workspace.id, { path: M, title: s.trim(), body: u, status: h }) : Ze(t.api, t.workspace.id, o)) && x.current && (a(""), c(""), i(""), z(null), t.onClose());
-  }, d = t.mode === "create", k = d ? "New ticket" : "Use existing note", K = !b && !y && !!n.trim() && (d ? !!s.trim() : !!o);
+  }, d = t.mode === "create", k = d ? "New ticket" : "Use existing note", K = !b && !N && !!n.trim() && (d ? !!s.trim() : !!o);
   return /* @__PURE__ */ r("section", { className: "qz-panel-surface qz-ticket-form", "aria-label": k, children: [
     /* @__PURE__ */ e("h3", { children: k }),
-    /* @__PURE__ */ r("form", { className: "qz-stack", onSubmit: (N) => {
-      N.preventDefault(), K && _();
+    /* @__PURE__ */ r("form", { className: "qz-stack", onSubmit: (C) => {
+      C.preventDefault(), K && _();
     }, children: [
       d && /* @__PURE__ */ r("label", { className: "qz-field", children: [
         "Title",
-        /* @__PURE__ */ e("input", { className: "qz-input", ref: t.firstField, "aria-label": "Ticket title", placeholder: "Fix login", value: s, disabled: p.pending, onChange: (N) => c(N.target.value) })
+        /* @__PURE__ */ e("input", { className: "qz-input", ref: t.firstField, "aria-label": "Ticket title", placeholder: "Fix login", value: s, disabled: p.pending, onChange: (C) => c(C.target.value) })
       ] }),
       /* @__PURE__ */ r("label", { className: "qz-field", children: [
         "Note path in ",
@@ -658,8 +658,8 @@ function ut(t) {
             placeholder: "tickets/fix-login.md",
             value: n,
             disabled: p.pending,
-            onChange: (N) => {
-              C.current++, g(!1), a(N.target.value), z(null);
+            onChange: (C) => {
+              y.current++, m(!1), a(C.target.value), z(null);
             }
           }
         )
@@ -670,11 +670,11 @@ function ut(t) {
             "Description ",
             /* @__PURE__ */ e("span", { className: "qz-muted", children: "· Optional Markdown" })
           ] }),
-          /* @__PURE__ */ e("textarea", { className: "qz-input", "aria-label": "Ticket description", placeholder: "What needs to happen?", value: u, disabled: p.pending, onChange: (N) => i(N.target.value), rows: 4 })
+          /* @__PURE__ */ e("textarea", { className: "qz-input", "aria-label": "Ticket description", placeholder: "What needs to happen?", value: u, disabled: p.pending, onChange: (C) => i(C.target.value), rows: 4 })
         ] }),
         /* @__PURE__ */ r("label", { className: "qz-field", children: [
           "Initial status",
-          /* @__PURE__ */ e("select", { className: "qz-input", value: h, disabled: p.pending, onChange: (N) => q(N.target.value), children: Y.map((N) => /* @__PURE__ */ e("option", { value: N, children: G[N] }, N)) })
+          /* @__PURE__ */ e("select", { className: "qz-input", value: h, disabled: p.pending, onChange: (C) => q(C.target.value), children: Y.map((C) => /* @__PURE__ */ e("option", { value: C, children: G[C] }, C)) })
         ] })
       ] }) : /* @__PURE__ */ r(j, { children: [
         /* @__PURE__ */ e("div", { className: "qz-actions", children: /* @__PURE__ */ e("button", { type: "button", className: "qz-button", disabled: b || !n.trim(), onClick: () => void A(), children: "Preview note" }) }),
@@ -683,7 +683,7 @@ function ut(t) {
           /* @__PURE__ */ e("p", { className: "qz-muted", children: "The note will appear in Backlog. Its content and existing properties are preserved." })
         ] })
       ] }),
-      y && /* @__PURE__ */ e("span", { className: "qz-notice", children: "Resume ordering maintenance for this column before adding a ticket." }),
+      N && /* @__PURE__ */ e("span", { className: "qz-notice", children: "Resume ordering maintenance for this column before adding a ticket." }),
       /* @__PURE__ */ e(L, { failure: f }),
       /* @__PURE__ */ e(L, { failure: p.failure }),
       /* @__PURE__ */ r("div", { className: "qz-actions", children: [
@@ -750,18 +750,18 @@ function pt(t) {
   ] });
 }
 function ht(t) {
-  const { api: n } = t, a = ve(), { companions: s, failure: c } = Ce(n), [u, i] = m("all"), [h, q] = m("open"), [o, z] = m(""), f = D(null);
+  const { api: n } = t, a = ve(), { companions: s, failure: c } = Ce(n), [u, i] = g("all"), [h, q] = g("open"), [o, z] = g(""), f = D(null);
   O(() => {
     s && u !== "all" && !s.some((d) => d.workspace.id === u) && i("all");
   }, [s, u]);
-  const w = u === "all" ? void 0 : u, S = !!s && s.length > 0, { data: g, failure: C, busy: x, refresh: p, reload: b } = Te(
+  const w = u === "all" ? void 0 : u, S = !!s && s.length > 0, { data: m, failure: y, busy: x, refresh: p, reload: b } = Te(
     S,
     `${u}:${h}`,
     () => _e(n, h, w),
     (d) => ae(n, { workspaceId: w, manual: d }),
     (d) => Object.values(d.index).some((k) => k.state === "scanning")
-  ), y = xe(() => He((g == null ? void 0 : g.groups) ?? [], o), [g, o]), $ = y.reduce((d, k) => d + k.items.length, 0), M = g ? Object.values(g.index) : [], A = ie(b), _ = (d, k, K) => {
-    A.pending || C || x || W(g == null ? void 0 : g.index[String(d.workspaceId)], d) || k.markerStart === void 0 || A.run(() => Je(n, d, k, K));
+  ), N = xe(() => He((m == null ? void 0 : m.groups) ?? [], o), [m, o]), $ = N.reduce((d, k) => d + k.items.length, 0), M = m ? Object.values(m.index) : [], A = ie(b), _ = (d, k, K) => {
+    A.pending || y || x || W(m == null ? void 0 : m.index[String(d.workspaceId)], d) || k.markerStart === void 0 || A.run(() => Je(n, d, k, K));
   };
   return c ? /* @__PURE__ */ e(L, { failure: c }) : s ? s.length === 0 ? /* @__PURE__ */ e(Re, { onSettings: t.onSettings }) : /* @__PURE__ */ r("div", { className: "qz-stack qz-todos", children: [
     /* @__PURE__ */ r("div", { className: "qz-view-heading", children: [
@@ -799,14 +799,14 @@ function ht(t) {
       ] })
     ] }),
     /* @__PURE__ */ r("div", { className: "qz-toolbar qz-board-meta", children: [
-      g && /* @__PURE__ */ r("span", { className: "qz-result-count", role: "status", children: [
+      m && /* @__PURE__ */ r("span", { className: "qz-result-count", role: "status", children: [
         $,
         " ",
         $ === 1 ? "item" : "items",
         " in ",
-        y.length,
+        N.length,
         " ",
-        y.length === 1 ? "note" : "notes"
+        N.length === 1 ? "note" : "notes"
       ] }),
       /* @__PURE__ */ r("div", { className: "qz-actions", children: [
         /* @__PURE__ */ e(Se, { statuses: M }),
@@ -817,11 +817,11 @@ function ht(t) {
       ] })
     ] }),
     /* @__PURE__ */ e($e, { statuses: M }),
-    /* @__PURE__ */ e(L, { failure: C }),
+    /* @__PURE__ */ e(L, { failure: y }),
     /* @__PURE__ */ e(L, { failure: A.failure }),
-    (g == null ? void 0 : g.truncated) && /* @__PURE__ */ e("div", { role: "note", className: "qz-notice", children: "Only the first items are listed. Narrow the list by workspace or completion status." }),
-    !g && !C && /* @__PURE__ */ e("p", { className: "qz-empty", role: "status", children: "Loading TODOs…" }),
-    g && y.length === 0 && /* @__PURE__ */ r("div", { className: "qz-empty", children: [
+    (m == null ? void 0 : m.truncated) && /* @__PURE__ */ e("div", { role: "note", className: "qz-notice", children: "Only the first items are listed. Narrow the list by workspace or completion status." }),
+    !m && !y && /* @__PURE__ */ e("p", { className: "qz-empty", role: "status", children: "Loading TODOs…" }),
+    m && N.length === 0 && /* @__PURE__ */ r("div", { className: "qz-empty", children: [
       /* @__PURE__ */ e("span", { className: "qz-empty-icon", children: /* @__PURE__ */ e(T, { name: o.trim() ? "search" : "checklist" }) }),
       /* @__PURE__ */ e("h3", { children: o.trim() ? "No matching TODOs" : "No TODOs to show" }),
       /* @__PURE__ */ e("p", { children: o.trim() ? "Try a different search or clear the filter." : "Choose a different workspace or completion status to see more." }),
@@ -830,7 +830,7 @@ function ht(t) {
         z(""), (d = f.current) == null || d.focus();
       }, children: "Clear search" })
     ] }),
-    /* @__PURE__ */ e("div", { className: "qz-stack", children: y.map((d) => /* @__PURE__ */ r("section", { "aria-label": d.title, className: "qz-todo-note qz-panel-surface", children: [
+    /* @__PURE__ */ e("div", { className: "qz-stack", children: N.map((d) => /* @__PURE__ */ r("section", { "aria-label": d.title, className: "qz-todo-note qz-panel-surface", children: [
       /* @__PURE__ */ r("header", { className: "qz-todo-header", children: [
         /* @__PURE__ */ e("span", { className: "qz-note-icon", children: /* @__PURE__ */ e(T, { name: "note" }) }),
         /* @__PURE__ */ r("div", { className: "qz-todo-identity", children: [
@@ -857,7 +857,7 @@ function ht(t) {
               type: "checkbox",
               "aria-label": `Complete ${ee(k.text)}`,
               checked: k.checked,
-              disabled: A.pending || !!C || x || !!W(g == null ? void 0 : g.index[String(d.workspaceId)], d) || k.markerStart === void 0,
+              disabled: A.pending || !!y || x || !!W(m == null ? void 0 : m.index[String(d.workspaceId)], d) || k.markerStart === void 0,
               onChange: (K) => _(d, k, K.target.checked)
             }
           ),
@@ -881,7 +881,7 @@ function ht(t) {
 }
 const mt = '.qz-settings{display:grid;align-content:start;gap:20px;width:100%;max-width:1100px;min-width:0;margin-inline:auto;container:qz-settings / inline-size}.qz-settings .qz-settings-grid{display:grid;align-items:start;gap:20px}@container qz-settings (min-width: 760px){.qz-settings .qz-settings-grid{grid-template-columns:minmax(0,1fr) minmax(260px,330px)}}.qz-settings .qz-settings-folders,.qz-settings .qz-settings-add,.qz-settings .qz-settings-folder,.qz-settings .qz-settings-migration,.qz-settings .qz-settings-notice{display:grid;min-width:0;gap:12px}.qz-settings .qz-settings-add,.qz-settings .qz-settings-folder{padding:16px}.qz-settings .qz-settings-add p{margin-block-start:4px}.qz-settings .qz-settings-add .qz-input{width:100%}.qz-settings .qz-settings-add>.qz-button{justify-self:start}.qz-settings .qz-settings-heading,.qz-settings .qz-settings-folder-identity,.qz-settings .qz-settings-folder-controls,.qz-settings .qz-settings-actions,.qz-settings .qz-settings-check{display:flex;align-items:center}.qz-settings .qz-settings-heading,.qz-settings .qz-settings-folder-identity,.qz-settings .qz-settings-check{gap:10px}.qz-settings .qz-settings-heading h3,.qz-settings .qz-settings-add h3,.qz-settings .qz-settings-folder h4{margin:0;color:var(--qz-text);font-size:15px;font-weight:650}.qz-settings .qz-settings-count{padding:1px 7px;border:1px solid var(--qz-border);border-radius:999px;color:var(--qz-muted);font-size:12px;font-variant-numeric:tabular-nums}.qz-settings .qz-settings-folder-icon{display:grid;flex:none;width:36px;height:36px;place-items:center;border-radius:9px;background:var(--qz-accent-soft);color:var(--qz-accent)}.qz-settings .qz-settings-folder-identity>div{display:grid;min-width:0;gap:3px;overflow-wrap:anywhere}.qz-settings .qz-settings-folder-controls{justify-content:space-between;flex-wrap:wrap;gap:8px 12px;padding-block-start:10px;border-top:1px solid var(--qz-border)}.qz-settings .qz-settings-actions{flex-wrap:wrap;gap:4px}.qz-settings .qz-settings-check{min-height:32px;font-size:13px;cursor:pointer}.qz-settings .qz-settings-check input{flex:none;accent-color:var(--qz-accent)}.qz-settings .qz-settings-toggle{display:inline-grid;align-items:center;justify-items:start;-webkit-appearance:none;-moz-appearance:none;appearance:none;width:34px;height:20px;padding:2px;margin:0;border:1px solid var(--qz-muted);border-radius:999px;background:var(--qz-elevated);cursor:inherit}.qz-settings .qz-settings-toggle:before{width:12px;height:12px;border-radius:50%;background:var(--qz-muted);content:""}.qz-settings .qz-settings-toggle:checked{justify-items:end;border-color:var(--qz-accent);background:var(--qz-accent-soft)}.qz-settings .qz-settings-toggle:checked:before{background:var(--qz-accent)}.qz-settings .qz-settings-toggle:disabled{opacity:.6;cursor:default}@media (forced-colors: active){.qz-settings .qz-settings-toggle{display:inline-block;-webkit-appearance:auto;-moz-appearance:auto;appearance:auto;width:16px;height:16px}}.qz-settings .qz-settings-migration,.qz-settings .qz-settings-result{padding:12px;border:1px solid var(--qz-border);border-radius:9px;background:var(--qz-canvas);font-size:13px}.qz-settings .qz-settings-migration{gap:6px}.qz-settings .qz-settings-notice{gap:8px;overflow-wrap:anywhere}.qz-settings .qz-settings-migration-files{max-height:200px;margin:0;padding-inline-start:20px;overflow-y:auto;list-style:disc}.qz-settings .qz-button[data-destructive]{color:var(--qz-danger)}';
 function re() {
-  const [t, n] = m(!1), [a, s] = m(null);
+  const [t, n] = g(!1), [a, s] = g(null);
   return { busy: t, failure: a, run: async (u) => {
     n(!0), s(null);
     try {
@@ -894,12 +894,12 @@ function re() {
   } };
 }
 function gt(t) {
-  const { api: n } = t, [a, s] = m(null), [c, u] = m(null), [i, h] = m(null), [q, o] = m(0), [z, f] = m(""), [w, S] = m(""), { busy: g, failure: C, run: x } = re();
+  const { api: n } = t, [a, s] = g(null), [c, u] = g(null), [i, h] = g(null), [q, o] = g(0), [z, f] = g(""), [w, S] = g(""), { busy: m, failure: y, run: x } = re();
   O(() => {
     let b = !1;
-    return Promise.all([Be(n), we(n)]).then(([y, $]) => {
-      b || (s(y), h($.writeBlocked ?? null), u(null));
-    }).catch((y) => !b && u(Q(y))), () => {
+    return Promise.all([Be(n), we(n)]).then(([N, $]) => {
+      b || (s(N), h($.writeBlocked ?? null), u(null));
+    }).catch((N) => !b && u(Q(N))), () => {
       b = !0;
     };
   }, [n, q]);
@@ -922,16 +922,16 @@ function gt(t) {
         ] }),
         !a && !c && /* @__PURE__ */ e("p", { className: "qz-muted", role: "status", children: "Loading folders…" }),
         (a == null ? void 0 : a.length) === 0 && /* @__PURE__ */ e("p", { className: "qz-empty", children: "Add a folder to start viewing its tickets and TODOs." }),
-        a == null ? void 0 : a.map((b) => /* @__PURE__ */ e(zt, { api: n, workspace: b, writeBlocked: i, onChanged: () => o((y) => y + 1) }, b.id))
+        a == null ? void 0 : a.map((b) => /* @__PURE__ */ e(zt, { api: n, workspace: b, writeBlocked: i, onChanged: () => o((N) => N + 1) }, b.id))
       ] }),
       /* @__PURE__ */ r(
         "form",
         {
           className: "qz-panel-surface qz-settings-add",
           "aria-labelledby": "qz-settings-add",
-          "aria-busy": g,
+          "aria-busy": m,
           onSubmit: (b) => {
-            b.preventDefault(), z.trim() && !g && p();
+            b.preventDefault(), z.trim() && !m && p();
           },
           children: [
             /* @__PURE__ */ r("div", { children: [
@@ -949,8 +949,8 @@ function gt(t) {
               ] }),
               /* @__PURE__ */ e("input", { className: "qz-input", placeholder: "e.g. Project notes", value: w, onChange: (b) => S(b.target.value) })
             ] }),
-            /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "primary", type: "submit", disabled: g || !z.trim(), children: "Add folder" }),
-            /* @__PURE__ */ e(L, { failure: C })
+            /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "primary", type: "submit", disabled: m || !z.trim(), children: "Add folder" }),
+            /* @__PURE__ */ e(L, { failure: y })
           ]
         }
       )
@@ -958,7 +958,7 @@ function gt(t) {
   ] });
 }
 function zt(t) {
-  const { api: n, workspace: a } = t, { busy: s, failure: c, run: u } = re(), [i, h] = m(null), [q, o] = m(!1);
+  const { api: n, workspace: a } = t, { busy: s, failure: c, run: u } = re(), [i, h] = g(null), [q, o] = g(!1);
   return O(() => {
     if (!i) return;
     const z = setTimeout(() => h(null), 3e3);
@@ -1030,9 +1030,9 @@ function zt(t) {
   ] });
 }
 function qt({ api: t, workspace: n, writeBlocked: a, onChanged: s }) {
-  const [c, u] = m(null), [i, h] = m(null), [q, o] = m(!1), [z, f] = m(!1), { busy: w, failure: S, run: g } = re(), C = async () => {
-    const p = await nt(t, n.id), b = URL.createObjectURL(new Blob([JSON.stringify(p, null, 2)], { type: "application/json" })), y = document.createElement("a");
-    y.href = b, y.download = `quartizo-old-tasks-${n.id}.json`, y.click(), setTimeout(() => URL.revokeObjectURL(b), 1e3), o(!0);
+  const [c, u] = g(null), [i, h] = g(null), [q, o] = g(!1), [z, f] = g(!1), { busy: w, failure: S, run: m } = re(), y = async () => {
+    const p = await nt(t, n.id), b = URL.createObjectURL(new Blob([JSON.stringify(p, null, 2)], { type: "application/json" })), N = document.createElement("a");
+    N.href = b, N.download = `quartizo-old-tasks-${n.id}.json`, N.click(), setTimeout(() => URL.revokeObjectURL(b), 1e3), o(!0);
   }, x = async () => {
     if (!c) return;
     const p = await tt(t, n.id, c.planHash, z);
@@ -1048,8 +1048,8 @@ function qt({ api: t, workspace: n, writeBlocked: a, onChanged: s }) {
       " from the old board into Markdown ticket notes."
     ] }),
     /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
-      /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", disabled: w, onClick: () => void g(C), children: "Export old tasks" }),
-      /* @__PURE__ */ e("button", { className: "qz-button", type: "button", disabled: w || !n.companion, onClick: () => void g(async () => {
+      /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", disabled: w, onClick: () => void m(y), children: "Export old tasks" }),
+      /* @__PURE__ */ e("button", { className: "qz-button", type: "button", disabled: w || !n.companion, onClick: () => void m(async () => {
         u(await et(t, n.id)), h(null), f(!1);
       }), children: "Preview migration" })
     ] }),
@@ -1084,7 +1084,7 @@ function qt({ api: t, workspace: n, writeBlocked: a, onChanged: s }) {
         "I reviewed the changed converted notes; keep their latest contents when resuming"
       ] }),
       /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
-        /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "primary", type: "button", disabled: w || !!a || c.complete || !c.tasks.length, onClick: () => void g(x), children: c.backup ? "Resume and verify migration" : "Back up and migrate" }),
+        /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "primary", type: "button", disabled: w || !!a || c.complete || !c.tasks.length, onClick: () => void m(x), children: c.backup ? "Resume and verify migration" : "Back up and migrate" }),
         /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", disabled: w, onClick: () => u(null), children: "Cancel" })
       ] })
     ] }),
@@ -1108,7 +1108,7 @@ const ft = ".qz-app{--qz-canvas: var(--bg, Canvas);--qz-surface: var(--card, Can
   { id: "settings", label: "Settings", icon: "settings" }
 ];
 function kt() {
-  const t = Le(), [n, a] = m("tasks"), s = D(null), c = (i) => {
+  const t = Le(), [n, a] = g("tasks"), s = D(null), c = (i) => {
     var o;
     if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(i.key)) return;
     i.preventDefault();

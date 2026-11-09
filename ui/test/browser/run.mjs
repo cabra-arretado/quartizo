@@ -120,6 +120,38 @@ async function selfDropRegression(page, fixture) {
   console.log('PASS native mouse self-drop is a no-op')
 }
 
+async function cancelledPreviewRegression(page, fixture) {
+  await page.goto(fixture.origin)
+  await ready(page)
+  let release
+  let intercepted
+  const paused = new Promise(resolve => { release = resolve })
+  const entered = new Promise(resolve => { intercepted = resolve })
+  await page.route('**/source?*', async route => {
+    intercepted()
+    await paused
+    await route.continue()
+  }, { times: 1 })
+  const form = page.getByRole('region', { name: 'Use existing note', exact: true })
+  await button(page, 'Use existing note').click()
+  await textbox(page, 'Ticket note path').fill('ordinary.md')
+  const response = page.waitForResponse(value => new URL(value.url()).pathname.endsWith('/source'))
+  await button(page, 'Preview note').click()
+  await entered
+  await button(page, 'Cancel').click()
+  await button(page, 'Use existing note').click()
+  release()
+  assert.equal((await response).status(), 200)
+  await delay(150)
+  assert.equal(await textbox(page, 'Ticket note path').inputValue(), '')
+  assert.equal(await form.locator('pre').count(), 0, 'Cancelled note preview reappeared')
+  await textbox(page, 'Ticket note path').fill('ordinary.md')
+  await button(page, 'Preview note').click()
+  await form.locator('pre').waitFor()
+  await button(page, 'Cancel').click()
+  console.log('PASS cancelling an in-flight note preview discards its response')
+}
+
 async function rebalance(page) {
   await button(page, 'Review column…').click()
   await button(page, 'Rebalance column').click()
@@ -226,6 +258,7 @@ try {
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
   const errors = []
   page.on('pageerror', error => errors.push(String(error)))
+  await cancelledPreviewRegression(page, fixture)
   await draftAndRequestRegression(page, fixture)
   await selfDropRegression(page, fixture)
   await exhaustionRegression(page, fixture)
