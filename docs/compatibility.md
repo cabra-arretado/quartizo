@@ -54,7 +54,7 @@ kirocrew gateway; "tests" means unit/HTTP tests with no gateway.
 | **OS** | Ubuntu 26.04.1 LTS, x86_64 (Linux 7.0) | Verified live and in tests. |
 | | macOS | CI only (`macos-latest`, Apple Silicon, Python 3.12 and 3.13, Node 22): full suite and the `ui/dist` drift check pass (run 39473401789, 12 tests skipped for Linux-only behaviour, e.g. `renameat2`, the `RLIMIT_DATA` bombs, non-UTF-8 file names). The `renameat2` fallback path is what runs there. Not run live against a gateway |
 | | Windows | Unsupported (POSIX `dir_fd`/`openat` backend); not in CI |
-| **Python** | 3.12.13 | The gateway's own venv ran the backend live. 3.12 and 3.13 are in the CI matrix. 3.14.4 ran the suite locally. The backend needs no installed packages (stdlib plus the parsers vendored in `backend/_vendor/`, which shadow the gateway venv's own markdown-it-py 4.2.0); `pyproject.toml` targets 3.10+ for lint, but 3.10/3.11 are not tested |
+| **Python** | 3.12.13 | The gateway's own venv ran the backend live. 3.12 and 3.13 are in the CI matrix. 3.14.4 ran the suite locally. The backend needs no installed packages (stdlib plus the parsers vendored in `backend/_vendor/`, which shadow the gateway venv's own markdown-it-py 4.2.0); `ruff.toml` targets 3.10+ for lint, but 3.10/3.11 are not tested |
 | **Node** | 22 | CI (`npm ci`, typecheck, tests, build, `ui/dist` drift check). Package needs 22.12+ |
 | | 26.11.1 | Developed on, and built the committed `ui/dist` |
 | **git** (runtime, for the Git tab) | 2.53.0 | Real-git tests; minimum enforced by the backend is 2.38 (`git_too_old` below). Not run through the gateway sandbox |

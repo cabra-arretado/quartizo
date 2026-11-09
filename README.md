@@ -52,7 +52,7 @@ ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
 tests/backend/        backend unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
 docs/                 compatibility, architecture, threat model, dependencies, CHANGELOG
-Makefile, pyproject.toml, .github/workflows/ci.yml   quality gates
+Makefile, ruff.toml, .github/workflows/ci.yml        quality gates
 ```
 
 ## Requirements
@@ -100,6 +100,21 @@ python3 -m unittest tests.integration.test_gateway -v
 ```
 
 ## Install into KiroCrew
+
+In KiroCrew **Apps → Discover → Sources**, choose **Add registry** and use
+these values:
+
+| Field | Value |
+| --- | --- |
+| Display name | Quartizo |
+| Repo | `https://github.com/cabra-arretado/quartizo` |
+| Branch | `main` |
+
+Open the Quartizo listing and click **Install**. If KiroCrew prompts for
+execution trust, grant it for Quartizo. Enable the app and open it from the
+sidebar. The registry follows `main`, and the app ships with a prebuilt UI.
+
+### Install from a local checkout
 
 ```bash
 kirocrew gateway                                       # in its own terminal
