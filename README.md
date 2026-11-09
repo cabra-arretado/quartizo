@@ -8,10 +8,10 @@ Notes; Quartizo shares the same folder and provides
 - **TODOs**: checkboxes grouped by note, with completion saved in the source;
 - **Settings**: the folders Quartizo reads.
 
-Clicking a card or a TODO opens Kiro Notes. Kiro Notes cannot be told which
-note to open, so every card and TODO has a **Copy name** button: paste the
-name into Kiro Notes' search. Ticket metadata and checkbox completion remain
-in your Markdown files; SQLite is a rebuildable view of that data.
+Use a card title or the arrow beside a TODO to open Kiro Notes. Copy the note
+name from the card’s actions or the checklist header and paste it into Kiro
+Notes’ search to find the file. Ticket metadata and checkbox completion live
+in your Markdown files. SQLite holds a rebuildable index of that data.
 
 A Python backend (standard library, plus ruamel.yaml vendored in
 `backend/_vendor/`) verifies the gateway's signed proxy requests and keeps a
@@ -174,8 +174,9 @@ network, sessionApproval or uploads). Earlier versions also asked for
    both flagged, never merged. Arrow keys move between cards.
    **New ticket** creates a Markdown note; **Use existing note** previews a
    note before adding ticket properties. Change the status selector, drag a
-   card into a column or before another card, or use its up/down buttons.
-   **Remove ticket…** removes ticket properties and keeps the note and TODOs.
+   card into a column or before another card, or choose **Move up** or
+   **Move down** from the card’s actions. **Remove ticket…** in the same
+   menu removes ticket properties and keeps the note and TODOs.
    Native Notes remains the editor for its title and body.
 4. **TODOs** lists exactly the checkboxes Kiro Notes shows, grouped by note,
    open ones by default. Like Kiro Notes, Quartizo drops a frontmatter block
@@ -184,8 +185,8 @@ network, sessionApproval or uploads). Earlier versions also asked for
    line with a pipe), then takes lines `- [ ] text` / `- [x] text` (a `-`
    bullet, lower-case `x`, any indentation). So `*`/`+`/numbered items, `[X]`,
    quoted items, `~~~` fences, table rows and CRLF lines are not checkboxes,
-   while an indented line is one. A card or group whose title differs from the
-   file name also shows the file name, which is what Kiro Notes lists.
+   while an indented line is one. Each ticket card and checklist shows the
+   Markdown path below the note title.
    Check or uncheck an item here to update that exact source marker.
 5. The views rescan when they open, every 30 s while shown, and on
    **Refresh**; **Rebuild index** in Settings re-parses everything. Every scan

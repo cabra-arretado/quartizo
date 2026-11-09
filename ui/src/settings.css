@@ -1,0 +1,201 @@
+.qz-settings {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  width: 100%;
+  max-width: 1100px;
+  min-width: 0;
+  margin-inline: auto;
+  container: qz-settings / inline-size;
+}
+
+.qz-settings .qz-settings-grid {
+  display: grid;
+  align-items: start;
+  gap: 20px;
+}
+
+@container qz-settings (min-width: 760px) {
+  .qz-settings .qz-settings-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
+  }
+}
+
+.qz-settings .qz-settings-folders,
+.qz-settings .qz-settings-add,
+.qz-settings .qz-settings-folder,
+.qz-settings .qz-settings-migration,
+.qz-settings .qz-settings-notice {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.qz-settings .qz-settings-add,
+.qz-settings .qz-settings-folder {
+  padding: 16px;
+}
+
+.qz-settings .qz-settings-add p {
+  margin-block-start: 4px;
+}
+
+.qz-settings .qz-settings-add .qz-input {
+  width: 100%;
+}
+
+.qz-settings .qz-settings-add > .qz-button {
+  justify-self: start;
+}
+
+.qz-settings .qz-settings-heading,
+.qz-settings .qz-settings-folder-identity,
+.qz-settings .qz-settings-folder-controls,
+.qz-settings .qz-settings-actions,
+.qz-settings .qz-settings-check {
+  display: flex;
+  align-items: center;
+}
+
+.qz-settings .qz-settings-heading,
+.qz-settings .qz-settings-folder-identity,
+.qz-settings .qz-settings-check {
+  gap: 10px;
+}
+
+.qz-settings .qz-settings-heading h3,
+.qz-settings .qz-settings-add h3,
+.qz-settings .qz-settings-folder h4 {
+  margin: 0;
+  color: var(--qz-text);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.qz-settings .qz-settings-count {
+  padding: 1px 7px;
+  border: 1px solid var(--qz-border);
+  border-radius: 999px;
+  color: var(--qz-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.qz-settings .qz-settings-folder-icon {
+  display: grid;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--qz-accent-soft);
+  color: var(--qz-accent);
+}
+
+.qz-settings .qz-settings-folder-identity > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.qz-settings .qz-settings-folder-controls {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding-block-start: 10px;
+  border-top: 1px solid var(--qz-border);
+}
+
+.qz-settings .qz-settings-actions {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.qz-settings .qz-settings-check {
+  min-height: 32px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.qz-settings .qz-settings-check input {
+  flex: none;
+  accent-color: var(--qz-accent);
+}
+
+.qz-settings .qz-settings-toggle {
+  display: inline-grid;
+  align-items: center;
+  justify-items: start;
+  appearance: none;
+  width: 34px;
+  height: 20px;
+  padding: 2px;
+  margin: 0;
+  border: 1px solid var(--qz-muted);
+  border-radius: 999px;
+  background: var(--qz-elevated);
+  cursor: inherit;
+}
+
+.qz-settings .qz-settings-toggle::before {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--qz-muted);
+  content: "";
+}
+
+.qz-settings .qz-settings-toggle:checked {
+  justify-items: end;
+  border-color: var(--qz-accent);
+  background: var(--qz-accent-soft);
+}
+
+.qz-settings .qz-settings-toggle:checked::before {
+  background: var(--qz-accent);
+}
+
+.qz-settings .qz-settings-toggle:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (forced-colors: active) {
+  .qz-settings .qz-settings-toggle {
+    display: inline-block;
+    appearance: auto;
+    width: 16px;
+    height: 16px;
+  }
+}
+
+.qz-settings .qz-settings-migration,
+.qz-settings .qz-settings-result {
+  padding: 12px;
+  border: 1px solid var(--qz-border);
+  border-radius: 9px;
+  background: var(--qz-canvas);
+  font-size: 13px;
+}
+
+.qz-settings .qz-settings-migration {
+  gap: 6px;
+}
+
+.qz-settings .qz-settings-notice {
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+
+.qz-settings .qz-settings-migration-files {
+  max-height: 200px;
+  margin: 0;
+  padding-inline-start: 20px;
+  overflow-y: auto;
+  list-style: disc;
+}
+
+.qz-settings .qz-button[data-destructive] {
+  color: var(--qz-danger);
+}

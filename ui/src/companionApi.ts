@@ -271,11 +271,13 @@ export function indexWarning(index: IndexStatus | undefined): string | null {
 export function describeIndex(index: IndexStatus | undefined, now: number = Date.now()): string {
   if (!index) return ''
   if (index.state === 'scanning') {
-    const n = index.progress?.notes
-    return index.progress ? `Scanning… ${n} note(s) read${index.progress.rebuild ? ' (rebuild)' : ''}` : 'Scan queued…'
+    if (!index.progress) return 'Scan queued…'
+    const { notes, rebuild } = index.progress
+    return `Scanning… ${notes} ${notes === 1 ? 'note' : 'notes'} read${rebuild ? ' (rebuild)' : ''}`
   }
   if (!index.indexedAt) return ''
-  return `${index.files ?? 0} note(s) indexed ${ago(index.indexedAt, now)}`
+  const files = index.files ?? 0
+  return `${files} ${files === 1 ? 'note' : 'notes'} indexed ${ago(index.indexedAt, now)}`
 }
 
 export function ago(at: number, now: number): string {

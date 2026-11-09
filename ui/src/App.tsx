@@ -1,14 +1,15 @@
 import { useAppApi } from '@kirocrew/app-sdk'
-import { PageHeader } from '@kirocrew/app-sdk/ui'
-import { type KeyboardEvent, useState } from 'react'
+import { type KeyboardEvent, useRef, useState } from 'react'
 import { TasksView, TodoView } from './Companion'
 import Settings from './Settings'
+import { Icon, type IconName } from './ui'
+import styles from './quartizo.css?inline'
 
 type Tab = 'tasks' | 'todos' | 'settings'
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'tasks', label: 'Tasks' },
-  { id: 'todos', label: 'TODOs' },
-  { id: 'settings', label: 'Settings' },
+const TABS: { id: Tab; label: string; icon: IconName }[] = [
+  { id: 'tasks', label: 'Tasks', icon: 'board' },
+  { id: 'todos', label: 'TODOs', icon: 'checklist' },
+  { id: 'settings', label: 'Settings', icon: 'settings' },
 ]
 
 // Default export is what the host renders (AppHost lazy-imports ui.entry and
@@ -18,20 +19,34 @@ const TABS: { id: Tab; label: string }[] = [
 export default function Quartizo() {
   const api = useAppApi()
   const [tab, setTab] = useState<Tab>('tasks')
+  const tabs = useRef<HTMLDivElement>(null)
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
     e.preventDefault()
     const i = TABS.findIndex(t => t.id === tab)
-    const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]
+    const next = e.key === 'Home' ? TABS[0] : e.key === 'End' ? TABS[TABS.length - 1]
+      : TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length]
     setTab(next.id)
-    document.getElementById(`qz-tab-${next.id}`)?.focus()
+    e.currentTarget.querySelector<HTMLElement>(`#qz-tab-${next.id}`)?.focus()
+  }
+  const openSettings = () => {
+    setTab('settings')
+    tabs.current?.querySelector<HTMLElement>('#qz-tab-settings')?.focus()
   }
 
   return (
-    <>
-      <PageHeader title="Quartizo" subtitle="Kiro Notes board and TODOs" />
-      <div className="px-6 pb-8 flex-1 min-h-0 flex flex-col gap-3">
-        <div role="tablist" aria-label="Quartizo" onKeyDown={onTabKey} style={{ display: 'flex', gap: 4 }}>
+    <div className="qz-app">
+      {/* The host loads a single ES module through the manifest. */}
+      <style>{styles}</style>
+      <header className="qz-header">
+        <div className="qz-brand">
+          <span className="qz-mark"><Icon name="gem" /></span>
+          <div>
+            <h1>Quartizo</h1>
+            <p>Kiro Notes companion</p>
+          </div>
+        </div>
+        <div className="qz-tabs" ref={tabs} role="tablist" aria-label="Quartizo" onKeyDown={onTabKey}>
           {TABS.map(t => (
             <button
               key={t.id}
@@ -42,35 +57,21 @@ export default function Quartizo() {
               aria-controls="qz-panel"
               tabIndex={tab === t.id ? 0 : -1}
               onClick={() => setTab(t.id)}
-              style={{
-                padding: '4px 12px',
-                background: 'transparent',
-                color: 'inherit',
-                border: 'none',
-                borderBottom: tab === t.id ? '2px solid currentColor' : '2px solid transparent',
-                fontWeight: tab === t.id ? 600 : 400,
-                cursor: 'pointer',
-              }}
             >
+              <Icon name={t.icon} />
               {t.label}
             </button>
           ))}
         </div>
-        {/* Keep Tasks mounted so drafts and in-flight writes survive tab navigation.
-            Its inactive views pause polling and refresh their registrations when shown. */}
-        <div
-          id="qz-panel"
-          role="tabpanel"
-          aria-labelledby={`qz-tab-${tab}`}
-          style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}
-        >
-          <div hidden={tab !== 'tasks'} style={{ display: tab === 'tasks' ? 'flex' : 'none', flex: 1, minHeight: 0 }}>
-            <TasksView api={api} active={tab === 'tasks'} />
-          </div>
-          {tab === 'todos' && <TodoView api={api} />}
-          {tab === 'settings' && <Settings api={api} />}
+      </header>
+      <div className="qz-content" id="qz-panel" role="tabpanel" aria-labelledby={`qz-tab-${tab}`}>
+        {/* Inactive boards pause polling and keep drafts and in-flight writes mounted. */}
+        <div hidden={tab !== 'tasks'}>
+          <TasksView api={api} active={tab === 'tasks'} onSettings={openSettings} />
         </div>
+        {tab === 'todos' && <TodoView api={api} onSettings={openSettings} />}
+        {tab === 'settings' && <Settings api={api} />}
       </div>
-    </>
+    </div>
   )
 }

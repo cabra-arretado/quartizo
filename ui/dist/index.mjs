@@ -1,488 +1,607 @@
-import { jsx as i, jsxs as c, Fragment as Q } from "react/jsx-runtime";
+import { jsx as e, jsxs as r, Fragment as j } from "react/jsx-runtime";
 import { useNavigate as ve, useAppApi as Le } from "@kirocrew/app-sdk";
-import { Btn as I, PageHeader as Pe } from "@kirocrew/app-sdk/ui";
-import { useState as f, useEffect as B, useMemo as we, useRef as _, useCallback as Z } from "react";
-const H = "/apps/quartizo/api", Fe = 15e3, G = ["backlog", "ready", "in_progress", "review", "done"], Y = {
+import { useState as m, useEffect as O, useRef as D, useMemo as xe, useCallback as te } from "react";
+const V = "/apps/quartizo/api", De = 15e3, Y = ["backlog", "ready", "in_progress", "review", "done"], G = {
   backlog: "Backlog",
   ready: "Ready",
   in_progress: "In Progress",
   review: "Review",
   done: "Done"
 };
-function j(e) {
-  const t = e;
-  if ((t == null ? void 0 : t.name) === "AppApiPermissionError")
+function Q(t) {
+  const n = t;
+  if ((n == null ? void 0 : n.name) === "AppApiPermissionError")
     return { code: "permission_denied", message: "Quartizo has not declared access to this API in app.json." };
-  const n = typeof (t == null ? void 0 : t.status) == "number" ? t.status : void 0;
-  let a;
-  if (typeof (t == null ? void 0 : t.body) == "string" && t.body)
+  const a = typeof (n == null ? void 0 : n.status) == "number" ? n.status : void 0;
+  let s;
+  if (typeof (n == null ? void 0 : n.body) == "string" && n.body)
     try {
-      const r = JSON.parse(t.body);
-      r && typeof r == "object" && !Array.isArray(r) && (a = r);
+      const i = JSON.parse(n.body);
+      i && typeof i == "object" && !Array.isArray(i) && (s = i);
     } catch {
     }
-  const o = typeof (a == null ? void 0 : a.code) == "string" ? a.code : void 0, d = typeof (a == null ? void 0 : a.error) == "string" ? a.error : typeof (t == null ? void 0 : t.message) == "string" ? t.message : String(e);
-  return { status: n, code: o, message: d };
+  const c = typeof (s == null ? void 0 : s.code) == "string" ? s.code : void 0, u = typeof (s == null ? void 0 : s.error) == "string" ? s.error : typeof (n == null ? void 0 : n.message) == "string" ? n.message : String(t);
+  return { status: a, code: c, message: u };
 }
-function V(e, t = Fe) {
-  let n;
-  const a = new Promise((o, d) => {
-    n = setTimeout(() => d(new Error(`request timed out after ${Math.round(t / 1e3)} s`)), t);
+function Z(t, n = De) {
+  let a;
+  const s = new Promise((c, u) => {
+    a = setTimeout(() => u(new Error(`request timed out after ${Math.round(n / 1e3)} s`)), n);
   });
-  return Promise.race([e, a]).finally(() => clearTimeout(n));
+  return Promise.race([t, s]).finally(() => clearTimeout(a));
 }
-function xe(e) {
-  const t = Object.entries(e).filter((n) => n[1] !== void 0 && n[1] !== "").map(([n, a]) => `${encodeURIComponent(n)}=${encodeURIComponent(a)}`);
-  return t.length ? `?${t.join("&")}` : "";
+function ke(t) {
+  const n = Object.entries(t).filter((a) => a[1] !== void 0 && a[1] !== "").map(([a, s]) => `${encodeURIComponent(a)}=${encodeURIComponent(s)}`);
+  return n.length ? `?${n.join("&")}` : "";
 }
-async function We(e) {
-  return (await e.get(`${H}/workspaces`)).workspaces;
+async function Be(t) {
+  return (await t.get(`${V}/workspaces`)).workspaces;
 }
-async function _e(e, t, n) {
-  return (await e.post(`${H}/workspaces`, n ? { path: t, name: n, companion: !0 } : { path: t, companion: !0 })).workspace;
+async function Ee(t, n, a) {
+  return (await t.post(`${V}/workspaces`, a ? { path: n, name: a, companion: !0 } : { path: n, companion: !0 })).workspace;
 }
-async function ze(e, t, n = !1) {
-  await e.del(`${H}/workspaces/${t}${n ? "?deleteOldTasks=1" : ""}`);
+async function Pe(t, n, a = !1) {
+  await t.del(`${V}/workspaces/${n}${a ? "?deleteOldTasks=1" : ""}`);
 }
-const te = `${H}/companion`;
-function Ne(e) {
-  return e.get(te);
+const ne = `${V}/companion`;
+function we(t) {
+  return t.get(ne);
 }
-function qe(e, t, n) {
-  return e.put(`${H}/workspaces/${t}/companion`, { enabled: n });
+function je(t, n, a) {
+  return t.put(`${V}/workspaces/${n}/companion`, { enabled: a });
 }
-function ne(e, t = {}) {
-  const n = {};
-  return t.workspaceId !== void 0 && (n.workspaceId = t.workspaceId), t.rebuild && (n.rebuild = !0), t.manual && (n.manual = !0), e.post(`${te}/refresh`, n);
+function ae(t, n = {}) {
+  const a = {};
+  return n.workspaceId !== void 0 && (a.workspaceId = n.workspaceId), n.rebuild && (a.rebuild = !0), n.manual && (a.manual = !0), t.post(`${ne}/refresh`, a);
 }
-function Ke(e, t) {
-  return e.get(`${H}/workspaces/${t}/board`);
+function Fe(t, n) {
+  return t.get(`${V}/workspaces/${n}/board`);
 }
-function je(e, t, n) {
-  return e.get(`${te}/todos${xe({ workspace: n === void 0 ? void 0 : String(n), state: t })}`);
+function _e(t, n, a) {
+  return t.get(`${ne}/todos${ke({ workspace: a === void 0 ? void 0 : String(a), state: n })}`);
 }
-const Ce = [...G, "repair"], ge = { ...Y, repair: "Needs repair" };
-function He(e) {
-  const t = Object.fromEntries(Ce.map((n) => [n, []]));
-  for (const n of e) (t[n.lane] ?? t.repair).push(n);
-  return t;
+const ye = [...Y, "repair"], qe = { ...G, repair: "Needs repair" };
+function Ke(t) {
+  const n = Object.fromEntries(ye.map((a) => [a, []]));
+  for (const a of t) (n[a.lane] ?? n.repair).push(a);
+  return n;
 }
-function Ue(e) {
-  var n;
-  if (!e) return null;
-  if (e.writeBlocked) return e.writeBlocked.message;
-  switch (e.state) {
+function Ne(t) {
+  var a;
+  if (!t) return null;
+  if (t.writeBlocked) return t.writeBlocked.message;
+  switch (t.state) {
     case "off":
       return "This workspace is not in Kiro Notes companion mode.";
     case "unavailable":
-      return `The Markdown index is unavailable: ${typeof e.error == "string" ? e.error : "parsers failed to load"}.`;
+      return `The Markdown index is unavailable: ${typeof t.error == "string" ? t.error : "parsers failed to load"}.`;
     case "unindexed":
       return "Not indexed yet.";
     case "error":
     case "stale": {
-      const a = e.error && typeof e.error == "object" ? e.error.message : "the last scan failed";
-      return e.state === "stale" ? `The last scan failed (${a}); showing the previous scan.` : `Indexing failed: ${a}.`;
+      const s = t.error && typeof t.error == "object" ? t.error.message : "the last scan failed";
+      return t.state === "stale" ? `The last scan failed (${s}); showing the previous scan.` : `Indexing failed: ${s}.`;
     }
   }
-  const t = [];
-  return e.migrationPending && t.push("Old task migration is unfinished. Resume it in Settings before editing this workspace."), (n = e.maintenance) != null && n.length && t.push("Some columns have unfinished ordering maintenance. Resume it in Tasks before editing those tickets."), e.complete === !1 ? t.push("The last scan was incomplete (a limit was reached or a folder could not be read): notes it did not reach are shown as last indexed, and none were treated as deleted.") : e.retained && t.push(`${e.retained} note(s) could not be read and are shown as last indexed.`), e.outdated && t.push("This index was built by an older version; refresh to update it."), t.length ? t.join(" ") : null;
+  const n = [];
+  return t.migrationPending && n.push("Old task migration is unfinished. Resume it in Settings before editing this workspace."), (a = t.maintenance) != null && a.length && n.push("Some columns have unfinished ordering maintenance. Resume it in Tasks before editing those tickets."), t.complete === !1 ? n.push("The last scan was incomplete (a limit was reached or a folder could not be read): notes it did not reach are shown as last indexed, and none were treated as deleted.") : t.retained && n.push(`${t.retained} note(s) could not be read and are shown as last indexed.`), t.outdated && n.push("This index was built by an older version; refresh to update it."), n.length ? n.join(" ") : null;
 }
-function Qe(e, t = Date.now()) {
-  var n;
-  if (!e) return "";
-  if (e.state === "scanning") {
-    const a = (n = e.progress) == null ? void 0 : n.notes;
-    return e.progress ? `Scanning… ${a} note(s) read${e.progress.rebuild ? " (rebuild)" : ""}` : "Scan queued…";
+function Ue(t, n = Date.now()) {
+  if (!t) return "";
+  if (t.state === "scanning") {
+    if (!t.progress) return "Scan queued…";
+    const { notes: s, rebuild: c } = t.progress;
+    return `Scanning… ${s} ${s === 1 ? "note" : "notes"} read${c ? " (rebuild)" : ""}`;
   }
-  return e.indexedAt ? `${e.files ?? 0} note(s) indexed ${Ve(e.indexedAt, t)}` : "";
+  if (!t.indexedAt) return "";
+  const a = t.files ?? 0;
+  return `${a} ${a === 1 ? "note" : "notes"} indexed ${We(t.indexedAt, n)}`;
 }
-function Ve(e, t) {
-  const n = Math.max(0, Math.round((t - e) / 1e3));
-  if (n < 5) return "just now";
-  if (n < 60) return `${n} s ago`;
-  const a = Math.round(n / 60);
-  return a < 60 ? `${a} min ago` : new Date(e).toLocaleString();
+function We(t, n) {
+  const a = Math.max(0, Math.round((n - t) / 1e3));
+  if (a < 5) return "just now";
+  if (a < 60) return `${a} s ago`;
+  const s = Math.round(a / 60);
+  return s < 60 ? `${s} min ago` : new Date(t).toLocaleString();
 }
-function Ye(e, t) {
-  const n = t.trim().toLocaleLowerCase();
-  if (!n) return [...e];
-  const a = [];
-  for (const o of e) {
-    const r = `${o.title}
-${o.path}`.toLocaleLowerCase().includes(n) ? o.items : o.items.filter((m) => `${m.text}
-${m.heading ?? ""}`.toLocaleLowerCase().includes(n));
-    r.length && a.push({ ...o, items: r });
+function He(t, n) {
+  const a = n.trim().toLocaleLowerCase();
+  if (!a) return [...t];
+  const s = [];
+  for (const c of t) {
+    const i = `${c.title}
+${c.path}`.toLocaleLowerCase().includes(a) ? c.items : c.items.filter((h) => `${h.text}
+${h.heading ?? ""}`.toLocaleLowerCase().includes(a));
+    i.length && s.push({ ...c, items: i });
   }
-  return a;
+  return s;
 }
-function X(e) {
-  return e.trim() || "(empty)";
+function ee(t) {
+  return t.trim() || "(empty)";
 }
-function z(e, t) {
-  return `${H}/workspaces/${e}/${t}`;
+function F(t, n) {
+  return `${V}/workspaces/${t}/${n}`;
 }
-function Ge(e, t, n) {
-  return e.get(z(t, "source") + xe({ path: n }));
+function Qe(t, n, a) {
+  return t.get(F(n, "source") + ke({ path: a }));
 }
-function Je(e, t, n) {
-  return e.post(z(t, "tickets"), n);
+function Ve(t, n, a) {
+  return t.post(F(n, "tickets"), a);
 }
-function Xe(e, t, n) {
-  return e.post(z(t, "tickets/promote"), { path: n.path, expectedHash: n.hash });
+function Ze(t, n, a) {
+  return t.post(F(n, "tickets/promote"), { path: a.path, expectedHash: a.hash });
 }
-function Ze(e, t, n) {
-  return e.post(z(t, "tickets/move"), n);
+function Ge(t, n, a) {
+  return t.post(F(n, "tickets/move"), a);
 }
-function et(e, t, n, a) {
-  return e.post(z(t.workspaceId, "todos/toggle"), {
-    path: t.path,
-    expectedHash: t.hash,
-    markerStart: n.markerStart,
-    line: n.line,
-    column: n.column,
-    checked: a
+function Je(t, n, a, s) {
+  return t.post(F(n.workspaceId, "todos/toggle"), {
+    path: n.path,
+    expectedHash: n.hash,
+    markerStart: a.markerStart,
+    line: a.line,
+    column: a.column,
+    checked: s
   });
 }
-function tt(e, t, n, a = !1) {
-  return e.post(z(t, "tickets/rebalance"), { status: n, confirm: !0, reconcile: a });
+function Ye(t, n, a, s = !1) {
+  return t.post(F(n, "tickets/rebalance"), { status: a, confirm: !0, reconcile: s });
 }
-function K(e, t) {
-  var n, a;
-  return e != null && e.writeBlocked ? e.writeBlocked.message : e != null && e.migrationPending ? "Finish the old task migration in Settings before editing this workspace." : !e || e.state !== "ready" || e.complete !== !0 || e.retained || e.outdated || e.error ? "Wait for a complete, current index before editing. Refresh if needed." : t != null && t.status && ((n = e.maintenance) != null && n.includes(t.status)) ? "This column has unfinished order maintenance. Resume maintenance before moving cards." : t && (!t.hash || t.retained || (a = t.diagnostics) != null && a.length) ? "Repair or refresh this note before editing it." : null;
+function W(t, n) {
+  var a, s;
+  return t != null && t.writeBlocked ? t.writeBlocked.message : t != null && t.migrationPending ? "Finish the old task migration in Settings before editing this workspace." : !t || t.state !== "ready" || t.complete !== !0 || t.retained || t.outdated || t.error ? "Wait for a complete, current index before editing. Refresh if needed." : n != null && n.status && ((a = t.maintenance) != null && a.includes(n.status)) ? "This column has unfinished order maintenance. Resume maintenance before moving cards." : n && (!n.hash || n.retained || (s = n.diagnostics) != null && s.length) ? "Repair or refresh this note before editing it." : null;
 }
-function nt(e, t, n, a) {
-  if (!t.hash) throw new Error("Refresh this ticket before moving it.");
-  const o = e.filter((s) => s.path !== t.path && s.lane === n);
-  if (a !== void 0 && (!Number.isInteger(a) || a < 0 || a > o.length))
+function Xe(t, n, a, s) {
+  if (!n.hash) throw new Error("Refresh this ticket before moving it.");
+  const c = t.filter((o) => o.path !== n.path && o.lane === a);
+  if (s !== void 0 && (!Number.isInteger(s) || s < 0 || s > c.length))
     throw new Error("The destination card changed. Refresh before moving this ticket.");
-  const d = a ?? o.length, r = o[d - 1], m = o[d], v = (s) => {
-    if (!s.hash || s.retained || s.diagnostics.length || !s.id || !s.order) throw new Error("Refresh or repair the destination column before moving cards.");
-    return { path: s.path, hash: s.hash };
+  const u = s ?? c.length, i = c[u - 1], h = c[u], q = (o) => {
+    if (!o.hash || o.retained || o.diagnostics.length || !o.id || !o.order) throw new Error("Refresh or repair the destination column before moving cards.");
+    return { path: o.path, hash: o.hash };
   };
   return {
-    path: t.path,
-    expectedHash: t.hash,
-    status: n,
-    ...r ? { before: v(r) } : {},
-    ...m ? { after: v(m) } : {}
+    path: n.path,
+    expectedHash: n.hash,
+    status: a,
+    ...i ? { before: q(i) } : {},
+    ...h ? { after: q(h) } : {}
   };
 }
-function it(e, t) {
-  return e.get(z(t, "migration"));
+function et(t, n) {
+  return t.get(F(n, "migration"));
 }
-function rt(e, t, n, a = !1) {
-  return e.post(z(t, "migration"), { planHash: n, confirm: !0, ...a ? { acceptCurrent: !0 } : {} });
+function tt(t, n, a, s = !1) {
+  return t.post(F(n, "migration"), { planHash: a, confirm: !0, ...s ? { acceptCurrent: !0 } : {} });
 }
-function at(e, t) {
-  return e.get(z(t, "legacy-tasks"));
+function nt(t, n) {
+  return t.get(F(n, "legacy-tasks"));
 }
-function ot(e, t, n) {
-  return e.post(z(t, "tickets/demote"), { path: n.path, expectedHash: n.hash });
+function at(t, n, a) {
+  return t.post(F(n, "tickets/demote"), { path: a.path, expectedHash: a.hash });
 }
-const ee = "/md-notebook";
-function Te(e) {
-  return (e.split("/").pop() ?? e).replace(/\.md$/i, "");
+const J = "/md-notebook";
+function it(t) {
+  return (t.split("/").pop() ?? t).replace(/\.md$/i, "");
 }
-const M = {
-  column: { display: "flex", flexDirection: "column", gap: 8, minHeight: 0, minWidth: 0 },
-  row: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" },
-  input: { padding: "4px 6px", border: "1px solid rgba(128,128,128,.4)", borderRadius: 4, background: "transparent", color: "inherit" },
-  box: { padding: 8, borderRadius: 4, border: "1px solid rgba(128,128,128,.35)", display: "flex", flexDirection: "column", gap: 6 },
-  notice: { padding: 8, borderRadius: 4, border: "1px solid rgba(220,120,0,.6)", display: "flex", flexDirection: "column", gap: 6 },
-  badge: { fontSize: 11, padding: "0 4px", borderRadius: 3, border: "1px solid rgba(220,120,0,.7)" },
-  mono: { fontFamily: "ui-monospace, monospace", fontSize: 12, wordBreak: "break-all" }
+const rt = {
+  gem: /* @__PURE__ */ e("path", { d: "M8 4h8l4.5 5L12 21 3.5 9 8 4Zm-4.5 5h17M8 4l1 5 3 12 3-12 1-5" }),
+  board: /* @__PURE__ */ r(j, { children: [
+    /* @__PURE__ */ e("rect", { x: "3", y: "4", width: "18", height: "16", rx: "2" }),
+    /* @__PURE__ */ e("path", { d: "M9 4v16m6-16v16M6 8h.1M12 8h.1m6 0h.1" })
+  ] }),
+  checklist: /* @__PURE__ */ e("path", { d: "m3 6 2 2 3-4m3 3h10M3 13l2 2 3-4m3 3h10M3 20h5m3 0h10" }),
+  settings: /* @__PURE__ */ r(j, { children: [
+    /* @__PURE__ */ e("path", { d: "M4 6h7m4 0h5M4 12h3m4 0h9M4 18h11m4 0h1" }),
+    /* @__PURE__ */ e("circle", { cx: "13", cy: "6", r: "2" }),
+    /* @__PURE__ */ e("circle", { cx: "9", cy: "12", r: "2" }),
+    /* @__PURE__ */ e("circle", { cx: "17", cy: "18", r: "2" })
+  ] }),
+  plus: /* @__PURE__ */ e("path", { d: "M12 5v14M5 12h14" }),
+  note: /* @__PURE__ */ e("path", { d: "M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Zm0 0v6h6M8 13h8m-8 4h6" }),
+  external: /* @__PURE__ */ e("path", { d: "M13 5h6v6m0-6-9 9m8-1v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" }),
+  refresh: /* @__PURE__ */ e("path", { d: "M20 11a8 8 0 1 0-2.2 6.6M20 4v7h-7" }),
+  folder: /* @__PURE__ */ e("path", { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" }),
+  more: /* @__PURE__ */ r(j, { children: [
+    /* @__PURE__ */ e("circle", { cx: "5", cy: "12", r: "1" }),
+    /* @__PURE__ */ e("circle", { cx: "12", cy: "12", r: "1" }),
+    /* @__PURE__ */ e("circle", { cx: "19", cy: "12", r: "1" })
+  ] }),
+  copy: /* @__PURE__ */ r(j, { children: [
+    /* @__PURE__ */ e("rect", { x: "8", y: "8", width: "12", height: "12", rx: "2" }),
+    /* @__PURE__ */ e("path", { d: "M16 4H6a2 2 0 0 0-2 2v10" })
+  ] }),
+  search: /* @__PURE__ */ r(j, { children: [
+    /* @__PURE__ */ e("circle", { cx: "10.5", cy: "10.5", r: "5.5" }),
+    /* @__PURE__ */ e("path", { d: "m15 15 5 5" })
+  ] }),
+  up: /* @__PURE__ */ e("path", { d: "m6 14 6-6 6 6" }),
+  down: /* @__PURE__ */ e("path", { d: "m6 10 6 6 6-6" }),
+  check: /* @__PURE__ */ e("path", { d: "m5 12 4 4L19 6" }),
+  minus: /* @__PURE__ */ e("path", { d: "M5 12h14" })
 };
-function E({ failure: e }) {
-  return e ? /* @__PURE__ */ i("div", { role: "alert", className: "text-sm text-danger", "data-code": e.code, children: e.message }) : null;
+function T({ name: t }) {
+  return /* @__PURE__ */ e(
+    "svg",
+    {
+      className: "qz-icon",
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: "1.7",
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      "aria-hidden": "true",
+      children: rt[t]
+    }
+  );
 }
-function be() {
+function L({ failure: t }) {
+  return t ? /* @__PURE__ */ e("div", { role: "alert", className: "qz-notice qz-error", "data-code": t.code, children: t.message }) : null;
+}
+function fe() {
   try {
     return window.localStorage;
   } catch {
     return;
   }
 }
-const st = 1500, lt = 3e4, ye = "quartizo:workspace", p = {
-  ...M,
-  board: { display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(170px, 1fr)", gap: 8, overflowX: "auto", minHeight: 0, flex: 1 },
-  lane: { display: "flex", flexDirection: "column", gap: 6, minHeight: 120, padding: 6, borderRadius: 4, border: "1px solid rgba(128,128,128,.25)" },
-  cards: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 },
-  card: { display: "flex", alignItems: "flex-start", gap: 4, padding: 6, borderRadius: 4, border: "1px solid rgba(128,128,128,.35)" },
-  open: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2, padding: 0, background: "transparent", color: "inherit", border: "none", textAlign: "left", cursor: "pointer" },
-  todoRow: { display: "flex", gap: 6, alignItems: "baseline" },
-  fileName: { fontFamily: "ui-monospace, monospace", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" },
-  copy: { flex: "none", fontSize: 11, padding: "1px 6px", borderRadius: 3, border: "1px solid rgba(128,128,128,.4)", background: "transparent", color: "inherit", cursor: "pointer" }
-};
-function ct() {
-  const [e, t] = f(() => typeof document > "u" || document.visibilityState !== "hidden");
-  return B(() => {
-    const n = () => t(document.visibilityState !== "hidden");
-    return document.addEventListener("visibilitychange", n), () => document.removeEventListener("visibilitychange", n);
-  }, []), e;
+const st = 1500, ot = 3e4, be = "quartizo:workspace";
+function lt() {
+  const [t, n] = m(() => typeof document > "u" || document.visibilityState !== "hidden");
+  return O(() => {
+    const a = () => n(document.visibilityState !== "hidden");
+    return document.addEventListener("visibilitychange", a), () => document.removeEventListener("visibilitychange", a);
+  }, []), t;
 }
-function Se(e, t = !0) {
-  const [n, a] = f(null), [o, d] = f(null);
-  return B(() => {
-    if (!t) return;
-    let r = !1;
-    return Ne(e).then((m) => {
-      r || (a(m.workspaces.filter((v) => v.workspace.companion)), d(m.available ? null : { message: m.error ?? "The Markdown index is unavailable." }));
-    }).catch((m) => !r && d(j(m))), () => {
-      r = !0;
+function Ce(t, n = !0) {
+  const [a, s] = m(null), [c, u] = m(null);
+  return O(() => {
+    if (!n) return;
+    let i = !1;
+    return we(t).then((h) => {
+      i || (s(h.workspaces.filter((q) => q.workspace.companion)), u(h.available ? null : { message: h.error ?? "The Markdown index is unavailable." }));
+    }).catch((h) => !i && u(Q(h))), () => {
+      i = !0;
     };
-  }, [e, t]), { companions: n, failure: o };
+  }, [t, n]), { companions: a, failure: c };
 }
-function Re(e, t, n, a, o) {
-  const d = ct(), [r, m] = f(null), [v, s] = f(null), [g, k] = f(0), [S, b] = f(!1), N = _(null), R = _(n), A = _(a), u = _(o);
-  R.current = n, A.current = a, u.current = o, B(() => {
-    N.current = null, m(null), s(null);
-  }, [t]), B(() => {
-    if (!e || !d) return;
-    let T = !1, h, C = !0;
-    const W = async () => {
+function Te(t, n, a, s, c) {
+  const u = lt(), [i, h] = m(null), [q, o] = m(null), [z, f] = m(0), [w, S] = m(!1), g = D(null), C = D(a), x = D(s), p = D(c);
+  C.current = a, x.current = s, p.current = c, O(() => {
+    g.current = null, h(null), o(null);
+  }, [n]), O(() => {
+    if (!t || !u) return;
+    let $ = !1, M, A = !0;
+    const _ = async () => {
       try {
-        (C || !N.current || !u.current(N.current)) && await V(A.current(!1));
-        const w = await V(R.current());
-        if (T) return;
-        N.current = w, m(w), s(null), b(!1);
-      } catch (w) {
-        T || (s(j(w)), b(!1));
+        (A || !g.current || !p.current(g.current)) && await Z(x.current(!1));
+        const d = await Z(C.current());
+        if ($) return;
+        g.current = d, h(d), o(null), S(!1);
+      } catch (d) {
+        $ || (o(Q(d)), S(!1));
       }
-      C = !1, T || (h = setTimeout(W, N.current && u.current(N.current) ? st : lt));
+      A = !1, $ || (M = setTimeout(_, g.current && p.current(g.current) ? st : ot));
     };
-    return W(), () => {
-      T = !0, clearTimeout(h);
+    return _(), () => {
+      $ = !0, clearTimeout(M);
     };
-  }, [e, d, t, g]);
-  const y = Z(async () => {
-    b(!0);
+  }, [t, u, n, z]);
+  const b = te(async () => {
+    S(!0);
     try {
-      await V(A.current(!0)), s(null), k((T) => T + 1);
-    } catch (T) {
-      s(j(T));
+      await Z(x.current(!0)), o(null), f(($) => $ + 1);
+    } catch ($) {
+      o(Q($));
     } finally {
-      b(!1);
+      S(!1);
     }
-  }, []), $ = Z(() => {
-    N.current = null, b(!0), k((T) => T + 1);
+  }, []), y = te(() => {
+    g.current = null, S(!0), f(($) => $ + 1);
   }, []);
-  return { data: r, failure: v, busy: S, refresh: y, reload: $ };
+  return { data: i, failure: q, busy: w, refresh: b, reload: y };
 }
-function $e(e) {
-  const t = Date.now(), n = e.statuses.map((o) => Qe(o, t)).filter(Boolean), a = e.statuses.map((o) => Ue(o)).filter((o) => !!o);
-  return /* @__PURE__ */ c(Q, { children: [
-    /* @__PURE__ */ c("div", { style: p.row, children: [
-      /* @__PURE__ */ i("span", { className: "text-sm text-muted", role: "status", "aria-live": "polite", children: n.join(" · ") }),
-      /* @__PURE__ */ i(I, { onClick: e.onRefresh, disabled: e.busy, children: "Refresh" })
-    ] }),
-    a.map((o) => /* @__PURE__ */ i("div", { role: "note", className: "text-sm", style: p.notice, children: o }, o))
-  ] });
+function Se({ statuses: t }) {
+  const n = Date.now(), a = t.map((s) => Ue(s, n)).filter(Boolean);
+  return /* @__PURE__ */ e("span", { className: "qz-index", role: "status", children: a.length > 0 && /* @__PURE__ */ r(j, { children: [
+    /* @__PURE__ */ e("span", { className: "qz-dot", "data-attention": t.some((s) => s.state === "scanning" || !!Ne(s)) }),
+    a.join(" · ")
+  ] }) });
 }
-function Ae({ path: e }) {
-  const t = Te(e), [n, a] = f("idle");
-  B(() => {
-    if (n === "idle") return;
-    const d = setTimeout(() => a("idle"), 1500);
-    return () => clearTimeout(d);
-  }, [n]);
-  const o = async () => {
+function $e({ statuses: t }) {
+  const n = new Set(t.map(Ne).filter(Boolean));
+  return /* @__PURE__ */ e(j, { children: [...n].map((a) => /* @__PURE__ */ e("div", { role: "note", className: "qz-notice", children: a }, a)) });
+}
+function Me({ path: t, compact: n = !1 }) {
+  const a = it(t), [s, c] = m("idle");
+  O(() => {
+    if (s === "idle") return;
+    const i = setTimeout(() => c("idle"), 1500);
+    return () => clearTimeout(i);
+  }, [s]);
+  const u = async () => {
     try {
-      await navigator.clipboard.writeText(t), a("copied");
+      await navigator.clipboard.writeText(a), c("copied");
     } catch {
-      a("failed");
+      c("failed");
     }
   };
-  return /* @__PURE__ */ i("button", { type: "button", onClick: () => void o(), "aria-label": `Copy note name “${t}”`, title: t, style: p.copy, children: n === "copied" ? "Copied" : n === "failed" ? "Failed" : "Copy name" });
+  return /* @__PURE__ */ r(j, { children: [
+    /* @__PURE__ */ r(
+      "button",
+      {
+        type: "button",
+        className: `qz-button${n ? " qz-icon-button" : ""}`,
+        "data-variant": "quiet",
+        onClick: () => void u(),
+        "aria-label": `Copy note name “${a}”`,
+        title: `Copy note name “${a}”`,
+        children: [
+          /* @__PURE__ */ e(T, { name: s === "copied" ? "check" : "copy" }),
+          (!n || s !== "idle") && (s === "copied" ? "Copied" : s === "failed" ? "Copy failed" : "Copy name")
+        ]
+      }
+    ),
+    /* @__PURE__ */ e("span", { className: "qz-visually-hidden", role: "status", children: s === "copied" ? "Note name copied." : s === "failed" ? "Could not copy note name." : "" })
+  ] });
 }
-function Ie({ path: e, title: t }) {
-  const n = Te(e);
-  return n === t ? null : /* @__PURE__ */ i("span", { className: "text-sm text-muted", title: n, style: p.fileName, children: n });
+function Re({ onSettings: t }) {
+  return /* @__PURE__ */ r("div", { className: "qz-empty", children: [
+    /* @__PURE__ */ e("span", { className: "qz-empty-icon", children: /* @__PURE__ */ e(T, { name: "folder" }) }),
+    /* @__PURE__ */ e("h2", { children: "Connect a notes folder" }),
+    /* @__PURE__ */ e("p", { children: "Share a folder from Kiro Notes to see its tickets and TODOs here." }),
+    /* @__PURE__ */ e("button", { type: "button", className: "qz-button", "data-variant": "primary", onClick: t, children: "Open Settings" })
+  ] });
 }
-function De() {
-  return /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: "No folder is shared with Kiro Notes yet. Add one in Settings." });
-}
-function dt(e) {
-  var m, v;
-  const t = e.active ?? !0, { companions: n, failure: a } = Se(e.api, t), [o, d] = f(() => {
-    var g;
-    const s = Number((g = be()) == null ? void 0 : g.getItem(ye));
-    return Number.isInteger(s) && s > 0 ? s : null;
-  }), r = ((m = n == null ? void 0 : n.find((s) => s.workspace.id === o)) == null ? void 0 : m.workspace) ?? ((v = n == null ? void 0 : n[0]) == null ? void 0 : v.workspace) ?? null;
-  return B(() => {
-    var s;
+function ct(t) {
+  var h, q;
+  const n = t.active ?? !0, { companions: a, failure: s } = Ce(t.api, n), [c, u] = m(() => {
+    var z;
+    const o = Number((z = fe()) == null ? void 0 : z.getItem(be));
+    return Number.isInteger(o) && o > 0 ? o : null;
+  }), i = ((h = a == null ? void 0 : a.find((o) => o.workspace.id === c)) == null ? void 0 : h.workspace) ?? ((q = a == null ? void 0 : a[0]) == null ? void 0 : q.workspace) ?? null;
+  return O(() => {
+    var o;
     try {
-      r && ((s = be()) == null || s.setItem(ye, String(r.id)));
+      i && ((o = fe()) == null || o.setItem(be, String(i.id)));
     } catch {
     }
-  }, [r]), a && !n ? /* @__PURE__ */ i(E, { failure: a }) : n ? r ? /* @__PURE__ */ c("div", { style: { ...p.column, flex: 1 }, children: [
-    /* @__PURE__ */ i(E, { failure: a }),
-    n.length > 1 && /* @__PURE__ */ c("div", { style: p.row, children: [
-      /* @__PURE__ */ i("label", { className: "text-sm", htmlFor: "qz-board-ws", children: "Workspace" }),
-      /* @__PURE__ */ i("select", { id: "qz-board-ws", value: r.id, onChange: (s) => d(Number(s.target.value)), style: p.input, children: n.map((s) => /* @__PURE__ */ i("option", { value: s.workspace.id, children: s.workspace.name }, s.workspace.id)) })
+  }, [i]), s && !a ? /* @__PURE__ */ e(L, { failure: s }) : a ? i ? /* @__PURE__ */ r("div", { className: "qz-stack", children: [
+    /* @__PURE__ */ e(L, { failure: s }),
+    /* @__PURE__ */ r("div", { className: "qz-view-heading", children: [
+      /* @__PURE__ */ r("div", { children: [
+        /* @__PURE__ */ e("h2", { className: "qz-section-title", children: "Task board" }),
+        /* @__PURE__ */ e("p", { className: "qz-section-description", children: "Plan and track tickets stored in Kiro Notes." })
+      ] }),
+      /* @__PURE__ */ r("label", { className: "qz-inline-field", children: [
+        /* @__PURE__ */ e(T, { name: "folder" }),
+        /* @__PURE__ */ e("span", { children: "Workspace" }),
+        /* @__PURE__ */ e("select", { className: "qz-input", value: i.id, onChange: (o) => u(Number(o.target.value)), children: a.map((o) => /* @__PURE__ */ e("option", { value: o.workspace.id, children: o.workspace.name }, o.workspace.id)) })
+      ] })
     ] }),
-    n.map(({ workspace: s }) => /* @__PURE__ */ i(
-      "div",
-      {
-        hidden: s.id !== r.id,
-        style: { display: s.id === r.id ? "flex" : "none", flex: 1, minHeight: 0 },
-        children: /* @__PURE__ */ i(ut, { api: e.api, workspace: s, active: t && s.id === r.id })
-      },
-      s.uid
-    ))
-  ] }) : /* @__PURE__ */ i(De, {}) : /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: "Loading…" });
+    a.map(({ workspace: o }) => /* @__PURE__ */ e("div", { hidden: o.id !== i.id, children: /* @__PURE__ */ e(dt, { api: t.api, workspace: o, active: n && o.id === i.id }) }, o.uid))
+  ] }) : /* @__PURE__ */ e(Re, { onSettings: t.onSettings }) : /* @__PURE__ */ e("p", { className: "qz-empty", role: "status", children: "Loading workspaces…" });
 }
-function ie(e) {
-  const [t, n] = f(!1), [a, o] = f(null), d = _(!0), r = _(!1);
-  return B(() => (d.current = !0, () => {
-    d.current = !1;
-  }), []), { pending: t, failure: a, run: async (v) => {
-    if (r.current) return !1;
-    r.current = !0, n(!0), o(null);
+function ie(t) {
+  const [n, a] = m(!1), [s, c] = m(null), u = D(!0), i = D(!1);
+  return O(() => (u.current = !0, () => {
+    u.current = !1;
+  }), []), { pending: n, failure: s, run: async (q) => {
+    if (i.current) return !1;
+    i.current = !0, a(!0), c(null);
     try {
-      return await V(v()), d.current && e(), !0;
-    } catch (s) {
-      if (d.current) {
-        const g = j(s);
-        g.status === 409 && (g.message += " Refresh to review the current file, then retry your change."), (g.message.includes("timed out") || !g.status) && (g.message += " The result may be unknown; refresh and check the file before retrying."), o(g);
+      return await Z(q()), u.current && t(), !0;
+    } catch (o) {
+      if (u.current) {
+        const z = Q(o);
+        z.status === 409 && (z.message += " Refresh to review the current file, then retry your change."), (z.message.includes("timed out") || !z.status) && (z.message += " The result may be unknown; refresh and check the file before retrying."), c(z);
       }
       return !1;
     } finally {
-      r.current = !1, d.current && n(!1);
+      i.current = !1, u.current && a(!1);
     }
   } };
 }
-function ut(e) {
-  var de, ue, he, me;
-  const { api: t, workspace: n, active: a } = e, o = n.id, d = ve(), { data: r, failure: m, busy: v, refresh: s, reload: g } = Re(
-    a,
-    String(o),
-    () => Ke(t, o),
-    (l) => ne(t, { workspaceId: o, manual: l }),
+function dt(t) {
+  var ue, pe, he, me;
+  const { api: n, workspace: a, active: s } = t, c = a.id, u = ve(), { data: i, failure: h, busy: q, refresh: o, reload: z } = Te(
+    s,
+    String(c),
+    () => Fe(n, c),
+    (l) => ae(n, { workspaceId: c, manual: l }),
     (l) => l.index.state === "scanning"
-  ), k = ie(g), S = we(() => He((r == null ? void 0 : r.tickets) ?? []), [r]), b = Ce.filter((l) => l !== "repair" || S.repair.length > 0), N = _(null), R = _(null), [A, u] = f(null), [y, $] = f(!1), T = !a || !!m || v || k.pending || y || !!K(r == null ? void 0 : r.index), [h, C] = f("backlog"), [W, w] = f(!1), [q, ae] = f(!1), [Me, oe] = f(!1), Oe = Z((l) => {
-    C(l), oe(!0);
-  }, []), [J, se] = f(null);
-  B(() => {
-    var L;
-    if (!J || T || !r) return;
-    const l = Array.from(((L = N.current) == null ? void 0 : L.querySelectorAll("[data-note-path]")) ?? []).find((x) => x.dataset.notePath === J);
-    l == null || l.focus(), se(null);
-  }, [J, T, r]);
-  const le = (l, L, x) => {
-    var P;
-    T || K(r == null ? void 0 : r.index, l) || !r || (P = r.index.maintenance) != null && P.includes(L) || k.run(() => Ze(t, o, nt(r.tickets, l, L, x))).then((D) => {
-      D && se(l.path);
+  ), f = ie(z), w = xe(() => Ke((i == null ? void 0 : i.tickets) ?? []), [i]), S = ye.filter((l) => l !== "repair" || w.repair.length > 0), g = D(null), C = D(null), [x, p] = m(null), b = D(null);
+  O(() => {
+    var l;
+    x && ((l = b.current) == null || l.focus());
+  }, [x]);
+  const [y, $] = m(!1), M = !s || !!h || q || f.pending || y || !!W(i == null ? void 0 : i.index), [A, _] = m("backlog"), [d, k] = m(!1), [K, N] = m(!1), [U, se] = m(!1), oe = i ? [i.index] : [], Oe = te((l) => {
+    _(l), se(!0);
+  }, []), [X, le] = m(null);
+  O(() => {
+    var B;
+    if (!X || M || !i) return;
+    const l = Array.from(((B = g.current) == null ? void 0 : B.querySelectorAll("[data-note-path]")) ?? []).find((v) => v.dataset.notePath === X);
+    l == null || l.focus(), le(null);
+  }, [X, M, i]);
+  const ce = (l, B, v) => {
+    var E;
+    M || W(i == null ? void 0 : i.index, l) || !i || (E = i.index.maintenance) != null && E.includes(B) || f.run(() => Ge(n, c, Xe(i.tickets, l, B, v))).then((R) => {
+      R && le(l.path);
     });
-  }, ce = (l, L, x) => {
+  }, de = (l, B, v) => {
     l.preventDefault(), l.stopPropagation();
-    const P = R.current;
-    if (R.current = null, !P || (x == null ? void 0 : x.path) === P.path) return;
-    const D = S[L].filter((F) => F.path !== P.path), O = x ? D.findIndex((F) => F.path === x.path) : void 0;
-    O !== void 0 && O < 0 || le(P, L, O);
-  }, Be = (l) => {
-    var fe, pe;
-    const L = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"], x = l.target;
-    if (!x.hasAttribute("data-lane")) return;
-    const P = Number(x.dataset.lane), D = Number(x.dataset.index);
-    if (!L.includes(l.key) || Number.isNaN(P) || Number.isNaN(D)) return;
-    let O = P, F = D;
-    if (l.key === "ArrowUp" && (F = Math.max(0, D - 1)), l.key === "ArrowDown" && (F = D + 1), l.key === "Home" && (F = 0), l.key === "End" && (F = Number.MAX_SAFE_INTEGER), l.key === "ArrowLeft" || l.key === "ArrowRight") {
-      const Ee = l.key === "ArrowLeft" ? -1 : 1;
+    const E = C.current;
+    if (C.current = null, !E || (v == null ? void 0 : v.path) === E.path) return;
+    const R = w[B].filter((P) => P.path !== E.path), I = v ? R.findIndex((P) => P.path === v.path) : void 0;
+    I !== void 0 && I < 0 || ce(E, B, I);
+  }, Ae = (l) => {
+    var ge, ze;
+    const B = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"], v = l.target;
+    if (!v.hasAttribute("data-lane")) return;
+    const E = Number(v.dataset.lane), R = Number(v.dataset.index);
+    if (!B.includes(l.key) || Number.isNaN(E) || Number.isNaN(R)) return;
+    let I = E, P = R;
+    if (l.key === "ArrowUp" && (P = Math.max(0, R - 1)), l.key === "ArrowDown" && (P = R + 1), l.key === "Home" && (P = 0), l.key === "End" && (P = Number.MAX_SAFE_INTEGER), l.key === "ArrowLeft" || l.key === "ArrowRight") {
+      const Ie = l.key === "ArrowLeft" ? -1 : 1;
       do
-        O += Ee;
-      while (O >= 0 && O < b.length && S[b[O]].length === 0);
-      if (O < 0 || O >= b.length) return;
+        I += Ie;
+      while (I >= 0 && I < S.length && w[S[I]].length === 0);
+      if (I < 0 || I >= S.length) return;
     }
-    F = Math.min(F, S[b[O]].length - 1), l.preventDefault(), (pe = (fe = N.current) == null ? void 0 : fe.querySelector(`[data-lane="${O}"][data-index="${F}"]`)) == null || pe.focus();
+    P = Math.min(P, w[S[I]].length - 1), l.preventDefault(), (ze = (ge = g.current) == null ? void 0 : ge.querySelector(`[data-lane="${I}"][data-index="${P}"]`)) == null || ze.focus();
   };
-  return /* @__PURE__ */ c("div", { style: { ...p.column, flex: 1 }, children: [
-    /* @__PURE__ */ c("div", { style: p.row, children: [
-      /* @__PURE__ */ i(I, { onClick: () => u(A === "create" ? null : "create"), disabled: k.pending || y, children: "New ticket" }),
-      /* @__PURE__ */ i(I, { onClick: () => u(A === "promote" ? null : "promote"), disabled: k.pending || y, children: "Use existing note" }),
-      /* @__PURE__ */ i(I, { onClick: () => oe((l) => !l), disabled: T, children: "Rebalance…" }),
-      /* @__PURE__ */ i(I, { onClick: () => d(ee), children: "Open Kiro Notes" })
-    ] }),
-    ["create", "promote"].map((l) => /* @__PURE__ */ i("div", { hidden: A !== l, style: { display: A === l ? "block" : "none" }, children: /* @__PURE__ */ i(ht, { mode: l, api: t, workspace: n, disabled: !a || !!m || v || k.pending || !!K(r == null ? void 0 : r.index), maintenance: (r == null ? void 0 : r.index.maintenance) ?? [], onBusy: $, onChanged: g, onClose: () => u(null), onMaintenanceNeeded: Oe }) }, l)),
-    /* @__PURE__ */ i($e, { statuses: r ? [r.index] : [], busy: v || k.pending, onRefresh: () => void s() }),
-    /* @__PURE__ */ i(E, { failure: m }),
-    /* @__PURE__ */ i(E, { failure: k.failure }),
-    K(r == null ? void 0 : r.index) && r && /* @__PURE__ */ i("div", { role: "note", className: "text-sm", children: K(r.index) }),
-    Me || ((de = k.failure) == null ? void 0 : de.code) === "rank_exhausted" || ((ue = k.failure) == null ? void 0 : ue.code) === "maintenance_pending" || (he = r == null ? void 0 : r.index.maintenance) != null && he.length ? /* @__PURE__ */ c("div", { style: p.notice, children: [
-      /* @__PURE__ */ i("span", { className: "text-sm", children: "Rebalance a column to restore space between card positions. Progress is saved if interrupted." }),
-      /* @__PURE__ */ c("div", { style: p.row, children: [
-        /* @__PURE__ */ i("select", { "aria-label": "Column to rebalance", value: h, onChange: (l) => C(l.target.value), style: p.input, children: G.map((l) => /* @__PURE__ */ i("option", { value: l, children: Y[l] }, l)) }),
-        /* @__PURE__ */ i(I, { onClick: () => w(!0), disabled: !a || k.pending || !!(r != null && r.index.writeBlocked), children: "Review column…" })
+  return /* @__PURE__ */ r("div", { className: "qz-stack", children: [
+    /* @__PURE__ */ r("div", { className: "qz-toolbar", children: [
+      /* @__PURE__ */ r("div", { className: "qz-actions", children: [
+        /* @__PURE__ */ r(
+          "button",
+          {
+            type: "button",
+            className: "qz-button",
+            "data-variant": "primary",
+            "aria-expanded": x === "create",
+            onClick: () => p(x === "create" ? null : "create"),
+            disabled: f.pending || y,
+            children: [
+              /* @__PURE__ */ e(T, { name: "plus" }),
+              "New ticket"
+            ]
+          }
+        ),
+        /* @__PURE__ */ r(
+          "button",
+          {
+            type: "button",
+            className: "qz-button",
+            "aria-expanded": x === "promote",
+            onClick: () => p(x === "promote" ? null : "promote"),
+            disabled: f.pending || y,
+            children: [
+              /* @__PURE__ */ e(T, { name: "note" }),
+              "Use existing note"
+            ]
+          }
+        )
       ] }),
-      W && /* @__PURE__ */ c("div", { role: "alertdialog", "aria-label": "Rebalance column", children: [
-        /* @__PURE__ */ i("p", { className: "text-sm", children: "Update ordering in each note of this column? Other editors may see progress before all files finish." }),
-        !!((me = r == null ? void 0 : r.index.maintenance) != null && me.includes(h)) && /* @__PURE__ */ c("label", { className: "text-sm", children: [
-          /* @__PURE__ */ i("input", { type: "checkbox", checked: q, onChange: (l) => ae(l.target.checked), disabled: k.pending }),
+      /* @__PURE__ */ r("div", { className: "qz-actions", children: [
+        /* @__PURE__ */ e(
+          "button",
+          {
+            type: "button",
+            className: "qz-button",
+            "data-variant": "quiet",
+            "aria-expanded": U,
+            onClick: () => se((l) => !l),
+            disabled: M,
+            children: "Rebalance…"
+          }
+        ),
+        /* @__PURE__ */ r("button", { type: "button", className: "qz-button", "data-variant": "quiet", onClick: () => u(J), children: [
+          /* @__PURE__ */ e(T, { name: "external" }),
+          "Open Kiro Notes"
+        ] })
+      ] })
+    ] }),
+    ["create", "promote"].map((l) => /* @__PURE__ */ e("div", { hidden: x !== l, children: /* @__PURE__ */ e(ut, { mode: l, api: n, workspace: a, firstField: x === l ? b : void 0, disabled: !s || !!h || q || f.pending || !!W(i == null ? void 0 : i.index), maintenance: (i == null ? void 0 : i.index.maintenance) ?? [], onBusy: $, onChanged: z, onClose: () => p(null), onMaintenanceNeeded: Oe }) }, l)),
+    /* @__PURE__ */ r("div", { className: "qz-toolbar qz-board-meta", children: [
+      i && /* @__PURE__ */ r("span", { className: "qz-result-count", children: [
+        i.tickets.length,
+        " ",
+        i.tickets.length === 1 ? "ticket" : "tickets"
+      ] }),
+      /* @__PURE__ */ r("div", { className: "qz-actions", children: [
+        /* @__PURE__ */ e(Se, { statuses: oe }),
+        /* @__PURE__ */ r("button", { type: "button", className: "qz-button", "data-variant": "quiet", onClick: () => void o(), disabled: q || f.pending, children: [
+          /* @__PURE__ */ e(T, { name: "refresh" }),
+          "Refresh"
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ e($e, { statuses: oe }),
+    /* @__PURE__ */ e(L, { failure: h }),
+    /* @__PURE__ */ e(L, { failure: f.failure }),
+    W(i == null ? void 0 : i.index) && i && /* @__PURE__ */ e("div", { role: "note", className: "qz-notice", children: W(i.index) }),
+    U || ((ue = f.failure) == null ? void 0 : ue.code) === "rank_exhausted" || ((pe = f.failure) == null ? void 0 : pe.code) === "maintenance_pending" || (he = i == null ? void 0 : i.index.maintenance) != null && he.length ? /* @__PURE__ */ r("div", { className: "qz-notice qz-stack", children: [
+      /* @__PURE__ */ e("p", { children: "Rebalance a column to restore space between card positions. Progress is saved if interrupted." }),
+      /* @__PURE__ */ r("div", { className: "qz-actions", children: [
+        /* @__PURE__ */ e("select", { className: "qz-input", "aria-label": "Column to rebalance", value: A, onChange: (l) => _(l.target.value), children: Y.map((l) => /* @__PURE__ */ e("option", { value: l, children: G[l] }, l)) }),
+        /* @__PURE__ */ e("button", { type: "button", className: "qz-button", onClick: () => k(!0), disabled: !s || f.pending || !!(i != null && i.index.writeBlocked), children: "Review column…" })
+      ] }),
+      d && /* @__PURE__ */ r("div", { className: "qz-stack", role: "alertdialog", "aria-label": "Rebalance column", children: [
+        /* @__PURE__ */ e("p", { children: "Update ordering in each note of this column? Other editors may see progress before all files finish." }),
+        !!((me = i == null ? void 0 : i.index.maintenance) != null && me.includes(A)) && /* @__PURE__ */ r("label", { className: "qz-check-label", children: [
+          /* @__PURE__ */ e("input", { type: "checkbox", checked: K, onChange: (l) => N(l.target.checked), disabled: f.pending }),
           "Keep the latest note contents and resume ordering after an external edit"
         ] }),
-        /* @__PURE__ */ i(I, { disabled: !a || k.pending || !!(r != null && r.index.writeBlocked), onClick: () => void k.run(() => tt(t, o, h, q)).then((l) => {
-          l && (w(!1), ae(!1));
-        }), children: "Rebalance column" }),
-        /* @__PURE__ */ i(I, { disabled: k.pending, onClick: () => w(!1), children: "Cancel" })
+        /* @__PURE__ */ r("div", { className: "qz-actions", children: [
+          /* @__PURE__ */ e("button", { type: "button", className: "qz-button", disabled: !s || f.pending || !!(i != null && i.index.writeBlocked), onClick: () => void f.run(() => Ye(n, c, A, K)).then((l) => {
+            l && (k(!1), N(!1));
+          }), children: "Rebalance column" }),
+          /* @__PURE__ */ e("button", { type: "button", className: "qz-button", "data-variant": "quiet", disabled: f.pending, onClick: () => k(!1), children: "Cancel" })
+        ] })
       ] })
     ] }) : null,
-    !r && !m && /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: "Loading the board…" }),
-    r && r.tickets.length === 0 && r.index.state !== "scanning" && /* @__PURE__ */ c("p", { className: "text-sm text-muted", children: [
+    !i && !h && /* @__PURE__ */ e("p", { className: "qz-empty", role: "status", children: "Loading the board…" }),
+    i && i.tickets.length === 0 && i.index.state !== "scanning" && /* @__PURE__ */ r("p", { className: "qz-notice", "data-variant": "neutral", children: [
       "No tickets in “",
-      n.name,
+      a.name,
       "” yet. Create a ticket or use an existing note."
     ] }),
-    r && /* @__PURE__ */ i("div", { ref: N, style: p.board, onKeyDown: Be, "aria-label": `Board of ${n.name}`, role: "group", children: b.map((l, L) => /* @__PURE__ */ c(
+    i && /* @__PURE__ */ e("div", { ref: g, className: "qz-board", tabIndex: 0, onKeyDown: Ae, "aria-label": `Board of ${a.name}`, role: "group", children: S.map((l, B) => /* @__PURE__ */ r(
       "section",
       {
-        "aria-label": ge[l],
-        style: p.lane,
-        onDragOver: (x) => {
-          !T && l !== "repair" && x.preventDefault();
+        "aria-label": qe[l],
+        className: "qz-lane",
+        "data-lane-status": l,
+        onDragOver: (v) => {
+          !M && l !== "repair" && v.preventDefault();
         },
-        onDrop: (x) => {
-          l !== "repair" && ce(x, l);
+        onDrop: (v) => {
+          l !== "repair" && de(v, l);
         },
         children: [
-          /* @__PURE__ */ c("strong", { className: "text-sm", children: [
-            ge[l],
-            " (",
-            S[l].length,
-            ")"
+          /* @__PURE__ */ r("h3", { className: "qz-lane-heading", children: [
+            /* @__PURE__ */ e("span", { className: "qz-dot" }),
+            qe[l],
+            /* @__PURE__ */ e("span", { className: "qz-count", children: w[l].length })
           ] }),
-          /* @__PURE__ */ i("ul", { style: p.cards, children: S[l].map((x, P) => /* @__PURE__ */ i(
+          w[l].length === 0 && /* @__PURE__ */ e("p", { className: "qz-lane-empty", children: "No tickets" }),
+          /* @__PURE__ */ e("ul", { className: "qz-cards", children: w[l].map((v, E) => /* @__PURE__ */ e(
             "li",
             {
-              draggable: !T && !K(r.index, x),
-              onDragStart: (D) => {
-                R.current = x, D.dataTransfer.setData("text/plain", x.path), D.dataTransfer.effectAllowed = "move";
+              draggable: !M && !W(i.index, v),
+              onDragStart: (R) => {
+                C.current = v, R.dataTransfer.setData("text/plain", v.path), R.dataTransfer.effectAllowed = "move";
               },
               onDragEnd: () => {
-                R.current = null;
+                C.current = null;
               },
-              onDragOver: (D) => {
-                !T && l !== "repair" && D.preventDefault();
+              onDragOver: (R) => {
+                !M && l !== "repair" && R.preventDefault();
               },
-              onDrop: (D) => {
-                l !== "repair" && ce(D, l, x);
+              onDrop: (R) => {
+                l !== "repair" && de(R, l, v);
               },
-              children: /* @__PURE__ */ i(
-                mt,
+              children: /* @__PURE__ */ e(
+                pt,
                 {
-                  ticket: x,
-                  lane: L,
-                  index: P,
-                  onOpen: () => d(ee),
-                  disabled: T || !!K(r.index, x),
-                  maintenance: r.index.maintenance ?? [],
-                  onMove: (D, O) => le(x, D, O),
+                  ticket: v,
+                  lane: B,
+                  index: E,
+                  onOpen: () => u(J),
+                  disabled: M || !!W(i.index, v),
+                  maintenance: i.index.maintenance ?? [],
+                  onMove: (R, I) => ce(v, R, I),
                   onDemote: () => {
-                    window.confirm(`Remove “${x.title}” from the board? Its note and TODOs will remain.`) && k.run(() => ot(t, o, x));
+                    window.confirm(`Remove “${v.title}” from the board? Its note and TODOs will remain.`) && f.run(() => at(n, c, v));
                   },
-                  count: S[l].length
+                  count: w[l].length
                 }
               )
             },
-            x.path
+            v.path
           )) })
         ]
       },
@@ -490,438 +609,550 @@ function ut(e) {
     )) })
   ] });
 }
-function ht(e) {
-  const [t, n] = f(""), [a, o] = f(""), [d, r] = f(""), [m, v] = f("backlog"), [s, g] = f(null), [k, S] = f(null), [b, N] = f(!1), R = _(0), A = _(!0);
-  B(() => (A.current = !0, () => {
-    A.current = !1, R.current++;
+function ut(t) {
+  const [n, a] = m(""), [s, c] = m(""), [u, i] = m(""), [h, q] = m("backlog"), [o, z] = m(null), [f, w] = m(null), [S, g] = m(!1), C = D(0), x = D(!0);
+  O(() => (x.current = !0, () => {
+    x.current = !1, C.current++;
   }), []);
-  const u = ie(e.onChanged);
-  B(() => (e.onBusy(u.pending), () => e.onBusy(!1)), [u.pending, e.onBusy]);
-  const y = e.disabled || u.pending || b, $ = e.maintenance.includes(e.mode === "promote" ? "backlog" : m);
-  B(() => {
-    var w, q;
-    (((w = u.failure) == null ? void 0 : w.code) === "rank_exhausted" || ((q = u.failure) == null ? void 0 : q.code) === "maintenance_pending") && e.onMaintenanceNeeded(e.mode === "promote" ? "backlog" : m);
-  }, [u.failure, e.mode, e.onMaintenanceNeeded, m]);
-  const T = () => {
-    n(""), o(""), r(""), g(null), S(null), e.onClose();
-  }, h = t.trim().endsWith(".md") ? t.trim() : `${t.trim()}.md`, C = async () => {
-    const w = ++R.current;
-    N(!0), S(null), g(null);
+  const p = ie(t.onChanged);
+  O(() => (t.onBusy(p.pending), () => t.onBusy(!1)), [p.pending, t.onBusy]);
+  const b = t.disabled || p.pending || S, y = t.maintenance.includes(t.mode === "promote" ? "backlog" : h);
+  O(() => {
+    var N, U;
+    (((N = p.failure) == null ? void 0 : N.code) === "rank_exhausted" || ((U = p.failure) == null ? void 0 : U.code) === "maintenance_pending") && t.onMaintenanceNeeded(t.mode === "promote" ? "backlog" : h);
+  }, [p.failure, t.mode, t.onMaintenanceNeeded, h]);
+  const $ = () => {
+    a(""), c(""), i(""), z(null), w(null), t.onClose();
+  }, M = n.trim().endsWith(".md") ? n.trim() : `${n.trim()}.md`, A = async () => {
+    const N = ++C.current;
+    g(!0), w(null), z(null);
     try {
-      const q = await V(Ge(e.api, e.workspace.id, h));
-      A.current && w === R.current && g(q);
-    } catch (q) {
-      A.current && w === R.current && S(j(q));
+      const U = await Z(Qe(t.api, t.workspace.id, M));
+      x.current && N === C.current && z(U);
+    } catch (U) {
+      x.current && N === C.current && w(Q(U));
     } finally {
-      A.current && w === R.current && N(!1);
+      x.current && N === C.current && g(!1);
     }
-  }, W = async () => {
-    await u.run(() => e.mode === "create" ? Je(e.api, e.workspace.id, { path: h, title: a.trim(), body: d, status: m }) : Xe(e.api, e.workspace.id, s)) && A.current && (n(""), o(""), r(""), g(null), e.onClose());
-  };
-  return /* @__PURE__ */ c("section", { style: p.box, "aria-label": e.mode === "create" ? "New ticket" : "Use existing note", children: [
-    /* @__PURE__ */ c("label", { className: "text-sm", children: [
-      "Note path in ",
-      e.workspace.name,
-      /* @__PURE__ */ i(
-        "input",
-        {
-          "aria-label": "Ticket note path",
-          placeholder: "tickets/fix-login.md",
-          value: t,
-          disabled: u.pending,
-          onChange: (w) => {
-            R.current++, N(!1), n(w.target.value), g(null);
-          },
-          style: { ...p.input, marginLeft: 6 }
-        }
-      )
-    ] }),
-    e.mode === "create" ? /* @__PURE__ */ c(Q, { children: [
-      /* @__PURE__ */ i("input", { "aria-label": "Ticket title", placeholder: "Ticket title", value: a, disabled: u.pending, onChange: (w) => o(w.target.value), style: p.input }),
-      /* @__PURE__ */ i("textarea", { "aria-label": "Ticket description", placeholder: "Description (Markdown)", value: d, disabled: u.pending, onChange: (w) => r(w.target.value), rows: 4, style: p.input }),
-      /* @__PURE__ */ i("select", { "aria-label": "Initial status", value: m, disabled: u.pending, onChange: (w) => v(w.target.value), style: p.input, children: G.map((w) => /* @__PURE__ */ i("option", { value: w, children: Y[w] }, w)) })
-    ] }) : /* @__PURE__ */ c(Q, { children: [
-      /* @__PURE__ */ i(I, { disabled: y || !t.trim(), onClick: () => void C(), children: "Preview note" }),
-      s && /* @__PURE__ */ c(Q, { children: [
-        /* @__PURE__ */ i("pre", { style: { ...p.mono, maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap" }, children: s.content }),
-        /* @__PURE__ */ i("p", { className: "text-sm", children: "Add ticket fields with Backlog status. Existing note content and unrelated properties are preserved." })
-      ] })
-    ] }),
-    $ && /* @__PURE__ */ i("span", { className: "text-sm", children: "Resume ordering maintenance for this column before adding a ticket." }),
-    /* @__PURE__ */ i(E, { failure: k }),
-    /* @__PURE__ */ i(E, { failure: u.failure }),
-    /* @__PURE__ */ c("div", { style: p.row, children: [
-      /* @__PURE__ */ i(I, { disabled: y || $ || !t.trim() || (e.mode === "create" ? !a.trim() : !s), onClick: () => void W(), children: e.mode === "create" ? "Create ticket" : "Make ticket" }),
-      /* @__PURE__ */ i(I, { disabled: u.pending, onClick: T, children: "Cancel" })
-    ] })
-  ] });
-}
-function mt(e) {
-  const { ticket: t } = e;
-  return /* @__PURE__ */ c("div", { style: { ...p.card, flexDirection: "column" }, children: [
-    /* @__PURE__ */ c("div", { style: { ...p.row, width: "100%", alignItems: "flex-start" }, children: [
-      /* @__PURE__ */ c("button", { type: "button", "data-lane": e.lane, "data-index": e.index, "data-note-path": t.path, "aria-label": `Open Kiro Notes: ${t.title}`, onClick: e.onOpen, style: p.open, children: [
-        /* @__PURE__ */ i("span", { className: "text-sm", style: { fontWeight: 600 }, children: t.title }),
-        /* @__PURE__ */ i(Ie, { path: t.path, title: t.title }),
-        /* @__PURE__ */ i("span", { className: "text-sm text-muted", style: { overflowWrap: "anywhere" }, children: t.path }),
-        t.todos.total > 0 && /* @__PURE__ */ c("span", { className: "text-sm text-muted", children: [
-          "☑ ",
-          t.todos.done,
-          "/",
-          t.todos.total
-        ] }),
-        t.diagnostics.map((n) => /* @__PURE__ */ i("span", { style: p.badge, title: n.message, children: n.code.replace(/_/g, " ") }, n.code))
+  }, _ = async () => {
+    await p.run(() => t.mode === "create" ? Ve(t.api, t.workspace.id, { path: M, title: s.trim(), body: u, status: h }) : Ze(t.api, t.workspace.id, o)) && x.current && (a(""), c(""), i(""), z(null), t.onClose());
+  }, d = t.mode === "create", k = d ? "New ticket" : "Use existing note", K = !b && !y && !!n.trim() && (d ? !!s.trim() : !!o);
+  return /* @__PURE__ */ r("section", { className: "qz-panel-surface qz-ticket-form", "aria-label": k, children: [
+    /* @__PURE__ */ e("h3", { children: k }),
+    /* @__PURE__ */ r("form", { className: "qz-stack", onSubmit: (N) => {
+      N.preventDefault(), K && _();
+    }, children: [
+      d && /* @__PURE__ */ r("label", { className: "qz-field", children: [
+        "Title",
+        /* @__PURE__ */ e("input", { className: "qz-input", ref: t.firstField, "aria-label": "Ticket title", placeholder: "Fix login", value: s, disabled: p.pending, onChange: (N) => c(N.target.value) })
       ] }),
-      /* @__PURE__ */ i(Ae, { path: t.path })
-    ] }),
-    /* @__PURE__ */ c("div", { style: p.row, children: [
-      /* @__PURE__ */ c(
-        "select",
-        {
-          "aria-label": `Move ${t.title} to column`,
-          value: t.status ?? "",
-          disabled: e.disabled,
-          style: p.input,
-          onChange: (n) => e.onMove(n.target.value),
-          children: [
-            !t.status && /* @__PURE__ */ i("option", { value: "", children: "Needs repair" }),
-            G.map((n) => /* @__PURE__ */ i("option", { value: n, disabled: e.maintenance.includes(n), children: Y[n] }, n))
-          ]
-        }
-      ),
-      /* @__PURE__ */ i("button", { type: "button", "aria-label": `Move ${t.title} up`, disabled: e.disabled || e.index === 0 || !t.status, onClick: () => t.status && e.onMove(t.status, e.index - 1), style: p.copy, children: "↑" }),
-      /* @__PURE__ */ i("button", { type: "button", "aria-label": `Remove ${t.title} from board`, disabled: e.disabled, onClick: e.onDemote, style: p.copy, children: "Remove ticket…" }),
-      /* @__PURE__ */ i("button", { type: "button", "aria-label": `Move ${t.title} down`, disabled: e.disabled || e.index >= e.count - 1 || !t.status, onClick: () => t.status && e.onMove(t.status, e.index + 1), style: p.copy, children: "↓" })
-    ] })
-  ] });
-}
-function ft(e) {
-  const { api: t } = e, n = ve(), { companions: a, failure: o } = Se(t), [d, r] = f("all"), [m, v] = f("open"), [s, g] = f("");
-  B(() => {
-    a && d !== "all" && !a.some((h) => h.workspace.id === d) && r("all");
-  }, [a, d]);
-  const k = d === "all" ? void 0 : d, S = !!a && a.length > 0, { data: b, failure: N, busy: R, refresh: A, reload: u } = Re(
-    S,
-    `${d}:${m}`,
-    () => je(t, m, k),
-    (h) => ne(t, { workspaceId: k, manual: h }),
-    (h) => Object.values(h.index).some((C) => C.state === "scanning")
-  ), y = we(() => Ye((b == null ? void 0 : b.groups) ?? [], s), [b, s]), $ = ie(u), T = (h, C, W) => {
-    $.pending || N || R || K(b == null ? void 0 : b.index[String(h.workspaceId)], h) || C.markerStart === void 0 || $.run(() => et(t, h, C, W));
-  };
-  return o ? /* @__PURE__ */ i(E, { failure: o }) : a ? a.length === 0 ? /* @__PURE__ */ i(De, {}) : /* @__PURE__ */ c("div", { style: { ...p.column, flex: 1 }, children: [
-    /* @__PURE__ */ c("div", { style: p.row, children: [
-      a.length > 1 && /* @__PURE__ */ c(
-        "select",
-        {
-          "aria-label": "Workspace",
-          value: d,
-          onChange: (h) => r(h.target.value === "all" ? "all" : Number(h.target.value)),
-          style: p.input,
-          children: [
-            /* @__PURE__ */ i("option", { value: "all", children: "All workspaces" }),
-            a.map((h) => /* @__PURE__ */ i("option", { value: h.workspace.id, children: h.workspace.name }, h.workspace.id))
-          ]
-        }
-      ),
-      /* @__PURE__ */ c("select", { "aria-label": "Show", value: m, onChange: (h) => v(h.target.value), style: p.input, children: [
-        /* @__PURE__ */ i("option", { value: "open", children: "Open" }),
-        /* @__PURE__ */ i("option", { value: "done", children: "Completed" }),
-        /* @__PURE__ */ i("option", { value: "all", children: "All" })
-      ] }),
-      /* @__PURE__ */ i(
-        "input",
-        {
-          "aria-label": "Filter TODOs",
-          placeholder: "Filter",
-          value: s,
-          onChange: (h) => g(h.target.value),
-          style: { ...p.input, flex: "1 1 200px" }
-        }
-      )
-    ] }),
-    /* @__PURE__ */ i($e, { statuses: b ? Object.values(b.index) : [], busy: R || $.pending, onRefresh: () => void A() }),
-    /* @__PURE__ */ i(E, { failure: N }),
-    /* @__PURE__ */ i(E, { failure: $.failure }),
-    (b == null ? void 0 : b.truncated) && /* @__PURE__ */ i("div", { role: "note", className: "text-sm", style: p.notice, children: "Only the first items are listed. Narrow it down by workspace, state or filter." }),
-    !b && !N && /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: "Loading TODOs…" }),
-    b && y.length === 0 && /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: s.trim() ? "No TODO matches." : "No TODOs." }),
-    /* @__PURE__ */ i("div", { style: { ...p.column, overflowY: "auto" }, children: y.map((h) => /* @__PURE__ */ c("section", { "aria-label": h.title, style: p.box, children: [
-      /* @__PURE__ */ c("strong", { className: "text-sm", children: [
-        h.title,
-        h.ticket && h.status && /* @__PURE__ */ i("span", { className: "text-muted", style: { fontWeight: 400 }, children: ` · ${Y[h.status]}` })
-      ] }),
-      /* @__PURE__ */ i(Ie, { path: h.path, title: h.title }),
-      /* @__PURE__ */ c("span", { className: "text-sm text-muted", style: p.mono, children: [
-        h.workspace,
-        " · ",
-        h.path
-      ] }),
-      /* @__PURE__ */ i("ul", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: h.items.map((C) => /* @__PURE__ */ c("li", { style: { ...p.todoRow, paddingLeft: C.depth * 18 }, children: [
-        /* @__PURE__ */ i(
+      /* @__PURE__ */ r("label", { className: "qz-field", children: [
+        "Note path in ",
+        t.workspace.name,
+        /* @__PURE__ */ e(
           "input",
           {
-            type: "checkbox",
-            "aria-label": `Complete ${X(C.text)}`,
-            checked: C.checked,
-            disabled: $.pending || !!N || R || !!K(b == null ? void 0 : b.index[String(h.workspaceId)], h) || C.markerStart === void 0,
-            onChange: (W) => T(h, C, W.target.checked)
+            className: "qz-input",
+            ref: d ? void 0 : t.firstField,
+            "aria-label": "Ticket note path",
+            placeholder: "tickets/fix-login.md",
+            value: n,
+            disabled: p.pending,
+            onChange: (N) => {
+              C.current++, g(!1), a(N.target.value), z(null);
+            }
           }
-        ),
-        /* @__PURE__ */ i(
+        )
+      ] }),
+      d ? /* @__PURE__ */ r(j, { children: [
+        /* @__PURE__ */ r("label", { className: "qz-field", children: [
+          /* @__PURE__ */ r("span", { children: [
+            "Description ",
+            /* @__PURE__ */ e("span", { className: "qz-muted", children: "· Optional Markdown" })
+          ] }),
+          /* @__PURE__ */ e("textarea", { className: "qz-input", "aria-label": "Ticket description", placeholder: "What needs to happen?", value: u, disabled: p.pending, onChange: (N) => i(N.target.value), rows: 4 })
+        ] }),
+        /* @__PURE__ */ r("label", { className: "qz-field", children: [
+          "Initial status",
+          /* @__PURE__ */ e("select", { className: "qz-input", value: h, disabled: p.pending, onChange: (N) => q(N.target.value), children: Y.map((N) => /* @__PURE__ */ e("option", { value: N, children: G[N] }, N)) })
+        ] })
+      ] }) : /* @__PURE__ */ r(j, { children: [
+        /* @__PURE__ */ e("div", { className: "qz-actions", children: /* @__PURE__ */ e("button", { type: "button", className: "qz-button", disabled: b || !n.trim(), onClick: () => void A(), children: "Preview note" }) }),
+        o && /* @__PURE__ */ r(j, { children: [
+          /* @__PURE__ */ e("pre", { className: "qz-mono qz-note-preview", children: o.content }),
+          /* @__PURE__ */ e("p", { className: "qz-muted", children: "The note will appear in Backlog. Its content and existing properties are preserved." })
+        ] })
+      ] }),
+      y && /* @__PURE__ */ e("span", { className: "qz-notice", children: "Resume ordering maintenance for this column before adding a ticket." }),
+      /* @__PURE__ */ e(L, { failure: f }),
+      /* @__PURE__ */ e(L, { failure: p.failure }),
+      /* @__PURE__ */ r("div", { className: "qz-actions", children: [
+        /* @__PURE__ */ e("button", { type: "submit", className: "qz-button", "data-variant": "primary", disabled: !K, children: d ? "Create ticket" : "Make ticket" }),
+        /* @__PURE__ */ e("button", { type: "button", className: "qz-button", "data-variant": "quiet", disabled: p.pending, onClick: $, children: "Cancel" })
+      ] })
+    ] })
+  ] });
+}
+function pt(t) {
+  const { ticket: n } = t;
+  return /* @__PURE__ */ r("article", { className: "qz-ticket", children: [
+    /* @__PURE__ */ r("div", { className: "qz-ticket-content", children: [
+      /* @__PURE__ */ r("button", { type: "button", className: "qz-note-link", "data-lane": t.lane, "data-index": t.index, "data-note-path": n.path, "aria-label": `Open Kiro Notes: ${n.title}`, onClick: t.onOpen, children: [
+        n.title,
+        /* @__PURE__ */ e(T, { name: "external" })
+      ] }),
+      /* @__PURE__ */ e("span", { className: "qz-mono qz-path", title: n.path, children: n.path }),
+      n.todos.total > 0 && /* @__PURE__ */ r("div", { className: "qz-ticket-progress", children: [
+        /* @__PURE__ */ e("progress", { value: n.todos.done, max: n.todos.total, "aria-label": `Checklist progress for ${n.title}` }),
+        /* @__PURE__ */ r("span", { title: "Completed TODOs", children: [
+          n.todos.done,
+          "/",
+          n.todos.total
+        ] })
+      ] }),
+      n.diagnostics.length > 0 && /* @__PURE__ */ e("div", { className: "qz-actions", children: n.diagnostics.map((a) => /* @__PURE__ */ e("span", { className: "qz-badge", title: a.message, children: a.code.replace(/_/g, " ") }, a.code)) })
+    ] }),
+    /* @__PURE__ */ r("div", { className: "qz-ticket-footer", children: [
+      /* @__PURE__ */ e("div", { className: "qz-ticket-status", children: /* @__PURE__ */ r(
+        "select",
+        {
+          className: "qz-input",
+          "aria-label": `Move ${n.title} to column`,
+          title: "Move to column",
+          value: n.status ?? "",
+          disabled: t.disabled,
+          onChange: (a) => t.onMove(a.target.value),
+          children: [
+            !n.status && /* @__PURE__ */ e("option", { value: "", children: "Needs repair" }),
+            Y.map((a) => /* @__PURE__ */ e("option", { value: a, disabled: t.maintenance.includes(a), children: G[a] }, a))
+          ]
+        }
+      ) }),
+      /* @__PURE__ */ r("details", { className: "qz-ticket-actions", children: [
+        /* @__PURE__ */ e("summary", { className: "qz-button qz-icon-button", "data-variant": "quiet", "aria-label": `Actions for ${n.title}`, title: "Ticket actions", children: /* @__PURE__ */ e(T, { name: "more" }) }),
+        /* @__PURE__ */ r("div", { className: "qz-ticket-action-list", children: [
+          /* @__PURE__ */ e(Me, { path: n.path }),
+          /* @__PURE__ */ r("button", { type: "button", className: "qz-button", "data-variant": "quiet", "aria-label": `Move ${n.title} up`, disabled: t.disabled || t.index === 0 || !n.status, onClick: () => n.status && t.onMove(n.status, t.index - 1), children: [
+            /* @__PURE__ */ e(T, { name: "up" }),
+            "Move up"
+          ] }),
+          /* @__PURE__ */ r("button", { type: "button", className: "qz-button", "data-variant": "quiet", "aria-label": `Move ${n.title} down`, disabled: t.disabled || t.index >= t.count - 1 || !n.status, onClick: () => n.status && t.onMove(n.status, t.index + 1), children: [
+            /* @__PURE__ */ e(T, { name: "down" }),
+            "Move down"
+          ] }),
+          /* @__PURE__ */ r("button", { type: "button", className: "qz-button qz-destructive", "data-variant": "quiet", "aria-label": `Remove ${n.title} from board`, disabled: t.disabled, onClick: t.onDemote, children: [
+            /* @__PURE__ */ e(T, { name: "minus" }),
+            "Remove ticket…"
+          ] })
+        ] })
+      ] })
+    ] })
+  ] });
+}
+function ht(t) {
+  const { api: n } = t, a = ve(), { companions: s, failure: c } = Ce(n), [u, i] = m("all"), [h, q] = m("open"), [o, z] = m(""), f = D(null);
+  O(() => {
+    s && u !== "all" && !s.some((d) => d.workspace.id === u) && i("all");
+  }, [s, u]);
+  const w = u === "all" ? void 0 : u, S = !!s && s.length > 0, { data: g, failure: C, busy: x, refresh: p, reload: b } = Te(
+    S,
+    `${u}:${h}`,
+    () => _e(n, h, w),
+    (d) => ae(n, { workspaceId: w, manual: d }),
+    (d) => Object.values(d.index).some((k) => k.state === "scanning")
+  ), y = xe(() => He((g == null ? void 0 : g.groups) ?? [], o), [g, o]), $ = y.reduce((d, k) => d + k.items.length, 0), M = g ? Object.values(g.index) : [], A = ie(b), _ = (d, k, K) => {
+    A.pending || C || x || W(g == null ? void 0 : g.index[String(d.workspaceId)], d) || k.markerStart === void 0 || A.run(() => Je(n, d, k, K));
+  };
+  return c ? /* @__PURE__ */ e(L, { failure: c }) : s ? s.length === 0 ? /* @__PURE__ */ e(Re, { onSettings: t.onSettings }) : /* @__PURE__ */ r("div", { className: "qz-stack qz-todos", children: [
+    /* @__PURE__ */ r("div", { className: "qz-view-heading", children: [
+      /* @__PURE__ */ r("div", { children: [
+        /* @__PURE__ */ e("h2", { className: "qz-section-title", children: "Note checklists" }),
+        /* @__PURE__ */ e("p", { className: "qz-section-description", children: "Find and complete Markdown TODOs across your shared folders." })
+      ] }),
+      /* @__PURE__ */ r("button", { type: "button", className: "qz-button", "data-variant": "quiet", onClick: () => a(J), children: [
+        /* @__PURE__ */ e(T, { name: "external" }),
+        "Open Kiro Notes"
+      ] })
+    ] }),
+    /* @__PURE__ */ r("div", { className: "qz-todo-filters qz-panel-surface", children: [
+      /* @__PURE__ */ r("label", { className: "qz-field", children: [
+        "Search",
+        /* @__PURE__ */ r("span", { className: "qz-search", children: [
+          /* @__PURE__ */ e(T, { name: "search" }),
+          /* @__PURE__ */ e("input", { className: "qz-input", ref: f, type: "search", "aria-label": "Filter TODOs", placeholder: "Search tasks or notes…", value: o, onChange: (d) => z(d.target.value) })
+        ] })
+      ] }),
+      s.length > 1 && /* @__PURE__ */ r("label", { className: "qz-field", children: [
+        "Workspace",
+        /* @__PURE__ */ r("select", { className: "qz-input", value: u, onChange: (d) => i(d.target.value === "all" ? "all" : Number(d.target.value)), children: [
+          /* @__PURE__ */ e("option", { value: "all", children: "All workspaces" }),
+          s.map((d) => /* @__PURE__ */ e("option", { value: d.workspace.id, children: d.workspace.name }, d.workspace.id))
+        ] })
+      ] }),
+      /* @__PURE__ */ r("label", { className: "qz-field", children: [
+        "Show",
+        /* @__PURE__ */ r("select", { className: "qz-input", value: h, onChange: (d) => q(d.target.value), children: [
+          /* @__PURE__ */ e("option", { value: "open", children: "Open" }),
+          /* @__PURE__ */ e("option", { value: "done", children: "Completed" }),
+          /* @__PURE__ */ e("option", { value: "all", children: "All" })
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ r("div", { className: "qz-toolbar qz-board-meta", children: [
+      g && /* @__PURE__ */ r("span", { className: "qz-result-count", role: "status", children: [
+        $,
+        " ",
+        $ === 1 ? "item" : "items",
+        " in ",
+        y.length,
+        " ",
+        y.length === 1 ? "note" : "notes"
+      ] }),
+      /* @__PURE__ */ r("div", { className: "qz-actions", children: [
+        /* @__PURE__ */ e(Se, { statuses: M }),
+        /* @__PURE__ */ r("button", { type: "button", className: "qz-button", "data-variant": "quiet", onClick: () => void p(), disabled: x || A.pending, children: [
+          /* @__PURE__ */ e(T, { name: "refresh" }),
+          "Refresh"
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ e($e, { statuses: M }),
+    /* @__PURE__ */ e(L, { failure: C }),
+    /* @__PURE__ */ e(L, { failure: A.failure }),
+    (g == null ? void 0 : g.truncated) && /* @__PURE__ */ e("div", { role: "note", className: "qz-notice", children: "Only the first items are listed. Narrow the list by workspace or completion status." }),
+    !g && !C && /* @__PURE__ */ e("p", { className: "qz-empty", role: "status", children: "Loading TODOs…" }),
+    g && y.length === 0 && /* @__PURE__ */ r("div", { className: "qz-empty", children: [
+      /* @__PURE__ */ e("span", { className: "qz-empty-icon", children: /* @__PURE__ */ e(T, { name: o.trim() ? "search" : "checklist" }) }),
+      /* @__PURE__ */ e("h3", { children: o.trim() ? "No matching TODOs" : "No TODOs to show" }),
+      /* @__PURE__ */ e("p", { children: o.trim() ? "Try a different search or clear the filter." : "Choose a different workspace or completion status to see more." }),
+      o.trim() && /* @__PURE__ */ e("button", { type: "button", className: "qz-button", onClick: () => {
+        var d;
+        z(""), (d = f.current) == null || d.focus();
+      }, children: "Clear search" })
+    ] }),
+    /* @__PURE__ */ e("div", { className: "qz-stack", children: y.map((d) => /* @__PURE__ */ r("section", { "aria-label": d.title, className: "qz-todo-note qz-panel-surface", children: [
+      /* @__PURE__ */ r("header", { className: "qz-todo-header", children: [
+        /* @__PURE__ */ e("span", { className: "qz-note-icon", children: /* @__PURE__ */ e(T, { name: "note" }) }),
+        /* @__PURE__ */ r("div", { className: "qz-todo-identity", children: [
+          /* @__PURE__ */ r("h3", { children: [
+            d.title,
+            d.ticket && d.status && /* @__PURE__ */ r("span", { className: "qz-status-pill", "data-lane-status": d.status, children: [
+              /* @__PURE__ */ e("span", { className: "qz-dot" }),
+              G[d.status]
+            ] })
+          ] }),
+          /* @__PURE__ */ r("p", { className: "qz-todo-meta", children: [
+            /* @__PURE__ */ e("span", { children: d.workspace }),
+            /* @__PURE__ */ e("span", { "aria-hidden": "true", children: "/" }),
+            /* @__PURE__ */ e("span", { className: "qz-mono qz-path", title: d.path, children: d.path })
+          ] })
+        ] }),
+        /* @__PURE__ */ e(Me, { path: d.path, compact: !0 })
+      ] }),
+      /* @__PURE__ */ e("ul", { className: "qz-todo-list", children: d.items.map((k) => /* @__PURE__ */ r("li", { className: "qz-todo-row", "data-checked": k.checked, style: { paddingInlineStart: `${Math.min(k.depth, 4) * 0.8}rem` }, children: [
+        /* @__PURE__ */ r("label", { className: "qz-todo-check", children: [
+          /* @__PURE__ */ e(
+            "input",
+            {
+              type: "checkbox",
+              "aria-label": `Complete ${ee(k.text)}`,
+              checked: k.checked,
+              disabled: A.pending || !!C || x || !!W(g == null ? void 0 : g.index[String(d.workspaceId)], d) || k.markerStart === void 0,
+              onChange: (K) => _(d, k, K.target.checked)
+            }
+          ),
+          /* @__PURE__ */ e("span", { children: ee(k.text) })
+        ] }),
+        /* @__PURE__ */ e(
           "button",
           {
             type: "button",
-            title: `${h.path}:${C.line}:${C.column}${C.heading ? ` · ${C.heading}` : ""}`,
-            "aria-label": `Open Kiro Notes: ${X(C.text)}`,
-            onClick: () => n(ee),
-            style: { ...p.open, flexDirection: "row", gap: 6 },
-            children: /* @__PURE__ */ i("span", { className: "text-sm", style: { textDecoration: C.checked ? "line-through" : void 0 }, children: X(C.text) })
+            title: `Open Kiro Notes · ${d.path}:${k.line}:${k.column}${k.heading ? ` · ${k.heading}` : ""}`,
+            "aria-label": `Open Kiro Notes: ${ee(k.text)}`,
+            onClick: () => a(J),
+            className: "qz-button qz-icon-button",
+            "data-variant": "quiet",
+            children: /* @__PURE__ */ e(T, { name: "external" })
           }
-        ),
-        /* @__PURE__ */ i(Ae, { path: h.path })
-      ] }, C.ordinal)) })
-    ] }, `${h.workspaceId}:${h.path}`)) })
-  ] }) : /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: "Loading…" });
+        )
+      ] }, k.ordinal)) })
+    ] }, `${d.workspaceId}:${d.path}`)) })
+  ] }) : /* @__PURE__ */ e("p", { className: "qz-empty", role: "status", children: "Loading workspaces…" });
 }
-const ke = { ...M.input, flex: 1, minWidth: 0 };
+const mt = '.qz-settings{display:grid;align-content:start;gap:20px;width:100%;max-width:1100px;min-width:0;margin-inline:auto;container:qz-settings / inline-size}.qz-settings .qz-settings-grid{display:grid;align-items:start;gap:20px}@container qz-settings (min-width: 760px){.qz-settings .qz-settings-grid{grid-template-columns:minmax(0,1fr) minmax(260px,330px)}}.qz-settings .qz-settings-folders,.qz-settings .qz-settings-add,.qz-settings .qz-settings-folder,.qz-settings .qz-settings-migration,.qz-settings .qz-settings-notice{display:grid;min-width:0;gap:12px}.qz-settings .qz-settings-add,.qz-settings .qz-settings-folder{padding:16px}.qz-settings .qz-settings-add p{margin-block-start:4px}.qz-settings .qz-settings-add .qz-input{width:100%}.qz-settings .qz-settings-add>.qz-button{justify-self:start}.qz-settings .qz-settings-heading,.qz-settings .qz-settings-folder-identity,.qz-settings .qz-settings-folder-controls,.qz-settings .qz-settings-actions,.qz-settings .qz-settings-check{display:flex;align-items:center}.qz-settings .qz-settings-heading,.qz-settings .qz-settings-folder-identity,.qz-settings .qz-settings-check{gap:10px}.qz-settings .qz-settings-heading h3,.qz-settings .qz-settings-add h3,.qz-settings .qz-settings-folder h4{margin:0;color:var(--qz-text);font-size:15px;font-weight:650}.qz-settings .qz-settings-count{padding:1px 7px;border:1px solid var(--qz-border);border-radius:999px;color:var(--qz-muted);font-size:12px;font-variant-numeric:tabular-nums}.qz-settings .qz-settings-folder-icon{display:grid;flex:none;width:36px;height:36px;place-items:center;border-radius:9px;background:var(--qz-accent-soft);color:var(--qz-accent)}.qz-settings .qz-settings-folder-identity>div{display:grid;min-width:0;gap:3px;overflow-wrap:anywhere}.qz-settings .qz-settings-folder-controls{justify-content:space-between;flex-wrap:wrap;gap:8px 12px;padding-block-start:10px;border-top:1px solid var(--qz-border)}.qz-settings .qz-settings-actions{flex-wrap:wrap;gap:4px}.qz-settings .qz-settings-check{min-height:32px;font-size:13px;cursor:pointer}.qz-settings .qz-settings-check input{flex:none;accent-color:var(--qz-accent)}.qz-settings .qz-settings-toggle{display:inline-grid;align-items:center;justify-items:start;-webkit-appearance:none;-moz-appearance:none;appearance:none;width:34px;height:20px;padding:2px;margin:0;border:1px solid var(--qz-muted);border-radius:999px;background:var(--qz-elevated);cursor:inherit}.qz-settings .qz-settings-toggle:before{width:12px;height:12px;border-radius:50%;background:var(--qz-muted);content:""}.qz-settings .qz-settings-toggle:checked{justify-items:end;border-color:var(--qz-accent);background:var(--qz-accent-soft)}.qz-settings .qz-settings-toggle:checked:before{background:var(--qz-accent)}.qz-settings .qz-settings-toggle:disabled{opacity:.6;cursor:default}@media (forced-colors: active){.qz-settings .qz-settings-toggle{display:inline-block;-webkit-appearance:auto;-moz-appearance:auto;appearance:auto;width:16px;height:16px}}.qz-settings .qz-settings-migration,.qz-settings .qz-settings-result{padding:12px;border:1px solid var(--qz-border);border-radius:9px;background:var(--qz-canvas);font-size:13px}.qz-settings .qz-settings-migration{gap:6px}.qz-settings .qz-settings-notice{gap:8px;overflow-wrap:anywhere}.qz-settings .qz-settings-migration-files{max-height:200px;margin:0;padding-inline-start:20px;overflow-y:auto;list-style:disc}.qz-settings .qz-button[data-destructive]{color:var(--qz-danger)}';
 function re() {
-  const [e, t] = f(!1), [n, a] = f(null);
-  return { busy: e, failure: n, run: async (d) => {
-    t(!0), a(null);
+  const [t, n] = m(!1), [a, s] = m(null);
+  return { busy: t, failure: a, run: async (u) => {
+    n(!0), s(null);
     try {
-      return await d(), !0;
-    } catch (r) {
-      return a(j(r)), !1;
+      return await u(), !0;
+    } catch (i) {
+      return s(Q(i)), !1;
     } finally {
-      t(!1);
+      n(!1);
     }
   } };
 }
-function pt(e) {
-  const { api: t } = e, [n, a] = f(null), [o, d] = f(null), [r, m] = f(null), [v, s] = f(0), [g, k] = f(""), [S, b] = f(""), { busy: N, failure: R, run: A } = re();
-  B(() => {
-    let y = !1;
-    return Promise.all([We(t), Ne(t)]).then(([$, T]) => {
-      y || (a($), m(T.writeBlocked ?? null), d(null));
-    }).catch(($) => !y && d(j($))), () => {
-      y = !0;
+function gt(t) {
+  const { api: n } = t, [a, s] = m(null), [c, u] = m(null), [i, h] = m(null), [q, o] = m(0), [z, f] = m(""), [w, S] = m(""), { busy: g, failure: C, run: x } = re();
+  O(() => {
+    let b = !1;
+    return Promise.all([Be(n), we(n)]).then(([y, $]) => {
+      b || (s(y), h($.writeBlocked ?? null), u(null));
+    }).catch((y) => !b && u(Q(y))), () => {
+      b = !0;
     };
-  }, [t, v]);
-  const u = async () => {
-    await A(() => _e(t, g.trim(), S.trim() || void 0)) && (k(""), b(""), s((y) => y + 1));
+  }, [n, q]);
+  const p = async () => {
+    await x(() => Ee(n, z.trim(), w.trim() || void 0)) && (f(""), S(""), o((b) => b + 1));
   };
-  return /* @__PURE__ */ c("div", { style: M.column, children: [
-    /* @__PURE__ */ i("strong", { className: "text-sm", children: "Folders" }),
-    /* @__PURE__ */ i(E, { failure: o }),
-    /* @__PURE__ */ i(E, { failure: r }),
-    !n && !o && /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: "Loading…" }),
-    (n == null ? void 0 : n.length) === 0 && /* @__PURE__ */ i("p", { className: "text-sm text-muted", children: "No folder yet. Add the folder you also attached in Kiro Notes." }),
-    n == null ? void 0 : n.map((y) => /* @__PURE__ */ i(gt, { api: t, workspace: y, writeBlocked: r, onChanged: () => s(($) => $ + 1) }, y.id)),
-    /* @__PURE__ */ c("div", { style: M.row, children: [
-      /* @__PURE__ */ i(
-        "input",
-        {
-          "aria-label": "Absolute folder path",
-          placeholder: "/home/you/notes",
-          value: g,
-          onChange: (y) => k(y.target.value),
-          onKeyDown: (y) => y.key === "Enter" && g.trim() && !N && void u(),
-          style: ke
-        }
-      ),
-      /* @__PURE__ */ i("input", { "aria-label": "Name (optional)", placeholder: "Name (optional)", value: S, onChange: (y) => b(y.target.value), style: { ...ke, flex: "0 1 180px" } }),
-      /* @__PURE__ */ i(I, { onClick: () => void u(), disabled: N || !g.trim(), children: "Add folder" })
+  return /* @__PURE__ */ r("div", { className: "qz-settings", children: [
+    /* @__PURE__ */ e("style", { children: mt }),
+    /* @__PURE__ */ r("header", { children: [
+      /* @__PURE__ */ e("h2", { className: "qz-section-title", children: "Settings" }),
+      /* @__PURE__ */ e("p", { className: "qz-section-description", children: "Manage the folders Quartizo reads for your board and TODOs." })
     ] }),
-    /* @__PURE__ */ i(E, { failure: R })
+    /* @__PURE__ */ e(L, { failure: c }),
+    /* @__PURE__ */ e(L, { failure: i }),
+    /* @__PURE__ */ r("div", { className: "qz-settings-grid", children: [
+      /* @__PURE__ */ r("section", { className: "qz-settings-folders", "aria-labelledby": "qz-settings-folders", children: [
+        /* @__PURE__ */ r("div", { className: "qz-settings-heading", children: [
+          /* @__PURE__ */ e("h3", { id: "qz-settings-folders", children: "Connected folders" }),
+          a && /* @__PURE__ */ e("span", { className: "qz-settings-count", children: a.length })
+        ] }),
+        !a && !c && /* @__PURE__ */ e("p", { className: "qz-muted", role: "status", children: "Loading folders…" }),
+        (a == null ? void 0 : a.length) === 0 && /* @__PURE__ */ e("p", { className: "qz-empty", children: "Add a folder to start viewing its tickets and TODOs." }),
+        a == null ? void 0 : a.map((b) => /* @__PURE__ */ e(zt, { api: n, workspace: b, writeBlocked: i, onChanged: () => o((y) => y + 1) }, b.id))
+      ] }),
+      /* @__PURE__ */ r(
+        "form",
+        {
+          className: "qz-panel-surface qz-settings-add",
+          "aria-labelledby": "qz-settings-add",
+          "aria-busy": g,
+          onSubmit: (b) => {
+            b.preventDefault(), z.trim() && !g && p();
+          },
+          children: [
+            /* @__PURE__ */ r("div", { children: [
+              /* @__PURE__ */ e("h3", { id: "qz-settings-add", children: "Add a folder" }),
+              /* @__PURE__ */ e("p", { className: "qz-muted", children: "Use the same folder path you added in Kiro Notes." })
+            ] }),
+            /* @__PURE__ */ r("label", { className: "qz-field", children: [
+              "Absolute folder path",
+              /* @__PURE__ */ e("input", { className: "qz-input", placeholder: "/home/you/notes", value: z, onChange: (b) => f(b.target.value) })
+            ] }),
+            /* @__PURE__ */ r("label", { className: "qz-field", children: [
+              /* @__PURE__ */ r("span", { children: [
+                "Name ",
+                /* @__PURE__ */ e("span", { className: "qz-muted", children: "(optional)" })
+              ] }),
+              /* @__PURE__ */ e("input", { className: "qz-input", placeholder: "e.g. Project notes", value: w, onChange: (b) => S(b.target.value) })
+            ] }),
+            /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "primary", type: "submit", disabled: g || !z.trim(), children: "Add folder" }),
+            /* @__PURE__ */ e(L, { failure: C })
+          ]
+        }
+      )
+    ] })
   ] });
 }
-function gt(e) {
-  const { api: t, workspace: n } = e, { busy: a, failure: o, run: d } = re(), [r, m] = f(null), [v, s] = f(!1);
-  return B(() => {
-    if (!r) return;
-    const g = setTimeout(() => m(null), 3e3);
-    return () => clearTimeout(g);
-  }, [r]), /* @__PURE__ */ c("section", { "aria-label": n.name, style: M.box, children: [
-    /* @__PURE__ */ c("div", { style: M.row, children: [
-      /* @__PURE__ */ i("strong", { className: "text-sm", children: n.name }),
-      /* @__PURE__ */ i("span", { className: "text-sm text-muted", style: M.mono, children: n.path })
+function zt(t) {
+  const { api: n, workspace: a } = t, { busy: s, failure: c, run: u } = re(), [i, h] = m(null), [q, o] = m(!1);
+  return O(() => {
+    if (!i) return;
+    const z = setTimeout(() => h(null), 3e3);
+    return () => clearTimeout(z);
+  }, [i]), /* @__PURE__ */ r("section", { "aria-label": a.name, className: "qz-panel-surface qz-settings-folder", children: [
+    /* @__PURE__ */ r("div", { className: "qz-settings-folder-identity", children: [
+      /* @__PURE__ */ e("span", { className: "qz-settings-folder-icon", children: /* @__PURE__ */ e(T, { name: "folder" }) }),
+      /* @__PURE__ */ r("div", { children: [
+        /* @__PURE__ */ e("h4", { children: a.name }),
+        /* @__PURE__ */ e("code", { className: "qz-mono qz-muted", children: a.path })
+      ] })
     ] }),
-    /* @__PURE__ */ c("div", { style: M.row, children: [
-      /* @__PURE__ */ c("label", { className: "text-sm", style: M.row, children: [
-        /* @__PURE__ */ i(
+    /* @__PURE__ */ r("div", { className: "qz-settings-folder-controls", children: [
+      /* @__PURE__ */ r("label", { className: "qz-settings-check", children: [
+        /* @__PURE__ */ e(
           "input",
           {
+            className: "qz-settings-toggle",
             type: "checkbox",
-            checked: !!n.companion,
-            disabled: a,
-            onChange: () => void d(() => qe(t, n.id, !n.companion)).then((g) => g && e.onChanged())
+            checked: !!a.companion,
+            disabled: s,
+            onChange: () => void u(() => je(n, a.id, !a.companion)).then((z) => z && t.onChanged())
           }
         ),
         "Shared with Kiro Notes"
       ] }),
-      /* @__PURE__ */ i("span", { style: { flex: 1 } }),
-      n.companion && /* @__PURE__ */ i(
-        I,
-        {
-          onClick: () => void d(() => ne(t, { workspaceId: n.id, manual: !0, rebuild: !0 })).then(
-            (g) => g && m("Rebuild requested.")
-          ),
-          disabled: a,
-          children: "Rebuild index"
-        }
-      ),
-      !v && /* @__PURE__ */ i(I, { onClick: () => s(!0), disabled: a, children: "Remove…" })
-    ] }),
-    !!n.oldTasks && /* @__PURE__ */ i(bt, { api: t, workspace: n, writeBlocked: e.writeBlocked, onChanged: e.onChanged }),
-    v && /* @__PURE__ */ c("div", { role: "alertdialog", "aria-label": "Remove folder", style: M.notice, children: [
-      /* @__PURE__ */ c("span", { className: "text-sm", children: [
-        "Stop showing “",
-        n.name,
-        "” in Quartizo? The folder and its files are not touched.",
-        !!n.oldTasks && ` It still has ${n.oldTasks} task(s) from Quartizo's old task board, which no view shows any more: removing the folder deletes them.`
-      ] }),
-      /* @__PURE__ */ c("div", { style: M.row, children: [
-        /* @__PURE__ */ i(
-          I,
+      /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
+        a.companion && /* @__PURE__ */ e(
+          "button",
           {
-            onClick: () => void d(() => ze(t, n.id, !!n.oldTasks)).then((g) => g && e.onChanged()),
-            disabled: a,
-            children: n.oldTasks ? `Remove and delete ${n.oldTasks} task(s)` : "Remove"
+            className: "qz-button",
+            "data-variant": "quiet",
+            type: "button",
+            onClick: () => void u(() => ae(n, { workspaceId: a.id, manual: !0, rebuild: !0 })).then(
+              (z) => z && h("Rebuild requested.")
+            ),
+            disabled: s,
+            children: "Rebuild index"
           }
         ),
-        /* @__PURE__ */ i(I, { onClick: () => s(!1), disabled: a, children: "Cancel" })
+        !q && /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", onClick: () => o(!0), disabled: s, children: "Remove…" })
       ] })
     ] }),
-    r && /* @__PURE__ */ i("span", { className: "text-sm text-muted", role: "status", children: r }),
-    /* @__PURE__ */ i(E, { failure: o })
+    !!a.oldTasks && /* @__PURE__ */ e(qt, { api: n, workspace: a, writeBlocked: t.writeBlocked, onChanged: t.onChanged }),
+    q && /* @__PURE__ */ r("div", { role: "alertdialog", "aria-label": "Remove folder", className: "qz-notice qz-settings-notice", children: [
+      /* @__PURE__ */ r("p", { children: [
+        "Stop showing “",
+        a.name,
+        "” in Quartizo? Your folder and files stay on disk.",
+        !!a.oldTasks && ` Removing this folder also deletes its ${a.oldTasks} saved task(s) from the old Quartizo board.`
+      ] }),
+      /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
+        /* @__PURE__ */ e(
+          "button",
+          {
+            className: "qz-button",
+            "data-destructive": !0,
+            type: "button",
+            onClick: () => void u(() => Pe(n, a.id, !!a.oldTasks)).then((z) => z && t.onChanged()),
+            disabled: s,
+            children: a.oldTasks ? `Remove and delete ${a.oldTasks} task(s)` : "Remove"
+          }
+        ),
+        /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", onClick: () => o(!1), disabled: s, children: "Cancel" })
+      ] })
+    ] }),
+    i && /* @__PURE__ */ e("span", { className: "qz-muted", role: "status", children: i }),
+    /* @__PURE__ */ e(L, { failure: c })
   ] });
 }
-function bt({ api: e, workspace: t, writeBlocked: n, onChanged: a }) {
-  const [o, d] = f(null), [r, m] = f(null), [v, s] = f(!1), [g, k] = f(!1), { busy: S, failure: b, run: N } = re(), R = async () => {
-    const u = await at(e, t.id), y = URL.createObjectURL(new Blob([JSON.stringify(u, null, 2)], { type: "application/json" })), $ = document.createElement("a");
-    $.href = y, $.download = `quartizo-old-tasks-${t.id}.json`, $.click(), setTimeout(() => URL.revokeObjectURL(y), 1e3), s(!0);
-  }, A = async () => {
-    if (!o) return;
-    const u = await rt(e, t.id, o.planHash, g);
-    m(u), d(null), a();
+function qt({ api: t, workspace: n, writeBlocked: a, onChanged: s }) {
+  const [c, u] = m(null), [i, h] = m(null), [q, o] = m(!1), [z, f] = m(!1), { busy: w, failure: S, run: g } = re(), C = async () => {
+    const p = await nt(t, n.id), b = URL.createObjectURL(new Blob([JSON.stringify(p, null, 2)], { type: "application/json" })), y = document.createElement("a");
+    y.href = b, y.download = `quartizo-old-tasks-${n.id}.json`, y.click(), setTimeout(() => URL.revokeObjectURL(b), 1e3), o(!0);
+  }, x = async () => {
+    if (!c) return;
+    const p = await tt(t, n.id, c.planHash, z);
+    h(p), u(null), s();
   };
-  return /* @__PURE__ */ c("section", { style: M.box, "aria-label": `Old tasks in ${t.name}`, children: [
-    /* @__PURE__ */ c("span", { className: "text-sm", children: [
-      t.oldTasks,
-      " old database task(s) are preserved. Convert them to Markdown ticket notes to show them on the board."
+  return /* @__PURE__ */ r("section", { className: "qz-settings-migration", "aria-label": `Old tasks in ${n.name}`, children: [
+    /* @__PURE__ */ e("strong", { children: "Old task migration" }),
+    /* @__PURE__ */ r("p", { className: "qz-muted", children: [
+      "Convert ",
+      n.oldTasks,
+      " saved ",
+      n.oldTasks === 1 ? "task" : "tasks",
+      " from the old board into Markdown ticket notes."
     ] }),
-    /* @__PURE__ */ c("div", { style: M.row, children: [
-      /* @__PURE__ */ i(I, { disabled: S, onClick: () => void N(R), children: "Export old tasks" }),
-      /* @__PURE__ */ i(I, { disabled: S || !t.companion, onClick: () => void N(async () => {
-        d(await it(e, t.id)), m(null), k(!1);
+    /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
+      /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", disabled: w, onClick: () => void g(C), children: "Export old tasks" }),
+      /* @__PURE__ */ e("button", { className: "qz-button", type: "button", disabled: w || !n.companion, onClick: () => void g(async () => {
+        u(await et(t, n.id)), h(null), f(!1);
       }), children: "Preview migration" })
     ] }),
-    v && /* @__PURE__ */ i("span", { className: "text-sm", role: "status", children: "Export downloaded." }),
-    o && /* @__PURE__ */ c("div", { role: "alertdialog", "aria-label": "Confirm old task migration", style: M.notice, children: [
-      /* @__PURE__ */ c("strong", { className: "text-sm", children: [
+    q && /* @__PURE__ */ e("span", { className: "qz-muted", role: "status", children: "Export downloaded." }),
+    c && /* @__PURE__ */ r("div", { role: "alertdialog", "aria-label": "Confirm old task migration", className: "qz-notice qz-settings-notice", children: [
+      /* @__PURE__ */ r("strong", { children: [
         "Create ",
-        o.tasks.filter((u) => !u.migrated).length,
+        c.tasks.filter((p) => !p.migrated).length,
         " ticket note(s)"
       ] }),
-      /* @__PURE__ */ i("span", { className: "text-sm", children: "A backup is saved before writing. Existing database tasks remain preserved; no existing note is overwritten." }),
-      o.warnings.map((u, y) => /* @__PURE__ */ i("span", { className: "text-sm", children: u }, y)),
-      /* @__PURE__ */ i("ul", { style: { maxHeight: 200, overflowY: "auto" }, children: o.tasks.map((u) => /* @__PURE__ */ c("li", { className: "text-sm", children: [
-        u.title,
+      /* @__PURE__ */ e("p", { children: "Quartizo backs up the database tasks before writing each ticket to a new file." }),
+      c.warnings.map((p, b) => /* @__PURE__ */ e("p", { children: p }, b)),
+      /* @__PURE__ */ e("ul", { className: "qz-settings-migration-files", children: c.tasks.map((p) => /* @__PURE__ */ r("li", { children: [
+        p.title,
         " → ",
-        /* @__PURE__ */ i("code", { children: u.path }),
+        /* @__PURE__ */ e("code", { children: p.path }),
         " (",
-        u.status,
+        p.status,
         ")",
-        u.migrated && " · already migrated",
-        u.noteRef && /* @__PURE__ */ c("span", { children: [
+        p.migrated && " · already migrated",
+        p.noteRef && /* @__PURE__ */ r("span", { children: [
           " · linked note: ",
-          u.noteRef
+          p.noteRef
         ] }),
-        u.slotId && /* @__PURE__ */ c("span", { children: [
+        p.slotId && /* @__PURE__ */ r("span", { children: [
           " · session: ",
-          u.slotId
+          p.slotId
         ] })
-      ] }, u.uid)) }),
-      o.tasks.some((u) => u.changed) && !o.complete && /* @__PURE__ */ c("label", { className: "text-sm", children: [
-        /* @__PURE__ */ i("input", { type: "checkbox", checked: g, onChange: (u) => k(u.target.checked), disabled: S }),
+      ] }, p.uid)) }),
+      c.tasks.some((p) => p.changed) && !c.complete && /* @__PURE__ */ r("label", { className: "qz-settings-check", children: [
+        /* @__PURE__ */ e("input", { type: "checkbox", checked: z, onChange: (p) => f(p.target.checked), disabled: w }),
         "I reviewed the changed converted notes; keep their latest contents when resuming"
       ] }),
-      /* @__PURE__ */ c("div", { style: M.row, children: [
-        /* @__PURE__ */ i(I, { disabled: S || !!n || o.complete || !o.tasks.length, onClick: () => void N(A), children: o.backup ? "Resume and verify migration" : "Back up and migrate" }),
-        /* @__PURE__ */ i(I, { disabled: S, onClick: () => d(null), children: "Cancel" })
+      /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
+        /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "primary", type: "button", disabled: w || !!a || c.complete || !c.tasks.length, onClick: () => void g(x), children: c.backup ? "Resume and verify migration" : "Back up and migrate" }),
+        /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", disabled: w, onClick: () => u(null), children: "Cancel" })
       ] })
     ] }),
-    r && /* @__PURE__ */ c("div", { style: M.notice, role: "status", children: [
-      /* @__PURE__ */ c("span", { className: "text-sm", children: [
-        r.migrated.length,
+    i && /* @__PURE__ */ r("div", { className: "qz-settings-notice qz-settings-result", role: "status", children: [
+      /* @__PURE__ */ r("p", { children: [
+        i.migrated.length,
         " ticket note(s) migrated. ",
-        r.complete ? "Migration verified." : `${r.remaining} task(s) remain; preview again to continue.`
+        i.complete ? "Migration verified." : `${i.remaining} task(s) remain; preview again to continue.`
       ] }),
-      /* @__PURE__ */ c("span", { className: "text-sm", style: M.mono, children: [
+      /* @__PURE__ */ r("code", { className: "qz-mono qz-muted", children: [
         "Backup: ",
-        r.backup.directory
+        i.backup.directory
       ] })
     ] }),
-    /* @__PURE__ */ i(E, { failure: b })
+    /* @__PURE__ */ e(L, { failure: S })
   ] });
 }
-const U = [
-  { id: "tasks", label: "Tasks" },
-  { id: "todos", label: "TODOs" },
-  { id: "settings", label: "Settings" }
+const ft = ".qz-app{--qz-canvas: var(--bg, Canvas);--qz-surface: var(--card, Canvas);--qz-elevated: var(--bg-elevated, Canvas);--qz-border: var(--border, color-mix(in srgb, CanvasText 18%, Canvas));--qz-text: var(--text-strong, CanvasText);--qz-muted: color-mix(in srgb, var(--muted, CanvasText) 87%, var(--qz-text));--qz-accent: var(--accent, LinkText);--qz-accent-soft: var(--accent-subtle, color-mix(in srgb, var(--qz-accent) 13%, transparent));--qz-ok: var(--ok, #4e9a6b);--qz-warning: var(--warn, #ad7628);--qz-danger: var(--danger, #c7465d);--qz-info: var(--info, var(--qz-accent));container:qz-app / inline-size;width:100%;max-width:1560px;min-width:0;margin-inline:auto;padding:24px clamp(16px,3%,40px) 36px;color:var(--qz-text)}.qz-app,.qz-app *{box-sizing:border-box}.qz-app [hidden]{display:none!important}.qz-app :where(h1,h2,h3,p,ul){margin:0}.qz-app :where(button,input,textarea,select){font:inherit}.qz-app :is(button,summary,input,textarea,select,.qz-board):focus-visible{outline:2px solid var(--qz-accent);outline-offset:2px}.qz-app :is(button,input,textarea,select):disabled{opacity:.55;cursor:default}.qz-app input[type=checkbox]{accent-color:var(--qz-accent)}.qz-icon{width:1rem;height:1rem;flex:none}.qz-header,.qz-brand,.qz-tabs,.qz-view-heading,.qz-toolbar,.qz-actions,.qz-inline-field{display:flex;align-items:center;min-width:0}.qz-header,.qz-view-heading,.qz-toolbar{justify-content:space-between;flex-wrap:wrap;gap:12px 20px}.qz-header{padding:0 0 20px;border-bottom:1px solid var(--qz-border)}.qz-brand{gap:12px}.qz-mark{display:grid;place-items:center;flex:none;width:46px;height:46px;border:1px solid color-mix(in srgb,var(--qz-accent) 34%,var(--qz-border));border-radius:13px;background:linear-gradient(145deg,var(--qz-accent-soft),var(--qz-surface));color:var(--qz-accent)}.qz-mark .qz-icon{width:26px;height:26px}.qz-brand h1{font-size:24px;font-weight:700;letter-spacing:-.035em;line-height:1.1}.qz-brand p{margin-top:3px;color:var(--qz-muted);font-size:12px}.qz-tabs{max-width:100%;gap:3px;padding:4px;border:1px solid var(--qz-border);border-radius:12px;background:var(--qz-surface)}.qz-tabs button{display:flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:6px 12px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--qz-muted);font-size:13px;font-weight:600;cursor:pointer}.qz-tabs button:hover{color:var(--qz-text);background:var(--qz-elevated)}.qz-tabs button[aria-selected=true]{border-color:color-mix(in srgb,var(--qz-accent) 25%,var(--qz-border));background:var(--qz-accent-soft);color:var(--qz-text)}.qz-tabs button[aria-selected=true] .qz-icon{color:var(--qz-accent)}.qz-content{padding-top:24px}.qz-stack{display:grid;gap:14px;min-width:0}.qz-section-title{font-size:27px;font-weight:700;letter-spacing:-.032em;line-height:1.17}.qz-section-description{margin-top:5px;color:var(--qz-muted)}.qz-muted{color:var(--qz-muted);font-weight:400}.qz-mono{font:400 12px/1.5 var(--mono, ui-monospace, monospace)}.qz-path{display:block;min-width:0;overflow:hidden;color:var(--qz-muted);text-overflow:ellipsis;white-space:nowrap}.qz-actions{gap:6px;flex-wrap:wrap}.qz-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;max-width:100%;min-height:36px;padding:5px 11px;border:1px solid var(--qz-border);border-radius:8px;background:var(--qz-surface);color:var(--qz-text);font-size:13px;font-weight:600;text-align:center;cursor:pointer}.qz-button:not(:disabled):hover{background:var(--qz-elevated);border-color:var(--border-strong, var(--qz-muted))}.qz-button[data-variant=primary]{border-color:var(--qz-accent);background:var(--qz-accent);color:var(--accent-fg, var(--qz-canvas))}.qz-button[data-variant=primary]:not(:disabled):hover{border-color:var(--accent-hover, var(--qz-accent));background:var(--accent-hover, var(--qz-accent))}.qz-button[data-variant=quiet]{border-color:transparent;background:transparent;color:var(--qz-muted)}.qz-button[data-variant=quiet]:not(:disabled):hover{color:var(--qz-text)}.qz-icon-button{min-width:36px;padding-inline:8px}.qz-input{min-width:0;max-width:100%;min-height:36px;padding:6px 9px;border:1px solid var(--qz-border);border-radius:8px;background:var(--qz-elevated);color:var(--qz-text);font-size:13px}.qz-input::placeholder{color:var(--qz-muted);opacity:1}.qz-field{display:grid;gap:5px;min-width:0;font-size:13px;font-weight:600}.qz-field .qz-input{width:100%;font-weight:400}.qz-inline-field{gap:8px;color:var(--qz-muted);font-size:13px}.qz-inline-field .qz-input{max-width:min(36ch,52%);font-weight:600}.qz-check-label{display:flex;align-items:center;gap:8px}.qz-panel-surface{min-width:0;border:1px solid var(--qz-border);border-radius:12px;background:var(--qz-surface)}.qz-notice{padding:11px 13px;border:1px solid color-mix(in srgb,var(--qz-warning) 42%,var(--qz-border));border-radius:9px;background:color-mix(in srgb,var(--qz-warning) 7%,var(--qz-surface));font-size:13px;overflow-wrap:anywhere}.qz-notice[data-variant=neutral]{border-color:var(--qz-border);background:var(--qz-surface)}.qz-notice.qz-error{border-color:color-mix(in srgb,var(--qz-danger) 53%,var(--qz-border));background:color-mix(in srgb,var(--qz-danger) 9%,var(--qz-surface))}.qz-empty{display:grid;place-items:center;gap:8px;padding:28px 16px;border:1px dashed var(--qz-border);border-radius:12px;color:var(--qz-muted);text-align:center}.qz-empty :is(h2,h3){color:var(--qz-text);font-size:17px;font-weight:650}.qz-empty .qz-button{margin-top:4px}.qz-empty-icon,.qz-note-icon{display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:9px;background:var(--qz-accent-soft);color:var(--qz-accent)}.qz-visually-hidden{position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}.qz-board-meta{gap:2px 12px;padding-block:2px}.qz-board-meta>.qz-actions{margin-inline-start:auto}.qz-result-count{color:var(--qz-muted);font-size:12px;font-weight:600}.qz-index{display:inline-flex;align-items:baseline;gap:7px;color:var(--qz-muted);font-size:12px}.qz-index:empty{display:none}.qz-board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(172px,1fr);gap:10px;min-width:0;padding:2px 2px 10px;overflow-x:auto;overscroll-behavior-inline:contain}.qz-lane{--qz-status: var(--qz-muted);min-width:0;min-height:308px;padding:9px;border:1px solid color-mix(in srgb,var(--qz-status) 20%,var(--qz-border));border-radius:12px;background:linear-gradient(180deg,color-mix(in srgb,var(--qz-status) 7%,var(--qz-surface)),var(--qz-surface) 105px)}.qz-app [data-lane-status=ready]{--qz-status: var(--qz-info)}.qz-app [data-lane-status=in_progress]{--qz-status: var(--qz-accent)}.qz-app [data-lane-status=review]{--qz-status: var(--qz-warning)}.qz-app [data-lane-status=done]{--qz-status: var(--qz-ok)}.qz-app [data-lane-status=repair]{--qz-status: var(--qz-danger)}.qz-lane-heading{display:flex;align-items:center;gap:7px;padding:3px 2px 10px;font-size:13px;font-weight:650}.qz-dot{width:8px;height:8px;flex:none;border-radius:50%;background:var(--qz-status, var(--qz-ok))}.qz-dot[data-attention=true]{background:var(--qz-warning)}.qz-count{margin-inline-start:auto;padding:1px 6px;border:1px solid var(--qz-border);border-radius:999px;color:var(--qz-muted);font-size:11px;font-variant-numeric:tabular-nums}.qz-lane-empty{padding:11px;border:1px dashed var(--qz-border);border-radius:8px;color:var(--qz-muted);font-size:12px;text-align:center}.qz-cards,.qz-todo-list{list-style:none;padding:0}.qz-cards{display:grid;gap:8px}.qz-cards li{min-width:0}.qz-cards li[draggable=true]{cursor:grab}.qz-cards li[draggable=true]:active{cursor:grabbing}.qz-ticket{border:1px solid var(--qz-border);border-radius:9px;background:var(--qz-elevated);box-shadow:var(--shadow-sm, none)}.qz-ticket:hover,.qz-ticket:focus-within{border-color:var(--border-strong, var(--qz-muted))}.qz-ticket-content{display:grid;gap:5px;padding:10px 10px 8px}.qz-note-link{display:flex;align-items:start;justify-content:space-between;gap:6px;padding:0;border:0;background:transparent;color:var(--qz-text);font-size:14px;font-weight:650;line-height:1.4;text-align:start;overflow-wrap:anywhere;cursor:pointer}.qz-note-link .qz-icon{width:13px;height:13px;margin-top:3px;color:var(--qz-muted)}.qz-note-link:hover{text-decoration:underline}.qz-ticket-progress{display:flex;align-items:center;gap:8px;margin-top:3px;color:var(--qz-muted);font-size:11px;font-variant-numeric:tabular-nums}.qz-ticket-progress progress{width:min(54px,40%);height:5px;accent-color:var(--qz-ok);border:0;border-radius:6px;overflow:hidden}.qz-ticket-progress progress::-webkit-progress-bar{background:var(--qz-border)}.qz-ticket-progress progress::-webkit-progress-value{border-radius:6px;background:var(--qz-ok)}.qz-badge{padding:2px 5px;border-radius:5px;background:color-mix(in srgb,var(--qz-warning) 17%,var(--qz-surface));font-size:11px;overflow-wrap:anywhere}.qz-ticket-footer{position:relative;padding:5px;border-top:1px solid var(--qz-border)}.qz-ticket-status{padding-inline-end:39px}.qz-ticket-status .qz-input{width:100%;min-height:32px;padding:3px 4px;border-color:transparent;background:transparent;color:var(--qz-muted)}.qz-ticket-status .qz-input:not(:disabled):hover{background:var(--qz-surface);border-color:var(--qz-border)}.qz-ticket-actions summary{position:absolute;inset-block-start:5px;inset-inline-end:5px;min-height:32px;list-style:none}.qz-ticket-actions summary::-webkit-details-marker{display:none}.qz-ticket-action-list{display:grid;gap:1px;margin-top:5px;padding-top:5px;border-top:1px solid var(--qz-border)}.qz-ticket-action-list .qz-button{justify-content:start;min-height:32px;text-align:start}.qz-ticket-action-list .qz-destructive:not(:disabled){color:var(--qz-danger)}.qz-ticket-form{display:grid;gap:12px;max-width:630px;padding:16px}.qz-ticket-form h3{font-size:17px;font-weight:650}.qz-note-preview{max-height:180px;margin:0;padding:10px;overflow:auto;background:var(--qz-canvas);white-space:pre-wrap;overflow-wrap:anywhere}.qz-todos{width:100%;max-width:1100px;margin-inline:auto}.qz-todo-filters{display:flex;flex-wrap:wrap;gap:12px;padding:12px}.qz-todo-filters .qz-field{flex:1 1 135px}.qz-todo-filters .qz-field:first-child{flex:3 1 245px}.qz-search{position:relative;display:block}.qz-search .qz-icon{position:absolute;inset-block-start:10px;inset-inline-start:9px;color:var(--qz-muted);pointer-events:none}.qz-search .qz-input{padding-inline-start:32px}.qz-todo-header{display:flex;align-items:center;gap:10px;min-width:0;padding:12px 14px}.qz-todo-identity{flex:1;min-width:0}.qz-todo-identity h3{display:flex;align-items:center;flex-wrap:wrap;gap:5px 9px;font-size:15px;font-weight:650;overflow-wrap:anywhere}.qz-todo-meta{display:flex;align-items:baseline;gap:6px;color:var(--qz-muted);font-size:12px}.qz-todo-meta>span:first-child{min-width:0;overflow-wrap:anywhere}.qz-status-pill{--qz-status: var(--qz-muted);display:inline-flex;align-items:center;gap:5px;padding:1px 7px;border-radius:999px;background:color-mix(in srgb,var(--qz-status) 13%,var(--qz-surface));font-size:11px;font-weight:500}.qz-status-pill .qz-dot{width:6px;height:6px}.qz-todo-row{display:flex;align-items:center;border-top:1px solid var(--qz-border)}.qz-todo-row:hover,.qz-todo-row:focus-within{background:var(--qz-elevated)}.qz-todo-row:last-child{border-radius:0 0 12px 12px}.qz-todo-check{display:flex;align-items:baseline;gap:10px;flex:1;min-width:0;padding:10px 14px;overflow-wrap:anywhere;cursor:pointer}.qz-todo-check input{flex:none;align-self:start;width:16px;height:16px;margin:2px 0 0}.qz-todo-check:has(input:disabled){cursor:default}.qz-todo-row[data-checked=true] .qz-todo-check span{color:var(--qz-muted);text-decoration:line-through}.qz-todo-row>.qz-button{margin-inline-end:6px}@container qz-app (max-width: 650px){.qz-board{grid-auto-columns:clamp(170px,65cqi,244px)}}@container qz-app (max-width: 520px){.qz-header{gap:14px;padding-bottom:14px}.qz-tabs{width:100%}.qz-tabs button{flex:1;gap:5px;padding-inline:5px}.qz-content{padding-top:18px}.qz-section-title{font-size:24px}.qz-inline-field{width:100%}.qz-inline-field .qz-input{flex:1;max-width:none}.qz-board-meta>.qz-actions{margin-inline-start:0}.qz-todo-filters .qz-field:first-child{flex-basis:100%}.qz-todo-header{padding-inline:10px}.qz-todo-header .qz-note-icon{display:none}}@media (pointer: coarse){.qz-app :is(.qz-button,.qz-tabs button,.qz-input,.qz-ticket-status .qz-input,.qz-ticket-actions summary){min-height:42px}}", H = [
+  { id: "tasks", label: "Tasks", icon: "board" },
+  { id: "todos", label: "TODOs", icon: "checklist" },
+  { id: "settings", label: "Settings", icon: "settings" }
 ];
-function xt() {
-  const e = Le(), [t, n] = f("tasks");
-  return /* @__PURE__ */ c(Q, { children: [
-    /* @__PURE__ */ i(Pe, { title: "Quartizo", subtitle: "Kiro Notes board and TODOs" }),
-    /* @__PURE__ */ c("div", { className: "px-6 pb-8 flex-1 min-h-0 flex flex-col gap-3", children: [
-      /* @__PURE__ */ i("div", { role: "tablist", "aria-label": "Quartizo", onKeyDown: (o) => {
-        var m;
-        if (o.key !== "ArrowLeft" && o.key !== "ArrowRight") return;
-        o.preventDefault();
-        const d = U.findIndex((v) => v.id === t), r = U[(d + (o.key === "ArrowRight" ? 1 : U.length - 1)) % U.length];
-        n(r.id), (m = document.getElementById(`qz-tab-${r.id}`)) == null || m.focus();
-      }, style: { display: "flex", gap: 4 }, children: U.map((o) => /* @__PURE__ */ i(
+function kt() {
+  const t = Le(), [n, a] = m("tasks"), s = D(null), c = (i) => {
+    var o;
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(i.key)) return;
+    i.preventDefault();
+    const h = H.findIndex((z) => z.id === n), q = i.key === "Home" ? H[0] : i.key === "End" ? H[H.length - 1] : H[(h + (i.key === "ArrowRight" ? 1 : H.length - 1)) % H.length];
+    a(q.id), (o = i.currentTarget.querySelector(`#qz-tab-${q.id}`)) == null || o.focus();
+  }, u = () => {
+    var i, h;
+    a("settings"), (h = (i = s.current) == null ? void 0 : i.querySelector("#qz-tab-settings")) == null || h.focus();
+  };
+  return /* @__PURE__ */ r("div", { className: "qz-app", children: [
+    /* @__PURE__ */ e("style", { children: ft }),
+    /* @__PURE__ */ r("header", { className: "qz-header", children: [
+      /* @__PURE__ */ r("div", { className: "qz-brand", children: [
+        /* @__PURE__ */ e("span", { className: "qz-mark", children: /* @__PURE__ */ e(T, { name: "gem" }) }),
+        /* @__PURE__ */ r("div", { children: [
+          /* @__PURE__ */ e("h1", { children: "Quartizo" }),
+          /* @__PURE__ */ e("p", { children: "Kiro Notes companion" })
+        ] })
+      ] }),
+      /* @__PURE__ */ e("div", { className: "qz-tabs", ref: s, role: "tablist", "aria-label": "Quartizo", onKeyDown: c, children: H.map((i) => /* @__PURE__ */ r(
         "button",
         {
-          id: `qz-tab-${o.id}`,
+          id: `qz-tab-${i.id}`,
           type: "button",
           role: "tab",
-          "aria-selected": t === o.id,
+          "aria-selected": n === i.id,
           "aria-controls": "qz-panel",
-          tabIndex: t === o.id ? 0 : -1,
-          onClick: () => n(o.id),
-          style: {
-            padding: "4px 12px",
-            background: "transparent",
-            color: "inherit",
-            border: "none",
-            borderBottom: t === o.id ? "2px solid currentColor" : "2px solid transparent",
-            fontWeight: t === o.id ? 600 : 400,
-            cursor: "pointer"
-          },
-          children: o.label
-        },
-        o.id
-      )) }),
-      /* @__PURE__ */ c(
-        "div",
-        {
-          id: "qz-panel",
-          role: "tabpanel",
-          "aria-labelledby": `qz-tab-${t}`,
-          style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 },
+          tabIndex: n === i.id ? 0 : -1,
+          onClick: () => a(i.id),
           children: [
-            /* @__PURE__ */ i("div", { hidden: t !== "tasks", style: { display: t === "tasks" ? "flex" : "none", flex: 1, minHeight: 0 }, children: /* @__PURE__ */ i(dt, { api: e, active: t === "tasks" }) }),
-            t === "todos" && /* @__PURE__ */ i(ft, { api: e }),
-            t === "settings" && /* @__PURE__ */ i(pt, { api: e })
+            /* @__PURE__ */ e(T, { name: i.icon }),
+            i.label
           ]
-        }
-      )
+        },
+        i.id
+      )) })
+    ] }),
+    /* @__PURE__ */ r("div", { className: "qz-content", id: "qz-panel", role: "tabpanel", "aria-labelledby": `qz-tab-${n}`, children: [
+      /* @__PURE__ */ e("div", { hidden: n !== "tasks", children: /* @__PURE__ */ e(ct, { api: t, active: n === "tasks", onSettings: u }) }),
+      n === "todos" && /* @__PURE__ */ e(ht, { api: t, onSettings: u }),
+      n === "settings" && /* @__PURE__ */ e(gt, { api: t })
     ] })
   ] });
 }
 export {
-  xt as default
+  kt as default
 };

@@ -153,9 +153,9 @@ describe('index status', () => {
   })
 
   it('describes progress and age', () => {
-    expect(describeIndex({ state: 'scanning', progress: { notes: 12, startedAt: 0, rebuild: true } })).toBe('Scanning… 12 note(s) read (rebuild)')
+    expect(describeIndex({ state: 'scanning', progress: { notes: 12, startedAt: 0, rebuild: true } })).toBe('Scanning… 12 notes read (rebuild)')
     expect(describeIndex({ state: 'scanning', queued: true, progress: null })).toBe('Scan queued…')
-    expect(describeIndex({ state: 'ready', indexedAt: 1000, files: 7 }, 3000)).toBe('7 note(s) indexed just now')
+    expect(describeIndex({ state: 'ready', indexedAt: 1000, files: 7 }, 3000)).toBe('7 notes indexed just now')
     expect(ago(0, 30_000)).toBe('30 s ago')
     expect(ago(0, 5 * 60_000)).toBe('5 min ago')
   })

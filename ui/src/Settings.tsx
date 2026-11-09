@@ -4,7 +4,6 @@
  * only show companion folders. Legacy conversion is an explicit, backed-up action.
  */
 import type { AppApi } from '@kirocrew/app-sdk'
-import { Btn } from '@kirocrew/app-sdk/ui'
 import { useEffect, useState } from 'react'
 import {
   addWorkspace,
@@ -22,9 +21,8 @@ import {
   toFailure,
   type Workspace,
 } from './companionApi'
-import { ErrorLine, S } from './ui'
-
-const grow = { ...S.input, flex: 1, minWidth: 0 }
+import { ErrorLine, Icon } from './ui'
+import styles from './settings.css?inline'
 
 /** Busy flag and last failure around one action at a time. */
 function useAction() {
@@ -80,30 +78,51 @@ export default function Settings(props: { api: AppApi }) {
   }
 
   return (
-    <div style={S.column}>
-      <strong className="text-sm">Folders</strong>
+    <div className="qz-settings">
+      <style>{styles}</style>
+      <header>
+        <h2 className="qz-section-title">Settings</h2>
+        <p className="qz-section-description">Manage the folders Quartizo reads for your board and TODOs.</p>
+      </header>
       <ErrorLine failure={loadFailure} />
       <ErrorLine failure={writeBlocked} />
-      {!workspaces && !loadFailure && <p className="text-sm text-muted">Loading…</p>}
-      {workspaces?.length === 0 && <p className="text-sm text-muted">No folder yet. Add the folder you also attached in Kiro Notes.</p>}
-      {workspaces?.map(w => (
-        <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={() => setReload(n => n + 1)} />
-      ))}
-      <div style={S.row}>
-        <input
-          aria-label="Absolute folder path"
-          placeholder="/home/you/notes"
-          value={path}
-          onChange={e => setPath(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && path.trim() && !busy && void add()}
-          style={grow}
-        />
-        <input aria-label="Name (optional)" placeholder="Name (optional)" value={name} onChange={e => setName(e.target.value)} style={{ ...grow, flex: '0 1 180px' }} />
-        <Btn onClick={() => void add()} disabled={busy || !path.trim()}>
-          Add folder
-        </Btn>
+      <div className="qz-settings-grid">
+        <section className="qz-settings-folders" aria-labelledby="qz-settings-folders">
+          <div className="qz-settings-heading">
+            <h3 id="qz-settings-folders">Connected folders</h3>
+            {workspaces && <span className="qz-settings-count">{workspaces.length}</span>}
+          </div>
+          {!workspaces && !loadFailure && <p className="qz-muted" role="status">Loading folders…</p>}
+          {workspaces?.length === 0 && <p className="qz-empty">Add a folder to start viewing its tickets and TODOs.</p>}
+          {workspaces?.map(w => (
+            <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={() => setReload(n => n + 1)} />
+          ))}
+        </section>
+        <form
+          className="qz-panel-surface qz-settings-add"
+          aria-labelledby="qz-settings-add"
+          aria-busy={busy}
+          onSubmit={event => {
+            event.preventDefault()
+            if (path.trim() && !busy) void add()
+          }}
+        >
+          <div>
+            <h3 id="qz-settings-add">Add a folder</h3>
+            <p className="qz-muted">Use the same folder path you added in Kiro Notes.</p>
+          </div>
+          <label className="qz-field">
+            Absolute folder path
+            <input className="qz-input" placeholder="/home/you/notes" value={path} onChange={e => setPath(e.target.value)} />
+          </label>
+          <label className="qz-field">
+            <span>Name <span className="qz-muted">(optional)</span></span>
+            <input className="qz-input" placeholder="e.g. Project notes" value={name} onChange={e => setName(e.target.value)} />
+          </label>
+          <button className="qz-button" data-variant="primary" type="submit" disabled={busy || !path.trim()}>Add folder</button>
+          <ErrorLine failure={failure} />
+        </form>
       </div>
-      <ErrorLine failure={failure} />
     </div>
   )
 }
@@ -120,16 +139,18 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
   }, [message])
 
   return (
-    <section aria-label={w.name} style={S.box}>
-      <div style={S.row}>
-        <strong className="text-sm">{w.name}</strong>
-        <span className="text-sm text-muted" style={S.mono}>
-          {w.path}
-        </span>
+    <section aria-label={w.name} className="qz-panel-surface qz-settings-folder">
+      <div className="qz-settings-folder-identity">
+        <span className="qz-settings-folder-icon"><Icon name="folder" /></span>
+        <div>
+          <h4>{w.name}</h4>
+          <code className="qz-mono qz-muted">{w.path}</code>
+        </div>
       </div>
-      <div style={S.row}>
-        <label className="text-sm" style={S.row}>
+      <div className="qz-settings-folder-controls">
+        <label className="qz-settings-check">
           <input
+            className="qz-settings-toggle"
             type="checkbox"
             checked={!!w.companion}
             disabled={busy}
@@ -137,48 +158,55 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
           />
           Shared with Kiro Notes
         </label>
-        <span style={{ flex: 1 }} />
-        {w.companion && (
-          <Btn
-            onClick={() =>
-              void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true })).then(
-                ok => ok && setMessage('Rebuild requested.'),
-              )
-            }
-            disabled={busy}
-          >
-            Rebuild index
-          </Btn>
-        )}
-        {!confirmRemove && (
-          <Btn onClick={() => setConfirmRemove(true)} disabled={busy}>
-            Remove…
-          </Btn>
-        )}
+        <div className="qz-settings-actions">
+          {w.companion && (
+            <button
+              className="qz-button"
+              data-variant="quiet"
+              type="button"
+              onClick={() =>
+                void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true })).then(
+                  ok => ok && setMessage('Rebuild requested.'),
+                )
+              }
+              disabled={busy}
+            >
+              Rebuild index
+            </button>
+          )}
+          {!confirmRemove && (
+            <button className="qz-button" data-variant="quiet" type="button" onClick={() => setConfirmRemove(true)} disabled={busy}>
+              Remove…
+            </button>
+          )}
+        </div>
       </div>
       {!!w.oldTasks && <LegacyMigration api={api} workspace={w} writeBlocked={props.writeBlocked} onChanged={props.onChanged} />}
       {confirmRemove && (
-        <div role="alertdialog" aria-label="Remove folder" style={S.notice}>
-          <span className="text-sm">
-            Stop showing “{w.name}” in Quartizo? The folder and its files are not touched.
+        <div role="alertdialog" aria-label="Remove folder" className="qz-notice qz-settings-notice">
+          <p>
+            Stop showing “{w.name}” in Quartizo? Your folder and files stay on disk.
             {!!w.oldTasks &&
-              ` It still has ${w.oldTasks} task(s) from Quartizo's old task board, which no view shows any more: removing the folder deletes them.`}
-          </span>
-          <div style={S.row}>
-            <Btn
+              ` Removing this folder also deletes its ${w.oldTasks} saved task(s) from the old Quartizo board.`}
+          </p>
+          <div className="qz-settings-actions">
+            <button
+              className="qz-button"
+              data-destructive
+              type="button"
               onClick={() => void run(() => removeWorkspace(api, w.id, !!w.oldTasks)).then(ok => ok && props.onChanged())}
               disabled={busy}
             >
               {w.oldTasks ? `Remove and delete ${w.oldTasks} task(s)` : 'Remove'}
-            </Btn>
-            <Btn onClick={() => setConfirmRemove(false)} disabled={busy}>
+            </button>
+            <button className="qz-button" data-variant="quiet" type="button" onClick={() => setConfirmRemove(false)} disabled={busy}>
               Cancel
-            </Btn>
+            </button>
           </div>
         </div>
       )}
       {message && (
-        <span className="text-sm text-muted" role="status">
+        <span className="qz-muted" role="status">
           {message}
         </span>
       )}
@@ -212,36 +240,39 @@ function LegacyMigration({ api, workspace, writeBlocked, onChanged }: { api: App
     setPreview(null)
     onChanged()
   }
-  return <section style={S.box} aria-label={`Old tasks in ${workspace.name}`}>
-    <span className="text-sm">{workspace.oldTasks} old database task(s) are preserved. Convert them to Markdown ticket notes to show them on the board.</span>
-    <div style={S.row}>
-      <Btn disabled={busy} onClick={() => void run(exportTasks)}>Export old tasks</Btn>
-      <Btn disabled={busy || !workspace.companion} onClick={() => void run(async () => { setPreview(await previewMigration(api, workspace.id)); setResult(null); setAcceptCurrent(false) })}>Preview migration</Btn>
+  return <section className="qz-settings-migration" aria-label={`Old tasks in ${workspace.name}`}>
+    <strong>Old task migration</strong>
+    <p className="qz-muted">
+      Convert {workspace.oldTasks} saved {workspace.oldTasks === 1 ? 'task' : 'tasks'} from the old board into Markdown ticket notes.
+    </p>
+    <div className="qz-settings-actions">
+      <button className="qz-button" data-variant="quiet" type="button" disabled={busy} onClick={() => void run(exportTasks)}>Export old tasks</button>
+      <button className="qz-button" type="button" disabled={busy || !workspace.companion} onClick={() => void run(async () => { setPreview(await previewMigration(api, workspace.id)); setResult(null); setAcceptCurrent(false) })}>Preview migration</button>
     </div>
-    {exported && <span className="text-sm" role="status">Export downloaded.</span>}
-    {preview && <div role="alertdialog" aria-label="Confirm old task migration" style={S.notice}>
-      <strong className="text-sm">Create {preview.tasks.filter(task => !task.migrated).length} ticket note(s)</strong>
-      <span className="text-sm">A backup is saved before writing. Existing database tasks remain preserved; no existing note is overwritten.</span>
-      {preview.warnings.map((warning, i) => <span key={i} className="text-sm">{warning}</span>)}
-      <ul style={{ maxHeight: 200, overflowY: 'auto' }}>
-        {preview.tasks.map(task => <li key={task.uid} className="text-sm">
+    {exported && <span className="qz-muted" role="status">Export downloaded.</span>}
+    {preview && <div role="alertdialog" aria-label="Confirm old task migration" className="qz-notice qz-settings-notice">
+      <strong>Create {preview.tasks.filter(task => !task.migrated).length} ticket note(s)</strong>
+      <p>Quartizo backs up the database tasks before writing each ticket to a new file.</p>
+      {preview.warnings.map((warning, i) => <p key={i}>{warning}</p>)}
+      <ul className="qz-settings-migration-files">
+        {preview.tasks.map(task => <li key={task.uid}>
           {task.title} → <code>{task.path}</code> ({task.status}){task.migrated && ' · already migrated'}
           {task.noteRef && <span> · linked note: {task.noteRef}</span>}
           {task.slotId && <span> · session: {task.slotId}</span>}
         </li>)}
       </ul>
-      {preview.tasks.some(task => task.changed) && !preview.complete && <label className="text-sm">
+      {preview.tasks.some(task => task.changed) && !preview.complete && <label className="qz-settings-check">
         <input type="checkbox" checked={acceptCurrent} onChange={e => setAcceptCurrent(e.target.checked)} disabled={busy} />
         I reviewed the changed converted notes; keep their latest contents when resuming
       </label>}
-      <div style={S.row}>
-        <Btn disabled={busy || !!writeBlocked || preview.complete || !preview.tasks.length} onClick={() => void run(migrate)}>{preview.backup ? 'Resume and verify migration' : 'Back up and migrate'}</Btn>
-        <Btn disabled={busy} onClick={() => setPreview(null)}>Cancel</Btn>
+      <div className="qz-settings-actions">
+        <button className="qz-button" data-variant="primary" type="button" disabled={busy || !!writeBlocked || preview.complete || !preview.tasks.length} onClick={() => void run(migrate)}>{preview.backup ? 'Resume and verify migration' : 'Back up and migrate'}</button>
+        <button className="qz-button" data-variant="quiet" type="button" disabled={busy} onClick={() => setPreview(null)}>Cancel</button>
       </div>
     </div>}
-    {result && <div style={S.notice} role="status">
-      <span className="text-sm">{result.migrated.length} ticket note(s) migrated. {result.complete ? 'Migration verified.' : `${result.remaining} task(s) remain; preview again to continue.`}</span>
-      <span className="text-sm" style={S.mono}>Backup: {result.backup.directory}</span>
+    {result && <div className="qz-settings-notice qz-settings-result" role="status">
+      <p>{result.migrated.length} ticket note(s) migrated. {result.complete ? 'Migration verified.' : `${result.remaining} task(s) remain; preview again to continue.`}</p>
+      <code className="qz-mono qz-muted">Backup: {result.backup.directory}</code>
     </div>}
     <ErrorLine failure={failure} />
   </section>
