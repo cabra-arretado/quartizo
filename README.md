@@ -218,12 +218,11 @@ network, sessionApproval or uploads). Earlier versions also asked for
 In **Settings**, expand **Work with a Bot or agent** under your connected
 notes folder and choose **Open in KiroCrew chat**. In the chat composer, pick
 a Bot or agent, add your request to the draft, and send it. The draft includes
-the folder path, board column IDs,
-and instructions for creating and updating notes, tickets, and TODOs. The
-selected agent needs read and write access to the connected folder through
-KiroCrew. If the chat needs a project directory, choose the connected folder
-in the composer’s project picker. Use **Copy agent prompt** to bring the same
-instructions to an existing conversation.
+the folder path, board column IDs, and instructions for creating and updating
+notes, tickets, and TODOs. The selected agent needs read and write access to
+the connected folder through KiroCrew. If the chat needs a project directory,
+choose the connected folder in the composer’s project picker. Use **Copy
+agent prompt** to bring the same instructions to an existing conversation.
 
 If a Bot is missing from the chat picker, enable
 [`dashboard.crewmates_in_agent_picker`](https://github.com/kirodotdev/KiroCrew/blob/main/src/kiro_crew/docs/configuration.md#dashboard)
