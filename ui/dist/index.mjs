@@ -1033,7 +1033,7 @@ function qt(t) {
         !z && /* @__PURE__ */ e("button", { className: "qz-button", "data-variant": "quiet", type: "button", onClick: () => c(!0), disabled: s, children: "Remove…" })
       ] })
     ] }),
-    a.companion && /* @__PURE__ */ e(vt, { workspace: a }),
+    /* @__PURE__ */ e(vt, { workspace: a }),
     !!a.oldTasks && /* @__PURE__ */ e(xt, { api: n, workspace: a, writeBlocked: t.writeBlocked, onChanged: t.onChanged }),
     z && /* @__PURE__ */ r("div", { role: "alertdialog", "aria-label": "Remove folder", className: "qz-notice qz-settings-notice", children: [
       /* @__PURE__ */ r("p", { children: [
@@ -1071,23 +1071,35 @@ function vt({ workspace: t }) {
       (p = s.current) == null || p.focus(), (z = s.current) == null || z.select(), u("Copy the selected text to use the prompt.");
     }
   };
-  return /* @__PURE__ */ r("details", { className: "qz-settings-disclosure", children: [
-    /* @__PURE__ */ e("summary", { children: "Work with a Bot or agent" }),
-    /* @__PURE__ */ r("div", { className: "qz-stack", children: [
-      /* @__PURE__ */ e("p", { className: "qz-muted", children: "Open a draft in KiroCrew, pick a Bot or agent in the chat composer, then add your request and send it. The selected agent needs access to this folder." }),
-      /* @__PURE__ */ e("div", { className: "qz-settings-actions", children: /* @__PURE__ */ r("button", { type: "button", className: "qz-button", "data-variant": "primary", onClick: () => n({ message: a, autoSend: !1 }), children: [
-        /* @__PURE__ */ e(T, { name: "external" }),
-        "Open in KiroCrew chat"
-      ] }) }),
-      /* @__PURE__ */ e("textarea", { ref: s, className: "qz-input qz-mono qz-agent-prompt", "aria-label": "Agent prompt", value: a, rows: 8, readOnly: !0 }),
-      /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
-        /* @__PURE__ */ r("button", { type: "button", className: "qz-button", onClick: () => void i(), children: [
-          /* @__PURE__ */ e(T, { name: "copy" }),
-          "Copy agent prompt"
-        ] }),
-        /* @__PURE__ */ e("span", { className: "qz-muted", role: "status", children: o })
+  return /* @__PURE__ */ r("div", { className: "qz-stack", children: [
+    /* @__PURE__ */ e("div", { className: "qz-settings-actions", children: /* @__PURE__ */ r(
+      "button",
+      {
+        type: "button",
+        className: "qz-button",
+        "data-variant": "primary",
+        disabled: !t.companion,
+        onClick: () => n({ message: a, autoSend: !1 }),
+        children: [
+          /* @__PURE__ */ e(T, { name: "external" }),
+          "Ask a Bot or agent"
+        ]
+      }
+    ) }),
+    t.companion ? /* @__PURE__ */ r("details", { className: "qz-settings-disclosure", children: [
+      /* @__PURE__ */ e("summary", { children: "Agent instructions" }),
+      /* @__PURE__ */ r("div", { className: "qz-stack", children: [
+        /* @__PURE__ */ e("p", { className: "qz-muted", children: "Pick an agent in KiroCrew’s chat composer, then add your request and send it. The agent needs access to this folder." }),
+        /* @__PURE__ */ e("textarea", { ref: s, className: "qz-input qz-mono qz-agent-prompt", "aria-label": "Agent prompt", value: a, rows: 8, readOnly: !0 }),
+        /* @__PURE__ */ r("div", { className: "qz-settings-actions", children: [
+          /* @__PURE__ */ r("button", { type: "button", className: "qz-button", onClick: () => void i(), children: [
+            /* @__PURE__ */ e(T, { name: "copy" }),
+            "Copy agent prompt"
+          ] }),
+          /* @__PURE__ */ e("span", { className: "qz-muted", role: "status", children: o })
+        ] })
       ] })
-    ] })
+    ] }) : /* @__PURE__ */ e("p", { className: "qz-muted", children: "Turn on Shared with Kiro Notes to ask a Bot about this folder." })
   ] });
 }
 function xt({ api: t, workspace: n, writeBlocked: a, onChanged: s }) {

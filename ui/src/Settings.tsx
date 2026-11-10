@@ -184,7 +184,7 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
           )}
         </div>
       </div>
-      {w.companion && <AgentPrompt workspace={w} />}
+      <AgentPrompt workspace={w} />
       {!!w.oldTasks && <LegacyMigration api={api} workspace={w} writeBlocked={props.writeBlocked} onChanged={props.onChanged} />}
       {confirmRemove && (
         <div role="alertdialog" aria-label="Remove folder" className="qz-notice qz-settings-notice">
@@ -237,22 +237,27 @@ function AgentPrompt({ workspace }: { workspace: Workspace }) {
       setMessage('Copy the selected text to use the prompt.')
     }
   }
-  return <details className="qz-settings-disclosure">
-    <summary>Work with a Bot or agent</summary>
-    <div className="qz-stack">
-      <p className="qz-muted">Open a draft in KiroCrew, pick a Bot or agent in the chat composer, then add your request and send it. The selected agent needs access to this folder.</p>
-      <div className="qz-settings-actions">
-        <button type="button" className="qz-button" data-variant="primary" onClick={() => openChat({ message: prompt, autoSend: false })}>
-          <Icon name="external" />Open in KiroCrew chat
-        </button>
-      </div>
-      <textarea ref={field} className="qz-input qz-mono qz-agent-prompt" aria-label="Agent prompt" value={prompt} rows={8} readOnly />
-      <div className="qz-settings-actions">
-        <button type="button" className="qz-button" onClick={() => void copy()}><Icon name="copy" />Copy agent prompt</button>
-        <span className="qz-muted" role="status">{message}</span>
-      </div>
+  return <div className="qz-stack">
+    <div className="qz-settings-actions">
+      <button type="button" className="qz-button" data-variant="primary" disabled={!workspace.companion}
+        onClick={() => openChat({ message: prompt, autoSend: false })}>
+        <Icon name="external" />Ask a Bot or agent
+      </button>
     </div>
-  </details>
+    {workspace.companion ? (
+      <details className="qz-settings-disclosure">
+        <summary>Agent instructions</summary>
+        <div className="qz-stack">
+          <p className="qz-muted">Pick an agent in KiroCrew’s chat composer, then add your request and send it. The agent needs access to this folder.</p>
+          <textarea ref={field} className="qz-input qz-mono qz-agent-prompt" aria-label="Agent prompt" value={prompt} rows={8} readOnly />
+          <div className="qz-settings-actions">
+            <button type="button" className="qz-button" onClick={() => void copy()}><Icon name="copy" />Copy agent prompt</button>
+            <span className="qz-muted" role="status">{message}</span>
+          </div>
+        </div>
+      </details>
+    ) : <p className="qz-muted">Turn on Shared with Kiro Notes to ask a Bot about this folder.</p>}
+  </div>
 }
 
 

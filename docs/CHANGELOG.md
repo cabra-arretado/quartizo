@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.3 - 2026-11-10
+
+- Show **Ask a Bot or agent** directly on each connected folder card. Turn on
+  **Shared with Kiro Notes** to open a draft for that folder in KiroCrew chat.
+
 ## 0.0.2 - 2026-11-10
 
 - Start an unsent notes request from Settings and choose a Bot or agent in

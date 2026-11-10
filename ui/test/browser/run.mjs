@@ -221,7 +221,17 @@ async function migrationRegression(page, fixture) {
 async function agentHandoffRegression(page, fixture) {
   await tab(page, 'Settings').click()
   const folder = page.getByRole('region', { name: 'Browser vault', exact: true })
-  await folder.getByText('Work with a Bot or agent', { exact: true }).click()
+  const ask = button(folder, 'Ask a Bot or agent')
+  const shared = folder.getByRole('checkbox', { name: 'Shared with Kiro Notes', exact: true })
+  await ask.waitFor()
+  assert.equal(await ask.isEnabled(), true)
+  await shared.click()
+  await folder.getByText('Turn on Shared with Kiro Notes to ask a Bot about this folder.').waitFor()
+  assert.equal(await ask.isDisabled(), true)
+  await shared.click()
+  assert.equal(await page.evaluate(() => window.testChatLaunch), undefined)
+  await ask.click()
+  await folder.getByText('Agent instructions', { exact: true }).click()
   const prompt = await textbox(folder, 'Agent prompt').inputValue()
   assert.ok(prompt.includes(fixture.vault))
   assert.match(prompt, /status: "backlog"/)
@@ -229,10 +239,8 @@ async function agentHandoffRegression(page, fixture) {
   await button(folder, 'Copy agent prompt').click()
   await folder.getByText('Agent prompt copied.', { exact: true }).waitFor()
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), prompt)
-  assert.equal(await page.evaluate(() => window.testChatLaunch), undefined)
-  await button(folder, 'Open in KiroCrew chat').click()
   assert.deepEqual(await page.evaluate(() => window.testChatLaunch), { message: prompt, autoSend: false })
-  console.log('PASS notes prompt copies to the clipboard and opens an unsent chat draft')
+  console.log('PASS the folder card exposes the Bot action and opens an unsent draft when shared')
 }
 
 async function prerequisiteRegression(browser) {
