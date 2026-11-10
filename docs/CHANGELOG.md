@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Start an unsent notes request from Settings and choose a Bot or agent in
+  KiroCrew chat. Copy the same folder-specific instructions into an existing
+  conversation.
+
 ## 0.0.2-rc.0 - 2026-11-09
 
 ### Updated interface

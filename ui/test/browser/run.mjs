@@ -218,6 +218,23 @@ async function migrationRegression(page, fixture) {
   console.log('PASS renamed and edited migration output exposes consent and resumes')
 }
 
+async function agentHandoffRegression(page, fixture) {
+  await tab(page, 'Settings').click()
+  const folder = page.getByRole('region', { name: 'Browser vault', exact: true })
+  await folder.getByText('Work with a Bot or agent', { exact: true }).click()
+  const prompt = await textbox(folder, 'Agent prompt').inputValue()
+  assert.ok(prompt.includes(fixture.vault))
+  assert.match(prompt, /status: "backlog"/)
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
+  await button(folder, 'Copy agent prompt').click()
+  await folder.getByText('Agent prompt copied.', { exact: true }).waitFor()
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), prompt)
+  assert.equal(await page.evaluate(() => window.testChatLaunch), undefined)
+  await button(folder, 'Open in KiroCrew chat').click()
+  assert.deepEqual(await page.evaluate(() => window.testChatLaunch), { message: prompt, autoSend: false })
+  console.log('PASS notes prompt copies to the clipboard and opens an unsent chat draft')
+}
+
 async function prerequisiteRegression(browser) {
   const fixture = await startFixture('0.12.0rc6')
   const page = await browser.newPage()
@@ -263,6 +280,7 @@ try {
   await selfDropRegression(page, fixture)
   await exhaustionRegression(page, fixture)
   await migrationRegression(page, fixture)
+  await agentHandoffRegression(page, fixture)
   await prerequisiteRegression(browser)
   assert.deepEqual(errors, [])
   success = true

@@ -32,6 +32,10 @@ declare module '@kirocrew/app-sdk' {
   export function useAppApi(): AppApi
 
   export function useNavigate(): (path: string) => void
+
+  export function useChatLauncher(): {
+    openChat: (options: { message: string; autoSend: false }) => void
+  }
 }
 
 declare module '@kirocrew/app-sdk/ui' {

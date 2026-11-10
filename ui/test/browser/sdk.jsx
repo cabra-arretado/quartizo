@@ -20,3 +20,5 @@ const api = {
 export function useAppApi() { return api }
 const navigate = path => { window.testNavigation = path }
 export function useNavigate() { return navigate }
+const openChat = options => { window.testChatLaunch = options }
+export function useChatLauncher() { return { openChat } }

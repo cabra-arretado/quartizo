@@ -6,7 +6,7 @@ Notes; Quartizo shares the same folder and provides
 
 - **Tasks**: a Kanban board whose card moves update the ticket notes;
 - **TODOs**: checkboxes grouped by note, with completion saved in the source;
-- **Settings**: the folders Quartizo reads.
+- **Settings** manages connected folders and opens notes requests in KiroCrew chat.
 
 Use a card title or the arrow beside a TODO to open Kiro Notes. Copy the note
 name from the card’s actions or the checklist header and paste it into Kiro
@@ -212,6 +212,22 @@ network, sessionApproval or uploads). Earlier versions also asked for
    forgets the folder. Nothing on disk changes either way. A folder that still
    has tasks from Quartizo's old database board says how many, and removing it
    deletes them only once you confirm.
+
+### Working with a Bot or agent
+
+In **Settings**, expand **Work with a Bot or agent** under your connected
+notes folder and choose **Open in KiroCrew chat**. In the chat composer, pick
+a Bot or agent, add your request to the draft, and send it. The draft includes
+the folder path, board column IDs,
+and instructions for creating and updating notes, tickets, and TODOs. The
+selected agent needs read and write access to the connected folder through
+KiroCrew. If the chat needs a project directory, choose the connected folder
+in the composer’s project picker. Use **Copy agent prompt** to bring the same
+instructions to an existing conversation.
+
+If a Bot is missing from the chat picker, enable
+[`dashboard.crewmates_in_agent_picker`](https://github.com/kirodotdev/KiroCrew/blob/main/src/kiro_crew/docs/configuration.md#dashboard)
+in KiroCrew and reload the dashboard.
 
 **Shared editing.** Use native Notes with the content-hash save fix. The old
 0.10.0rc4 timestamp-only guard could silently overwrite companion changes

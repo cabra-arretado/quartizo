@@ -3,10 +3,12 @@
  * Kiro Notes right away (companion mode), since the board and the TODO list
  * only show companion folders. Legacy conversion is an explicit, backed-up action.
  */
-import type { AppApi } from '@kirocrew/app-sdk'
-import { useEffect, useState } from 'react'
+import { type AppApi, useChatLauncher } from '@kirocrew/app-sdk'
+import { useEffect, useRef, useState } from 'react'
 import {
   addWorkspace,
+  STATUSES,
+  STATUS_LABELS,
   type ApiFailure,
   companionStatus,
   listWorkspaces,
@@ -21,6 +23,7 @@ import {
   toFailure,
   type Workspace,
 } from './companionApi'
+import { agentPrompt } from './agentPrompt'
 import { ErrorLine, Icon } from './ui'
 import styles from './settings.css?inline'
 
@@ -82,7 +85,7 @@ export default function Settings(props: { api: AppApi }) {
       <style>{styles}</style>
       <header>
         <h2 className="qz-section-title">Settings</h2>
-        <p className="qz-section-description">Manage the folders Quartizo reads for your board and TODOs.</p>
+        <p className="qz-section-description">Manage connected folders or start a notes request in KiroCrew.</p>
       </header>
       <ErrorLine failure={loadFailure} />
       <ErrorLine failure={writeBlocked} />
@@ -181,6 +184,7 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
           )}
         </div>
       </div>
+      {w.companion && <AgentPrompt workspace={w} />}
       {!!w.oldTasks && <LegacyMigration api={api} workspace={w} writeBlocked={props.writeBlocked} onChanged={props.onChanged} />}
       {confirmRemove && (
         <div role="alertdialog" aria-label="Remove folder" className="qz-notice qz-settings-notice">
@@ -213,6 +217,42 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
       <ErrorLine failure={failure} />
     </section>
   )
+}
+
+
+const NOTES_COLUMNS = STATUSES.map(id => ({ id, label: STATUS_LABELS[id] }))
+
+function AgentPrompt({ workspace }: { workspace: Workspace }) {
+  const { openChat } = useChatLauncher()
+  const prompt = agentPrompt(workspace.path, NOTES_COLUMNS)
+  const field = useRef<HTMLTextAreaElement>(null)
+  const [message, setMessage] = useState('')
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt)
+      setMessage('Agent prompt copied.')
+    } catch {
+      field.current?.focus()
+      field.current?.select()
+      setMessage('Copy the selected text to use the prompt.')
+    }
+  }
+  return <details className="qz-settings-disclosure">
+    <summary>Work with a Bot or agent</summary>
+    <div className="qz-stack">
+      <p className="qz-muted">Open a draft in KiroCrew, pick a Bot or agent in the chat composer, then add your request and send it. The selected agent needs access to this folder.</p>
+      <div className="qz-settings-actions">
+        <button type="button" className="qz-button" data-variant="primary" onClick={() => openChat({ message: prompt, autoSend: false })}>
+          <Icon name="external" />Open in KiroCrew chat
+        </button>
+      </div>
+      <textarea ref={field} className="qz-input qz-mono qz-agent-prompt" aria-label="Agent prompt" value={prompt} rows={8} readOnly />
+      <div className="qz-settings-actions">
+        <button type="button" className="qz-button" onClick={() => void copy()}><Icon name="copy" />Copy agent prompt</button>
+        <span className="qz-muted" role="status">{message}</span>
+      </div>
+    </div>
+  </details>
 }
 
 

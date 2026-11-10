@@ -199,3 +199,16 @@
 .qz-settings .qz-button[data-destructive] {
   color: var(--qz-danger);
 }
+
+.qz-settings-disclosure {
+  border-top: 1px solid var(--qz-border);
+  font-size: 13px;
+}
+
+.qz-settings-disclosure > summary {
+  padding-block: 8px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.qz-agent-prompt { width: 100%; }
