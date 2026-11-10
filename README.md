@@ -34,7 +34,7 @@ editing acceptance checks.
 
 ```
 app.json              manifest (name, ui page, backend, permissions)
-assets/icon.png       512x512 opaque placeholder (same as `kirocrew app init`)
+ui/quartizo-icon.svg  app catalog and sidebar icon
 backend/server.py     HTTP backend (stdlib): auth, routing
 backend/workspace.py  folder registry + fd-based path confinement
 backend/db.py         sqlite3 DB (registry + index) with a migrations table

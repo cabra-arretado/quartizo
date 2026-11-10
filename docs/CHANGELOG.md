@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.4 - 2026-11-10
+
+- Use Quartizo’s gem icon in the Kiro Crew app catalog and sidebar.
+
 ## 0.0.3 - 2026-11-10
 
 - Show **Ask a Bot or agent** directly on each connected folder card. Turn on

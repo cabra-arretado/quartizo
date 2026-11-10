@@ -1,11 +1,11 @@
 {
   "name": "quartizo",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "minKiroCrewVersion": "0.12.0",
   "displayName": "Quartizo",
   "description": "A Kiro Crew app: Quartizo",
   "author": "felipe",
-  "iconPath": "assets/icon.png",
+  "iconPath": "ui/quartizo-icon.svg",
   "tags": [],
   "ui": {
     "entry": "dist/index.mjs",
@@ -13,7 +13,8 @@
       {
         "route": "/apps/quartizo",
         "label": "Quartizo",
-        "icon": "Gem"
+        "icon": "Gem",
+        "iconUrl": "quartizo-icon.svg"
       }
     ]
   },
