@@ -3,6 +3,7 @@ import { type AppApi, useNavigate } from '@kirocrew/app-sdk'
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   type ApiFailure,
+  type BoardColumn,
   type BoardData,
   companionStatus,
   createTicket,
@@ -13,7 +14,6 @@ import {
   promoteNote,
   readSource,
   rebalanceTickets,
-  STATUSES,
   type SourceNote,
   type TaskStatus,
   type TodoGroup,
@@ -25,15 +25,13 @@ import {
   groupLanes,
   indexWarning,
   type IndexStatus,
-  LANE_LABELS,
-  LANES,
+  REPAIR_COLUMN,
   loadBoard,
   loadTodos,
   requestRefresh,
   type Ticket,
   type TodoData,
   type TodoState,
-  STATUS_LABELS,
   todoLabel,
   toFailure,
   withTimeout,
@@ -262,7 +260,7 @@ export function TasksView(props: { api: AppApi; active?: boolean; onSettings: ()
         </label>
       </div>
       {companions.map(({ workspace }) => <div key={workspace.uid} hidden={workspace.id !== current.id}>
-        <TicketBoard api={props.api} workspace={workspace} active={active && workspace.id === current.id} />
+        <TicketBoard api={props.api} workspace={workspace} active={active && workspace.id === current.id} onSettings={props.onSettings} />
       </div>)}
     </div>
   )
@@ -300,7 +298,7 @@ function useMutation(onChanged: () => void) {
   return { pending, failure, run }
 }
 
-function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean }) {
+function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean; onSettings: () => void }) {
   const { api, workspace, active } = props
   const wsId = workspace.id
   const navigate = useNavigate()
@@ -309,8 +307,9 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
     manual => requestRefresh(api, { workspaceId: wsId, manual }), d => d.index.state === 'scanning',
   )
   const action = useMutation(reload)
-  const lanes = useMemo(() => groupLanes(data?.tickets ?? []), [data])
-  const shown = LANES.filter(l => l !== 'repair' || lanes.repair.length > 0)
+  const columns = data?.workspace.columns ?? workspace.columns
+  const lanes = useMemo(() => groupLanes(columns, data?.tickets ?? []), [columns, data])
+  const shown = lanes.repair.length > 0 ? [...columns, REPAIR_COLUMN] : columns
   const boardRef = useRef<HTMLDivElement>(null)
   const dragging = useRef<Ticket | null>(null)
   const [form, setForm] = useState<'create' | 'promote' | null>(null)
@@ -318,7 +317,8 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
   useEffect(() => { if (form) firstField.current?.focus() }, [form])
   const [formPending, setFormPending] = useState(false)
   const blocked = !active || !!failure || busy || action.pending || formPending || !!mutationProblem(data?.index)
-  const [maintenanceStatus, setMaintenanceStatus] = useState<TaskStatus>('backlog')
+  const [selectedMaintenance, setMaintenanceStatus] = useState<TaskStatus>('')
+  const maintenanceStatus = columns.find(c => c.id === selectedMaintenance)?.id ?? data?.index.maintenance?.[0] ?? columns[0].id
   const [confirmMaintenance, setConfirmMaintenance] = useState(false)
   const [reconcileMaintenance, setReconcileMaintenance] = useState(false)
   const [showMaintenance, setShowMaintenance] = useState(false)
@@ -369,10 +369,10 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
     if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       const dir = e.key === 'ArrowLeft' ? -1 : 1
       do li += dir
-      while (li >= 0 && li < shown.length && lanes[shown[li]].length === 0)
+      while (li >= 0 && li < shown.length && lanes[shown[li].id].length === 0)
       if (li < 0 || li >= shown.length) return
     }
-    ci = Math.min(ci, lanes[shown[li]].length - 1)
+    ci = Math.min(ci, lanes[shown[li].id].length - 1)
     e.preventDefault()
     boardRef.current?.querySelector<HTMLElement>(`[data-lane="${li}"][data-index="${ci}"]`)?.focus()
   }
@@ -387,13 +387,14 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
             onClick={() => setForm(form === 'promote' ? null : 'promote')} disabled={action.pending || formPending}><Icon name="note" />Use existing note</button>
         </div>
         <div className="qz-actions">
+          <button type="button" className="qz-button" data-variant="quiet" onClick={props.onSettings}>Customize columns</button>
           <button type="button" className="qz-button" data-variant="quiet" aria-expanded={showMaintenance}
             onClick={() => setShowMaintenance(value => !value)} disabled={blocked}>Rebalance…</button>
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => navigate(KIRO_NOTES_ROUTE)}><Icon name="external" />Open Kiro Notes</button>
         </div>
       </div>
       {(['create', 'promote'] as const).map(mode => <div key={mode} hidden={form !== mode}>
-        <TicketForm mode={mode} api={api} workspace={workspace} firstField={form === mode ? firstField : undefined} disabled={!active || !!failure || busy || action.pending || !!mutationProblem(data?.index)} maintenance={data?.index.maintenance ?? []} onBusy={setFormPending} onChanged={reload} onClose={() => setForm(null)} onMaintenanceNeeded={needMaintenance} />
+        <TicketForm mode={mode} api={api} workspace={workspace} columns={columns} firstField={form === mode ? firstField : undefined} disabled={!active || !!failure || busy || action.pending || !!mutationProblem(data?.index)} maintenance={data?.index.maintenance ?? []} onBusy={setFormPending} onChanged={reload} onClose={() => setForm(null)} onMaintenanceNeeded={needMaintenance} />
       </div>)}
       <div className="qz-toolbar qz-board-meta">
         {data && <span className="qz-result-count">{data.tickets.length} {data.tickets.length === 1 ? 'ticket' : 'tickets'}</span>}
@@ -410,8 +411,8 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
         <div className="qz-notice qz-stack">
           <p>Rebalance a column to restore space between card positions. Progress is saved if interrupted.</p>
           <div className="qz-actions">
-            <select className="qz-input" aria-label="Column to rebalance" value={maintenanceStatus} onChange={e => setMaintenanceStatus(e.target.value as TaskStatus)}>
-              {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+            <select className="qz-input" aria-label="Column to rebalance" value={maintenanceStatus} onChange={e => setMaintenanceStatus(e.target.value)}>
+              {columns.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
             </select>
             <button type="button" className="qz-button" onClick={() => setConfirmMaintenance(true)} disabled={!active || action.pending || !!data?.index.writeBlocked}>Review column…</button>
           </div>
@@ -432,11 +433,11 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
       {data && data.tickets.length === 0 && data.index.state !== 'scanning' && <p className="qz-notice" data-variant="neutral">No tickets in “{workspace.name}” yet. Create a ticket or use an existing note.</p>}
       {data && (
         <div ref={boardRef} className="qz-board" tabIndex={0} onKeyDown={onKey} aria-label={`Board of ${workspace.name}`} role="group">
-          {shown.map((lane, li) => (
-            <section key={lane} aria-label={LANE_LABELS[lane]} className="qz-lane" data-lane-status={lane}
+          {shown.map(({ id: lane, label }, li) => (
+            <section key={lane} aria-label={label} className="qz-lane" data-lane-status={lane}
               onDragOver={e => { if (!blocked && lane !== 'repair') e.preventDefault() }}
               onDrop={e => { if (lane !== 'repair') drop(e, lane) }}>
-              <h3 className="qz-lane-heading"><span className="qz-dot" />{LANE_LABELS[lane]}<span className="qz-count">{lanes[lane].length}</span></h3>
+              <h3 className="qz-lane-heading"><span className="qz-dot" />{label}<span className="qz-count">{lanes[lane].length}</span></h3>
               {lanes[lane].length === 0 && <p className="qz-lane-empty">No tickets</p>}
               <ul className="qz-cards">
                 {lanes[lane].map((t, ci) => (
@@ -445,7 +446,7 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
                     onDragEnd={() => { dragging.current = null }}
                     onDragOver={e => { if (!blocked && lane !== 'repair') e.preventDefault() }}
                     onDrop={e => { if (lane !== 'repair') drop(e, lane, t) }}>
-                    <TicketCard ticket={t} lane={li} index={ci} onOpen={() => navigate(KIRO_NOTES_ROUTE)}
+                    <TicketCard ticket={t} lane={li} index={ci} columns={columns} onOpen={() => navigate(KIRO_NOTES_ROUTE)}
                       disabled={blocked || !!mutationProblem(data.index, t)} maintenance={data.index.maintenance ?? []}
                       onMove={(status, position) => move(t, status, position)}
                       onDemote={() => {
@@ -463,11 +464,12 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
   )
 }
 
-function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace: Workspace; firstField?: React.Ref<HTMLInputElement>; disabled: boolean; maintenance: TaskStatus[]; onBusy: (busy: boolean) => void; onChanged: () => void; onClose: () => void; onMaintenanceNeeded: (status: TaskStatus) => void }) {
+function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace: Workspace; columns: BoardColumn[]; firstField?: React.Ref<HTMLInputElement>; disabled: boolean; maintenance: TaskStatus[]; onBusy: (busy: boolean) => void; onChanged: () => void; onClose: () => void; onMaintenanceNeeded: (status: TaskStatus) => void }) {
   const [path, setPath] = useState('')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
-  const [status, setStatus] = useState<TaskStatus>('backlog')
+  const [selectedStatus, setStatus] = useState<TaskStatus>('')
+  const status = (props.columns.find(c => c.id === selectedStatus) ?? props.columns[0]).id
   const [source, setSource] = useState<SourceNote | null>(null)
   const [previewFailure, setPreviewFailure] = useState<ApiFailure | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
@@ -480,12 +482,12 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
   const action = useMutation(props.onChanged)
   useEffect(() => { props.onBusy(action.pending); return () => props.onBusy(false) }, [action.pending, props.onBusy])
   const blocked = props.disabled || action.pending || previewBusy
-  const columnBusy = props.maintenance.includes(props.mode === 'promote' ? 'backlog' : status)
+  const columnBusy = props.maintenance.includes(status)
   useEffect(() => {
     if (action.failure?.code === 'rank_exhausted' || action.failure?.code === 'maintenance_pending') {
-      props.onMaintenanceNeeded(props.mode === 'promote' ? 'backlog' : status)
+      props.onMaintenanceNeeded(status)
     }
-  }, [action.failure, props.mode, props.onMaintenanceNeeded, status])
+  }, [action.failure, props.onMaintenanceNeeded, status])
   const discard = () => {
     previewVersion.current++
     setPreviewBusy(false)
@@ -510,7 +512,7 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
   const submit = async () => {
     const ok = await action.run(() => props.mode === 'create'
       ? createTicket(props.api, props.workspace.id, { path: notePath, title: title.trim(), body, status })
-      : promoteNote(props.api, props.workspace.id, source!))
+      : promoteNote(props.api, props.workspace.id, source!, status))
     if (ok && mounted.current) {
       setPath(''); setTitle(''); setBody(''); setSource(null)
       props.onClose()
@@ -529,20 +531,20 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
         <input className="qz-input" ref={creating ? undefined : props.firstField} aria-label="Ticket note path" placeholder="tickets/fix-login.md" value={path} disabled={action.pending}
           onChange={e => { previewVersion.current++; setPreviewBusy(false); setPath(e.target.value); setSource(null) }} />
       </label>
-      {creating ? <>
+      {creating ?
         <label className="qz-field"><span>Description <span className="qz-muted">· Optional Markdown</span></span>
           <textarea className="qz-input" aria-label="Ticket description" placeholder="What needs to happen?" value={body} disabled={action.pending} onChange={e => setBody(e.target.value)} rows={4} />
         </label>
-        <label className="qz-field">Initial status
-          <select className="qz-input" value={status} disabled={action.pending} onChange={e => setStatus(e.target.value as TaskStatus)}>
-            {STATUSES.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
-          </select>
-        </label>
-      </> : <>
+      : <>
         <div className="qz-actions"><button type="button" className="qz-button" disabled={blocked || !path.trim()} onClick={() => void preview()}>Preview note</button></div>
         {source && <><pre className="qz-mono qz-note-preview">{source.content}</pre>
-          <p className="qz-muted">The note will appear in Backlog. Its content and existing properties are preserved.</p></>}
+          <p className="qz-muted">The note’s content and existing properties are preserved.</p></>}
       </>}
+      {(creating || source) && <label className="qz-field">Initial status
+        <select className="qz-input" value={status} disabled={action.pending} onChange={e => setStatus(e.target.value)}>
+          {props.columns.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+        </select>
+      </label>}
       {columnBusy && <span className="qz-notice">Resume ordering maintenance for this column before adding a ticket.</span>}
       <ErrorLine failure={previewFailure} /><ErrorLine failure={action.failure} />
       <div className="qz-actions">
@@ -553,8 +555,9 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
   </section>
 }
 
-function TicketCard(props: { ticket: Ticket; lane: number; index: number; onOpen: () => void; disabled: boolean; onMove: (status: TaskStatus, position?: number) => void; onDemote: () => void; maintenance: TaskStatus[]; count: number }) {
+function TicketCard(props: { ticket: Ticket; lane: number; index: number; columns: BoardColumn[]; onOpen: () => void; disabled: boolean; onMove: (status: TaskStatus, position?: number) => void; onDemote: () => void; maintenance: TaskStatus[]; count: number }) {
   const { ticket: t } = props
+  const status = t.lane === 'repair' ? '' : t.lane
   return <article className="qz-ticket">
     <div className="qz-ticket-content">
       <button type="button" className="qz-note-link" data-lane={props.lane} data-index={props.index} data-note-path={t.path} aria-label={`Open Kiro Notes: ${t.title}`} onClick={props.onOpen}>
@@ -569,18 +572,18 @@ function TicketCard(props: { ticket: Ticket; lane: number; index: number; onOpen
     </div>
     <div className="qz-ticket-footer">
       <div className="qz-ticket-status">
-        <select className="qz-input" aria-label={`Move ${t.title} to column`} title="Move to column" value={t.status ?? ''} disabled={props.disabled}
-          onChange={e => props.onMove(e.target.value as TaskStatus)}>
-          {!t.status && <option value="">Needs repair</option>}
-          {STATUSES.map(s => <option key={s} value={s} disabled={props.maintenance.includes(s)}>{STATUS_LABELS[s]}</option>)}
+        <select className="qz-input" aria-label={`Move ${t.title} to column`} title="Move to column" value={status} disabled={props.disabled}
+          onChange={e => props.onMove(e.target.value)}>
+          {!status && <option value="" disabled>{t.status ? `No column for ${t.status}` : 'Needs repair'}</option>}
+          {props.columns.map(c => <option key={c.id} value={c.id} disabled={props.maintenance.includes(c.id)}>{c.label}</option>)}
         </select>
       </div>
       <details className="qz-ticket-actions">
         <summary className="qz-button qz-icon-button" data-variant="quiet" aria-label={`Actions for ${t.title}`} title="Ticket actions"><Icon name="more" /></summary>
         <div className="qz-ticket-action-list">
           <CopyName path={t.path} />
-          <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} up`} disabled={props.disabled || props.index === 0 || !t.status} onClick={() => t.status && props.onMove(t.status, props.index - 1)}><Icon name="up" />Move up</button>
-          <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} down`} disabled={props.disabled || props.index >= props.count - 1 || !t.status} onClick={() => t.status && props.onMove(t.status, props.index + 1)}><Icon name="down" />Move down</button>
+          <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} up`} disabled={props.disabled || props.index === 0 || !status} onClick={() => props.onMove(status, props.index - 1)}><Icon name="up" />Move up</button>
+          <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} down`} disabled={props.disabled || props.index >= props.count - 1 || !status} onClick={() => props.onMove(status, props.index + 1)}><Icon name="down" />Move down</button>
           <button type="button" className="qz-button qz-destructive" data-variant="quiet" aria-label={`Remove ${t.title} from board`} disabled={props.disabled} onClick={props.onDemote}><Icon name="minus" />Remove ticket…</button>
         </div>
       </details>
@@ -686,7 +689,7 @@ export function TodoView(props: { api: AppApi; onSettings: () => void }) {
             <header className="qz-todo-header">
               <span className="qz-note-icon"><Icon name="note" /></span>
               <div className="qz-todo-identity">
-                <h3>{g.title}{g.ticket && g.status && <span className="qz-status-pill" data-lane-status={g.status}><span className="qz-dot" />{STATUS_LABELS[g.status]}</span>}</h3>
+                <h3>{g.title}{g.ticket && g.status && <span className="qz-status-pill" data-lane-status={g.status}><span className="qz-dot" />{g.statusLabel ?? g.status}</span>}</h3>
                 <p className="qz-todo-meta"><span>{g.workspace}</span><span aria-hidden="true">/</span><span className="qz-mono qz-path" title={g.path}>{g.path}</span></p>
               </div>
               <CopyName path={g.path} compact />

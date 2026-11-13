@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.0.2 - 2026-11-09
 
+- Add, rename, reorder, and remove board columns per connected folder. The
+  first column is the default for new tickets. Tickets in a removed column
+  remain in **Needs repair** until moved or the original status ID is restored.
 - Start an unsent notes request from Settings and choose a Bot or agent in
   KiroCrew chat. Copy the same folder-specific instructions into an existing
   conversation.

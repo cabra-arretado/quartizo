@@ -18,6 +18,7 @@ from bisect import bisect_right
 from dataclasses import dataclass, field
 
 import vendored
+from columns import valid_status_id
 
 vendored.activate()
 
@@ -33,7 +34,6 @@ from ruamel.yaml.events import (  # noqa: E402
 )
 from ruamel.yaml.nodes import MappingNode, ScalarNode, SequenceNode  # noqa: E402
 
-STATUSES = ("backlog", "ready", "in_progress", "review", "done")
 MAX_FILE_BYTES = 2 * 1024 * 1024
 MAX_FRONTMATTER_BYTES = 64 * 1024
 MAX_YAML_EVENTS = 8192
@@ -239,8 +239,8 @@ def _ticket_fields(source: _Source, note: Note) -> None:
     if note.ticket_id is None or not _TICKET_ID.fullmatch(note.ticket_id):
         note.diagnose("invalid_id", "ticket requires a UUID or a preserved 32-hex legacy UID")
         note.ticket_id = None
-    if note.status not in STATUSES:
-        note.diagnose("invalid_status", "ticket status is missing or unsupported")
+    if not valid_status_id(note.status):
+        note.diagnose("invalid_status", "ticket status is missing or has an invalid ID")
         note.status = None
     if not valid_rank(note.order):
         note.diagnose("invalid_order", "ticket order is missing or invalid")

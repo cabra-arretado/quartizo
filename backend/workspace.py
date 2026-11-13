@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import errno
 import grp
+import json
 import os
 import pwd
 import sqlite3
@@ -32,10 +33,11 @@ import stat
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import db
+from columns import DEFAULT_COLUMNS, Column, valid_status_id
 
 MAX_REL_PATH_CHARS = 1024
 MAX_SEGMENT_BYTES = 255
@@ -67,14 +69,40 @@ class Workspace:
     path: str
     # Kiro Notes companion mode: Quartizo only reads this folder (README).
     companion: bool = False
+    columns: tuple[Column, ...] = DEFAULT_COLUMNS
+    columns_version: int = 0
+
+    @property
+    def statuses(self) -> tuple[str, ...]:
+        return tuple(column.id for column in self.columns)
 
     def to_json(self) -> dict:
         return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path,
-                "companion": self.companion}
+                "companion": self.companion, "columns": [asdict(column) for column in self.columns],
+                "columnsVersion": self.columns_version}
 
 
 def _workspace(row: sqlite3.Row) -> Workspace:
-    return Workspace(row["id"], row["uid"], row["name"], row["path"], bool(row["companion"]))
+    columns = tuple(Column(**c) for c in json.loads(row["board_columns"])) if row["board_columns"] else DEFAULT_COLUMNS
+    return Workspace(row["id"], row["uid"], row["name"], row["path"], bool(row["companion"]),
+                     columns, row["columns_version"])
+
+
+def validate_columns(raw: object) -> tuple[Column, ...]:
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 20:
+        raise ApiError(400, "bad_columns", "a board needs between 1 and 20 columns")
+    columns, ids = [], set()
+    for entry in raw:
+        if not isinstance(entry, dict) or not valid_status_id(entry.get("id")):
+            raise ApiError(400, "bad_columns", "status IDs start with a lowercase letter, use only lowercase letters, digits and underscores, and cannot be 'repair' (32 characters max)")
+        status, label = entry["id"], entry.get("label")
+        if not isinstance(label, str) or not label.strip() or len(label.strip()) > 40 or not label.isprintable():
+            raise ApiError(400, "bad_columns", "column names must be nonempty, printable and at most 40 characters")
+        if status in ids:
+            raise ApiError(400, "bad_columns", "status IDs must be unique")
+        ids.add(status)
+        columns.append(Column(status, label.strip()))
+    return tuple(columns)
 
 
 def validate_relpath(rel: object) -> list[str]:
@@ -347,6 +375,22 @@ class Registry:
             if not db.set_companion(conn, workspace_id, enabled):
                 raise ApiError(404, "workspace_not_found", "no such workspace")
         return self.get(workspace_id)
+
+    def set_columns(self, workspace_id: int, columns: tuple[Column, ...], version: object) -> Workspace:
+        if type(version) is not int or not 0 <= version < 2**63 - 1:
+            raise ApiError(400, "bad_columns", "columnsVersion must be the version last read")
+        with self._lock, self._conn() as conn, db.transaction(conn):
+            row = db.get_workspace(conn, workspace_id)
+            if row is None:
+                raise ApiError(404, "workspace_not_found", "no such workspace")
+            ws = _workspace(row)
+            if version != ws.columns_version:
+                raise ApiError(409, "columns_changed", "column settings changed. Reload Settings to review them before saving again")
+            if columns == ws.columns:
+                return ws
+            conn.execute("UPDATE workspaces SET board_columns = ?, columns_version = columns_version + 1 WHERE id = ?",
+                         (json.dumps([asdict(column) for column in columns]), workspace_id))
+            return _workspace(db.get_workspace(conn, workspace_id))
 
     def canonical_root(self, raw: object) -> str:
         """Validate a candidate root and return its realpath, or raise."""

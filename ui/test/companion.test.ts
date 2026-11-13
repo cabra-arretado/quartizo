@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { AppApi } from '@kirocrew/app-sdk'
 import {
-  addWorkspace, ago, companionStatus, describeIndex, filterTodos, groupLanes, indexWarning, LANES, listWorkspaces, loadBoard,
+  addWorkspace, ago, companionStatus, describeIndex, filterTodos, groupLanes, indexWarning, listWorkspaces, loadBoard,
   loadTodos, query, removeWorkspace, REQUEST_TIMEOUT_MS, requestRefresh, setCompanion, type Ticket, type TodoGroup, todoLabel,
   toFailure, withTimeout, createTicket, moveTicket, mutationProblem, planMove, promoteNote, readSource,
   toggleTodo, previewMigration, migrateTasks, exportLegacyTasks,
@@ -122,17 +122,18 @@ describe('withTimeout', () => {
 })
 
 describe('board lanes', () => {
+  const columns = [{ id: 'done', label: 'Done' }, { id: 'queue', label: 'Queue' }, { id: 'backlog', label: 'Backlog' }]
+
   it('keeps the backend order inside each lane and has a repair lane last', () => {
-    const lanes = groupLanes([ticket('b', 'ready'), ticket('x', 'repair'), ticket('a', 'ready'), ticket('d', 'done')])
-    expect(LANES[LANES.length - 1]).toBe('repair')
-    expect(lanes.ready.map(t => t.path)).toEqual(['b', 'a'])
+    const lanes = groupLanes(columns, [ticket('b', 'queue'), ticket('x', 'repair'), ticket('a', 'queue'), ticket('d', 'done')])
+    expect(Object.keys(lanes)).toEqual(['done', 'queue', 'backlog', 'repair'])
+    expect(lanes.queue.map(t => t.path)).toEqual(['b', 'a'])
     expect(lanes.repair.map(t => t.path)).toEqual(['x'])
     expect(lanes.backlog).toEqual([])
   })
 
   it('puts an unknown lane in repair rather than dropping it', () => {
-    const odd = { ...ticket('odd', 'ready'), lane: 'weird' as never }
-    expect(groupLanes([odd]).repair.map(t => t.path)).toEqual(['odd'])
+    expect(groupLanes(columns, [ticket('odd', 'constructor')]).repair.map(t => t.path)).toEqual(['odd'])
   })
 })
 

@@ -22,8 +22,19 @@ from dataclasses import replace
 
 import companion
 import mdsource
-from mdsource import MAX_RANK, STATUSES, _Source
-from workspace import ApiError, Registry, Workspace, open_dir_at, open_file_at, open_root, os_error, validate_relpath
+from columns import DEFAULT_STATUSES, valid_status_id
+from mdsource import MAX_RANK, _Source
+from workspace import (
+    ApiError,
+    Registry,
+    Workspace,
+    open_dir_at,
+    open_file_at,
+    open_root,
+    os_error,
+    validate_columns,
+    validate_relpath,
+)
 
 _HEX = re.compile(r"[0-9a-f]{64}")
 _ID = re.compile(r"(?:[0-9a-f]{32}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})")
@@ -184,9 +195,8 @@ def patch_scalar(path: str, data: bytes, key: str, value: str) -> bytes:
         raise ApiError(409, "unsupported_scalar", "only single-line string properties can be changed")
     if not re.fullmatch(r"[a-z0-9_]+", value):
         raise ApiError(400, "bad_value", "unsupported property value")
-    # YAML can infer an integer when a previously plain rank acquires only
-    # numeric digits. Keep the updated value a string in every case.
-    quote = node.style or ('"' if key == "order" else "")
+    # YAML can infer types from plain ranks and some custom status IDs.
+    quote = node.style or ('"' if key == "order" or (key == "status" and value not in DEFAULT_STATUSES) else "")
     start = source.byte_offset(source.yaml_start + node.start_mark.index)
     end = source.byte_offset(source.yaml_start + node.end_mark.index)
     return data[:start] + f"{quote}{value}{quote}".encode("ascii") + data[end:]
@@ -194,7 +204,7 @@ def patch_scalar(path: str, data: bytes, key: str, value: str) -> bytes:
 
 def promote_bytes(path: str, data: bytes, uid: str, rank: str, status: str = "backlog") -> bytes:
     source, _ = _source(path, data)
-    if not _ID.fullmatch(uid) or not mdsource.valid_rank(rank) or status not in STATUSES:
+    if not _ID.fullmatch(uid) or not mdsource.valid_rank(rank) or not valid_status_id(status):
         raise ApiError(400, "bad_ticket", "invalid ticket identity, rank or status")
     if any(k in source.fields for k in ("id", "type", "status", "order")):
         raise ApiError(409, "property_collision", "existing id/type/status/order properties require explicit repair")
@@ -202,7 +212,8 @@ def promote_bytes(path: str, data: bytes, uid: str, rank: str, status: str = "ba
         raise ApiError(409, "unsupported_yaml", "adding ticket properties requires block-style frontmatter")
     endings = re.findall(r"\r\n|\r|\n", source.text)
     newline = endings[0] if endings else "\n"
-    fields = newline.join((f'id: "{uid}"', "type: ticket", f"status: {status}", f'order: "{rank}"', ""))
+    status_yaml = status if status in DEFAULT_STATUSES else f'"{status}"'
+    fields = newline.join((f'id: "{uid}"', "type: ticket", f"status: {status_yaml}", f'order: "{rank}"', ""))
     if source.yaml_end is not None:
         # An explicit YAML document terminator belongs before the Markdown
         # delimiter. Appending after it would start invalid trailing YAML.
@@ -327,7 +338,15 @@ class CompanionWriter:
             raise ApiError(409, "maintenance_pending", "resume this column rebalance before moving tickets")
 
     def maintenance(self, ws: Workspace) -> list[str]:
-        return [s for s in STATUSES if self._journal_path(ws, s).exists()]
+        return [s for s in ws.statuses if self._journal_path(ws, s).exists()]
+
+    def set_columns(self, ws_id: int, body: dict) -> Workspace:
+        columns = validate_columns(body.get("columns"))
+        with self.lock:
+            ws = self.registry.get(ws_id)
+            if set(self.maintenance(ws)) - {column.id for column in columns}:
+                raise ApiError(409, "maintenance_pending", "finish the pending rebalance before removing that column")
+            return self.registry.set_columns(ws_id, columns, body.get("columnsVersion"))
 
     def _finish(self, ws: Workspace, path: str, data: bytes, expected: str | None, *, validate=None) -> dict:
         def validate_scope() -> None:
@@ -352,10 +371,10 @@ class CompanionWriter:
             path = body.get("path")
             _path(path)
             title, description = body.get("title"), body.get("body", "")
-            status = body.get("status", "backlog")
+            status = body.get("status", ws.columns[0].id)
             if not isinstance(title, str) or not title.strip() or len(title) > 200 or any(ord(c) < 32 for c in title):
                 raise ApiError(400, "bad_title", "title must be a nonempty single line of at most 200 characters")
-            if not isinstance(description, str) or status not in STATUSES:
+            if not isinstance(description, str) or status not in ws.statuses:
                 raise ApiError(400, "bad_ticket", "invalid description or status")
             self._not_maintaining(ws, status)
             snapshot = self._snapshot()
@@ -381,10 +400,13 @@ class CompanionWriter:
             path = body.get("path")
             data = read_note(ws, path)
             _check_hash(data, body.get("expectedHash"))
-            self._not_maintaining(ws, "backlog")
+            status = body.get("status", ws.columns[0].id)
+            if status not in ws.statuses:
+                raise ApiError(400, "bad_status", "this status has no column in the workspace")
+            self._not_maintaining(ws, status)
             snapshot = self._snapshot()
             uid = str(uuid.uuid4())
-            result = promote_bytes(path, data, uid, self._append_rank(snapshot, ws, "backlog"))
+            result = promote_bytes(path, data, uid, self._append_rank(snapshot, ws, status), status)
             return self._finish(ws, path, result, digest(data))
 
     def demote(self, ws: Workspace, body: dict) -> dict:
@@ -418,7 +440,7 @@ class CompanionWriter:
         with self.lock:
             ws = self._require(ws)
             path, status = body.get("path"), body.get("status")
-            if status not in STATUSES:
+            if status not in ws.statuses:
                 raise ApiError(400, "bad_status", "unsupported status")
             data = read_note(ws, path)
             _check_hash(data, body.get("expectedHash"))
@@ -516,7 +538,7 @@ class CompanionWriter:
         with self.lock:
             ws = self._require(ws)
             status = body.get("status")
-            if status not in STATUSES:
+            if status not in ws.statuses:
                 raise ApiError(400, "bad_status", "unsupported status")
             if not isinstance(body.get("reconcile", False), bool):
                 raise ApiError(400, "bad_reconcile", "reconcile must be true or false")

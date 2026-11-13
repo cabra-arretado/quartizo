@@ -162,6 +162,11 @@ MIGRATIONS: tuple[str, ...] = (
         PRIMARY KEY (workspace_uid, generation, path, ordinal)
     );
     """,
+    # 7: ordered, user-owned board preferences, independent of the derived index.
+    """
+    ALTER TABLE workspaces ADD COLUMN board_columns TEXT;
+    ALTER TABLE workspaces ADD COLUMN columns_version INTEGER NOT NULL DEFAULT 0;
+    """,
 )
 
 
@@ -214,11 +219,11 @@ def migrate(conn: sqlite3.Connection) -> int:
 
 
 def list_workspaces(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    return conn.execute("SELECT id, uid, name, path, companion, created_at FROM workspaces ORDER BY name, id").fetchall()
+    return conn.execute("SELECT * FROM workspaces ORDER BY name, id").fetchall()
 
 
 def get_workspace(conn: sqlite3.Connection, workspace_id: int) -> sqlite3.Row | None:
-    return conn.execute("SELECT id, uid, name, path, companion, created_at FROM workspaces WHERE id = ?",
+    return conn.execute("SELECT * FROM workspaces WHERE id = ?",
                         (workspace_id,)).fetchone()
 
 

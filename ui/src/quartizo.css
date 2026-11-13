@@ -246,6 +246,7 @@
   padding: 3px 2px 10px;
   font-size: 13px;
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 .qz-dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--qz-status, var(--qz-ok)); }
 .qz-dot[data-attention="true"] { background: var(--qz-warning); }

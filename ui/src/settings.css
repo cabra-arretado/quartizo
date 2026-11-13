@@ -211,4 +211,20 @@
   cursor: pointer;
 }
 
-.qz-agent-prompt { width: 100%; }
+.qz-column-list {
+  display: grid;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.qz-column-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 6px 10px;
+}
+
+.qz-column-row .qz-field { flex: 1 1 140px; }
+.qz-column-row .qz-field > span { overflow-wrap: anywhere; }
+.qz-column-row .qz-input, .qz-agent-prompt { width: 100%; }

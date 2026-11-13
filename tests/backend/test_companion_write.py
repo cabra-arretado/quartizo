@@ -54,6 +54,37 @@ class WriteTests(unittest.TestCase):
         self.assertEqual(result["id"], "a" * 32)
         self.assertTrue(self.index._queue)
 
+    def test_custom_columns_persist_and_keep_removed_statuses_recoverable(self):
+        columns = [{"id": "null", "label": "New queue"}, {"id": "ready", "label": "Up next"}]
+        initial = {"columns": columns, "columnsVersion": self.ws.columns_version}
+        saved = self.writer.set_columns(self.ws.id, initial)
+        self.assertEqual(Registry(self.registry.data_dir).get(self.ws.id), saved)
+        self.refuse("columns_changed", self.writer.set_columns, self.ws.id, initial)
+        self.refuse("bad_columns", self.writer.set_columns, self.ws.id, {**initial, "columns": columns * 2})
+
+        result = self.writer.create(self.ws, {"path": "ticket.md", "title": "Custom", "body": "- [ ] Task\n"})
+        self.assertEqual(result["status"], "null")
+        path = self.vault / "ticket.md"
+        before = path.read_bytes()
+        self.assertIn(b'status: "null"', before)
+        self.index.scan(saved, companion._Scan(False))
+        self.assertEqual(self.index.todos([saved], "open")["groups"][0]["statusLabel"], "New queue")
+
+        update = {"columns": columns[1:], "columnsVersion": saved.columns_version}
+        journal = self.writer._journal_path(saved, "null")
+        self.writer._save_journal(journal, {})
+        self.assertEqual(self.index.status(saved)["maintenance"], ["null"])
+        self.refuse("maintenance_pending", self.writer.set_columns, self.ws.id, update)
+        journal.unlink()
+
+        updated = self.writer.set_columns(self.ws.id, update)
+        item = self.index.board(updated)["tickets"][0]
+        self.assertEqual((item["status"], item["lane"], item["diagnostics"][0]["code"]),
+                         ("null", "repair", "unconfigured_status"))
+        self.assertEqual(path.read_bytes(), before)
+        self.refuse("bad_status", self.writer.move, self.ws, self.body(status="null"))
+        self.assertEqual(self.writer.move(self.ws, self.body(status="ready"))["status"], "ready")
+
     def test_preserved_mtime_external_edit_is_refused(self):
         self.ticket()
         request = self.body(status="done")

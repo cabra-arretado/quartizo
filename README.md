@@ -6,7 +6,7 @@ Notes; Quartizo shares the same folder and provides
 
 - **Tasks**: a Kanban board whose card moves update the ticket notes;
 - **TODOs**: checkboxes grouped by note, with completion saved in the source;
-- **Settings** manages connected folders and opens notes requests in KiroCrew chat.
+- **Settings** manages connected folders and board columns and opens notes requests in KiroCrew chat.
 
 Use a card title or the arrow beside a TODO to open Kiro Notes. Copy the note
 name from the card’s actions or the checklist header and paste it into Kiro
@@ -143,8 +143,9 @@ Outside the install root the gateway asks the operator to run it with
 
 **Data** lives in `$KIROCREW_HOME/apps/quartizo/data/` (default
 `~/.kiro/crew/apps/quartizo/data/`): `quartizo.sqlite3` holds the folder
-registry, derived index, and application migration/maintenance records. Your
-notes remain in the registered folders. Back up application data before
+registry, board column settings, derived index, and application
+migration/maintenance records. Your notes remain in the registered folders.
+Back up application data before
 upgrades or legacy-card conversion; deleting only the derived index is safe,
 while deleting the data directory also loses registrations and audit state.
 
@@ -163,9 +164,10 @@ network, sessionApproval or uploads). Earlier versions also asked for
    **Settings**, add the same folder's absolute path. It is registered and
    shared with Kiro Notes in one step; nothing on disk changes.
 2. A **ticket** is a note whose frontmatter has `type: ticket`, plus `id` (a
-   UUID, or a 32-hex legacy UID), `status` (`backlog`, `ready`, `in_progress`,
-   `review`, `done`) and `order` (32 lowercase hex characters, quoted). Its
-   title is its first `# ` heading, or its file name:
+   UUID, or a 32-hex legacy UID), `status` (a configured column's ID) and
+   `order` (32 lowercase hex characters, quoted). The default column IDs are
+   `backlog`, `ready`, `in_progress`, `review`, and `done`. The ticket title
+   comes from its first `# ` heading or its file name.
 
    ```markdown
    ---
@@ -180,13 +182,13 @@ network, sessionApproval or uploads). Earlier versions also asked for
    - [ ] Reproduce the timeout
    ```
 
-   The full format contract is in
-   [docs/markdown-tickets-phase1.md](docs/markdown-tickets-phase1.md).
+   The [phase 1 format contract](docs/markdown-tickets-phase1.md) describes
+   the original format and rank rules.
 3. **Tasks** shows the tickets by status, sorted by `order` (then `id`).
-   Tickets with missing or invalid fields, or metadata Quartizo cannot read
-   safely (invalid YAML, duplicate keys, anchors), go to a **Needs repair**
-   lane; the badge says why. Two notes with the same `id` are both shown and
-   both flagged, never merged. Arrow keys move between cards.
+   Tickets without a configured status go to **Needs repair**. Diagnostic
+   badges explain metadata problems such as invalid YAML or duplicate ticket
+   IDs. Two notes with the same `id` are shown separately. Arrow keys move
+   between cards.
    **New ticket** creates a Markdown note; **Use existing note** previews a
    note before adding ticket properties. Change the status selector, drag a
    card into a column or before another card, or choose **Move up** or
@@ -213,12 +215,20 @@ network, sessionApproval or uploads). Earlier versions also asked for
    has tasks from Quartizo's old database board says how many, and removing it
    deletes them only once you confirm.
 
-### Working with a Bot or agent
+### Board columns and working with an agent
 
-In **Settings**, expand **Work with a Bot or agent** under your connected
-notes folder and choose **Open in KiroCrew chat**. In the chat composer, pick
-a Bot or agent, add your request to the draft, and send it. The draft includes
-the folder path, board column IDs,
+In **Settings**, expand **Board columns** under a connected folder. Rename,
+reorder, add, or remove columns and choose **Save columns**. The first column
+is the default when you create a ticket or use an existing note. A rename
+keeps the status ID stored in Markdown. If you remove a column, its tickets
+appear in **Needs repair**. Move them to a configured column or add a column
+with the same status ID to restore them to the board. Custom status IDs start
+with a lowercase letter, use lowercase letters, digits, and underscores, and
+are at most 32 characters. Quote them in Markdown frontmatter.
+
+Under the same folder, expand **Work with a Bot or agent** and choose **Open in
+KiroCrew chat**. In the chat composer, pick a Bot or agent, add your request to
+the draft, and send it. The draft includes the folder path, saved column IDs,
 and instructions for creating and updating notes, tickets, and TODOs. The
 selected agent needs read and write access to the connected folder through
 KiroCrew. If the chat needs a project directory, choose the connected folder

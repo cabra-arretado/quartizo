@@ -56,7 +56,7 @@ import legacy_migration  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
 
 APP_NAME = "quartizo"
-APP_VERSION = "0.0.2-rc.0"
+APP_VERSION = "0.0.2"
 SECRET_ENV = "KIROCREW_PROXY_SECRET"
 PROXY_HEADER = "X-KiroCrew-Proxy"
 PRINCIPAL_HEADER = "X-KiroCrew-Principal"
@@ -341,6 +341,9 @@ class Handler(BaseHTTPRequestHandler):
                 return 200, {"workspace": ws.to_json(), "index": index.status(ws)}
             if parts[3:] == ["board"] and method == "GET":
                 return 200, index.board(registry.get(ws_id))
+            if parts[3:] == ["columns"] and method == "PUT":
+                ws = self.server.writer.set_columns(ws_id, self._json_body())  # type: ignore[attr-defined]
+                return 200, {"workspace": ws.to_json()}
             return self._handle_writes(registry, ws_id, parts[3:], query)
         return None
 

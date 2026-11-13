@@ -21,6 +21,7 @@ from urllib.parse import quote
 import companion_write
 import db
 import mdsource
+from columns import DEFAULT_STATUSES
 from workspace import ApiError, Registry, Workspace, validate_relpath
 
 _UID = re.compile(r"[0-9a-f]{32}")
@@ -118,7 +119,7 @@ class LegacyMigration:
         result, warnings = [], []
         for task in exported["tasks"]:
             uid, status = task["uid"], task["status"]
-            if not isinstance(uid, str) or not _UID.fullmatch(uid) or status not in mdsource.STATUSES:
+            if not isinstance(uid, str) or not _UID.fullmatch(uid) or status not in DEFAULT_STATUSES:
                 raise ApiError(409, "legacy_invalid", "a legacy card has invalid identity or status; export it before repair")
             offsets[status] = offsets.get(status, 0) + 1
             rank = f"{mdsource.MAX_RANK // (counts[status] + 1) * offsets[status]:032x}"

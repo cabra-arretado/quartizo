@@ -15,7 +15,7 @@ Else install Playwright's browser with `npx playwright install chromium`, or set
 Scenarios cover drafts across tabs/modes/workspaces, navigation during an
 in-flight write, real mouse self-drop, rank exhaustion and recovery for both
 creation and promotion, renamed/edited interrupted migration, inert hostile
-HTML, the clipboard and unsent chat handoffs, and the unfixed-host write
-prerequisite. A failure keeps a screenshot in
+HTML, per-folder columns, clipboard copying, unsent chat handoff, and the
+unfixed-host write prerequisite. A failure keeps a screenshot in
 the printed temporary artifact directory; successful runs remove their
 temporary bundle and fixtures.

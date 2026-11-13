@@ -1,5 +1,5 @@
 /**
- * Settings: the folders Quartizo reads. A folder added here is shared with
+ * Settings: connected folders and their board preferences. A folder added here is shared with
  * Kiro Notes right away (companion mode), since the board and the TODO list
  * only show companion folders. Legacy conversion is an explicit, backed-up action.
  */
@@ -7,9 +7,8 @@ import { type AppApi, useChatLauncher } from '@kirocrew/app-sdk'
 import { useEffect, useRef, useState } from 'react'
 import {
   addWorkspace,
-  STATUSES,
-  STATUS_LABELS,
   type ApiFailure,
+  type BoardColumn,
   companionStatus,
   listWorkspaces,
   exportLegacyTasks,
@@ -19,6 +18,7 @@ import {
   type MigrationResult,
   removeWorkspace,
   requestRefresh,
+  saveColumns,
   setCompanion,
   toFailure,
   type Workspace,
@@ -85,7 +85,7 @@ export default function Settings(props: { api: AppApi }) {
       <style>{styles}</style>
       <header>
         <h2 className="qz-section-title">Settings</h2>
-        <p className="qz-section-description">Manage connected folders or start a notes request in KiroCrew.</p>
+        <p className="qz-section-description">Manage connected folders and board columns, or start a notes request in KiroCrew.</p>
       </header>
       <ErrorLine failure={loadFailure} />
       <ErrorLine failure={writeBlocked} />
@@ -98,7 +98,8 @@ export default function Settings(props: { api: AppApi }) {
           {!workspaces && !loadFailure && <p className="qz-muted" role="status">Loading folders…</p>}
           {workspaces?.length === 0 && <p className="qz-empty">Add a folder to start viewing its tickets and TODOs.</p>}
           {workspaces?.map(w => (
-            <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={() => setReload(n => n + 1)} />
+            <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={() => setReload(n => n + 1)}
+              onColumnsSaved={saved => setWorkspaces(items => items?.map(item => item.id === saved.id ? { ...item, ...saved } : item) ?? null)} />
           ))}
         </section>
         <form
@@ -130,7 +131,7 @@ export default function Settings(props: { api: AppApi }) {
   )
 }
 
-function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked: ApiFailure | null; onChanged: () => void }) {
+function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked: ApiFailure | null; onChanged: () => void; onColumnsSaved: (workspace: Workspace) => void }) {
   const { api, workspace: w } = props
   const { busy, failure, run } = useAction()
   const [message, setMessage] = useState<string | null>(null)
@@ -184,7 +185,7 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
           )}
         </div>
       </div>
-      {w.companion && <AgentPrompt workspace={w} />}
+      {w.companion && <BoardSettings api={api} workspace={w} onSaved={props.onColumnsSaved} />}
       {!!w.oldTasks && <LegacyMigration api={api} workspace={w} writeBlocked={props.writeBlocked} onChanged={props.onChanged} />}
       {confirmRemove && (
         <div role="alertdialog" aria-label="Remove folder" className="qz-notice qz-settings-notice">
@@ -219,12 +220,85 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
   )
 }
 
-
-const NOTES_COLUMNS = STATUSES.map(id => ({ id, label: STATUS_LABELS[id] }))
+function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Workspace; onSaved: (workspace: Workspace) => void }) {
+  const [draft, setDraft] = useState<{ columns: BoardColumn[]; version: number } | null>(null)
+  const [newLabel, setNewLabel] = useState('')
+  const [newId, setNewId] = useState<string | null>(null)
+  const [message, setMessage] = useState('')
+  const { busy, failure, run } = useAction()
+  const columns = draft?.columns ?? workspace.columns
+  const statusId = newId ?? newLabel.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32)
+  const canAdd = columns.length < 20 && !!newLabel.trim() && /^[a-z][a-z0-9_]{0,31}$/.test(statusId) && statusId !== 'repair' && !columns.some(c => c.id === statusId)
+  const removed = workspace.columns.some(saved => !columns.some(c => c.id === saved.id))
+  const edit = (next: BoardColumn[]) => {
+    setDraft({ columns: next, version: draft?.version ?? workspace.columnsVersion })
+    setMessage('')
+  }
+  const reorder = (index: number, direction: number) => {
+    const next = [...columns]
+    const [column] = next.splice(index, 1)
+    next.splice(index + direction, 0, column)
+    edit(next)
+  }
+  const save = () => run(async () => {
+    if (!draft) return
+    const saved = await saveColumns(api, workspace.id, columns, draft.version)
+    onSaved(saved)
+    setDraft(null)
+    setMessage('Board columns saved.')
+  })
+  const changed = JSON.stringify(columns) !== JSON.stringify(workspace.columns)
+  return <>
+    <details className="qz-settings-disclosure">
+      <summary>Board columns</summary>
+      <div className="qz-stack">
+        <p className="qz-muted">Rename, reorder, add, or remove columns for this folder. The first column is the default for new tickets.</p>
+        <ul className="qz-column-list">
+          {columns.map((column, index) => <li className="qz-column-row" key={column.id}>
+            <label className="qz-field">
+              <span className="qz-mono">{column.id}</span>
+              <input className="qz-input" aria-label={`Name for ${column.id}`} value={column.label} maxLength={40} disabled={busy}
+                onChange={e => edit(columns.map(c => c.id === column.id ? { ...c, label: e.target.value } : c))} />
+            </label>
+            <div className="qz-settings-actions">
+              <button className="qz-button" type="button" aria-label={`Move column ${column.id} up`} disabled={busy || index === 0} onClick={() => reorder(index, -1)}><Icon name="up" /></button>
+              <button className="qz-button" type="button" aria-label={`Move column ${column.id} down`} disabled={busy || index === columns.length - 1} onClick={() => reorder(index, 1)}><Icon name="down" /></button>
+              <button className="qz-button" type="button" aria-label={`Remove column ${column.id}`} disabled={busy || columns.length === 1} onClick={() => edit(columns.filter(c => c.id !== column.id))}>Remove</button>
+            </div>
+          </li>)}
+        </ul>
+        {columns.length < 20 && <form className="qz-column-row" onSubmit={e => {
+          e.preventDefault()
+          if (busy || !canAdd) return
+          edit([...columns, { id: statusId, label: newLabel.trim() }])
+          setNewLabel('')
+          setNewId(null)
+        }}>
+          <label className="qz-field">New column name
+            <input className="qz-input" value={newLabel} maxLength={40} disabled={busy} onChange={e => setNewLabel(e.target.value)} />
+          </label>
+          <label className="qz-field">New status ID
+            <input className="qz-input qz-mono" value={statusId} maxLength={32} disabled={busy} onChange={e => setNewId(e.target.value)} />
+          </label>
+          <button className="qz-button" type="submit" disabled={busy || !canAdd}>Add column</button>
+        </form>}
+        <p className="qz-muted">Status IDs are saved in notes. Use a unique ID starting with a lowercase letter, followed by lowercase letters, digits, or underscores.</p>
+        {removed && <p className="qz-notice">Tickets in removed columns will appear in Needs repair until you move them or restore the column with the same status ID.</p>}
+        <div className="qz-settings-actions">
+          <button className="qz-button" data-variant="primary" type="button" disabled={busy || !changed || columns.some(c => !c.label.trim())} onClick={() => void save()}>Save columns</button>
+          {changed && <button className="qz-button" data-variant="quiet" type="button" disabled={busy} onClick={() => { setDraft(null); setMessage('') }}>Discard changes</button>}
+          <span className="qz-muted" role="status">{message}</span>
+        </div>
+        <ErrorLine failure={failure} />
+      </div>
+    </details>
+    <AgentPrompt workspace={workspace} />
+  </>
+}
 
 function AgentPrompt({ workspace }: { workspace: Workspace }) {
   const { openChat } = useChatLauncher()
-  const prompt = agentPrompt(workspace.path, NOTES_COLUMNS)
+  const prompt = agentPrompt(workspace.path, workspace.columns)
   const field = useRef<HTMLTextAreaElement>(null)
   const [message, setMessage] = useState('')
   const copy = async () => {

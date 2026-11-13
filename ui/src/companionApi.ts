@@ -12,16 +12,9 @@ export const BACKEND_BASE = '/apps/quartizo/api'
 /** Each request gives up after this long; a timeout counts as a failure. */
 export const REQUEST_TIMEOUT_MS = 15000
 
-export const STATUSES = ['backlog', 'ready', 'in_progress', 'review', 'done'] as const
-export type TaskStatus = (typeof STATUSES)[number]
-
-export const STATUS_LABELS: Record<TaskStatus, string> = {
-  backlog: 'Backlog',
-  ready: 'Ready',
-  in_progress: 'In Progress',
-  review: 'Review',
-  done: 'Done',
-}
+export type TaskStatus = string
+export interface BoardColumn { id: TaskStatus; label: string }
+export const REPAIR_COLUMN: BoardColumn = { id: 'repair', label: 'Needs repair' }
 
 export interface Workspace {
   id: number
@@ -29,6 +22,8 @@ export interface Workspace {
   uid: string
   name: string
   path: string
+  columns: BoardColumn[]
+  columnsVersion: number
   /** Shared with Kiro Notes: indexed for the board and the TODO list. */
   companion?: boolean
   /** Tasks left from the removed database board; removing the folder deletes them. */
@@ -91,6 +86,11 @@ export async function addWorkspace(api: AppApi, path: string, name?: string): Pr
   return res.workspace
 }
 
+export async function saveColumns(api: AppApi, wsId: number, columns: BoardColumn[], columnsVersion: number): Promise<Workspace> {
+  const res = await api.put<{ workspace: Workspace }>(workspacePath(wsId, 'columns'), { columns, columnsVersion })
+  return res.workspace
+}
+
 /**
  * Call only after the user confirmed in the UI. The folder and its files are not touched. A folder
  * with old database tasks is refused (409 `has_old_tasks`) unless `deleteOldTasks`, which deletes them.
@@ -147,14 +147,12 @@ export interface NoteItem {
   retained: boolean
 }
 
-export type Lane = TaskStatus | 'repair'
-
 export interface Ticket extends NoteItem {
   id: string | null
   status: TaskStatus | null
   order: string | null
   todos: { total: number; done: number }
-  lane: Lane
+  lane: TaskStatus
 }
 
 export interface BoardData {
@@ -183,6 +181,7 @@ export interface TodoGroup {
   ticket: boolean
   ticketId: string | null
   status: TaskStatus | null
+  statusLabel?: string | null
   hash: string | null
   retained: boolean
   diagnostics?: Diagnostic[]
@@ -228,14 +227,13 @@ export function loadTodos(api: AppApi, state: TodoState, wsId?: number): Promise
   return api.get<TodoData>(`${COMPANION}/todos${query({ workspace: wsId === undefined ? undefined : String(wsId), state })}`)
 }
 
-export const LANES: readonly Lane[] = [...STATUSES, 'repair']
-export const LANE_LABELS: Record<Lane, string> = { ...STATUS_LABELS, repair: 'Needs repair' }
-
 /** Tickets per lane, keeping the backend's order inside each. */
-export function groupLanes(tickets: readonly Ticket[]): Record<Lane, Ticket[]> {
-  const lanes = Object.fromEntries(LANES.map(l => [l, [] as Ticket[]])) as Record<Lane, Ticket[]>
-  for (const t of tickets) (lanes[t.lane] ?? lanes.repair).push(t)
-  return lanes
+export function groupLanes(columns: readonly BoardColumn[], tickets: readonly Ticket[]): Record<TaskStatus, Ticket[]> {
+  const repair: Ticket[] = []
+  const lanes = new Map(columns.map(column => [column.id, [] as Ticket[]]))
+  lanes.set(REPAIR_COLUMN.id, repair)
+  for (const t of tickets) (lanes.get(t.lane) ?? repair).push(t)
+  return Object.fromEntries(lanes)
 }
 
 /** Whether the status should be called out next to the data (not "ready"). */
@@ -329,8 +327,8 @@ export function readSource(api: AppApi, wsId: number, path: string): Promise<Sou
 export function createTicket(api: AppApi, wsId: number, body: { path: string; title: string; body?: string; status?: TaskStatus }): Promise<MutationResult> {
   return api.post(workspacePath(wsId, 'tickets'), body)
 }
-export function promoteNote(api: AppApi, wsId: number, note: SourceNote): Promise<MutationResult> {
-  return api.post(workspacePath(wsId, 'tickets/promote'), { path: note.path, expectedHash: note.hash })
+export function promoteNote(api: AppApi, wsId: number, note: SourceNote, status?: TaskStatus): Promise<MutationResult> {
+  return api.post(workspacePath(wsId, 'tickets/promote'), { path: note.path, expectedHash: note.hash, ...(status === undefined ? {} : { status }) })
 }
 export function moveTicket(api: AppApi, wsId: number, body: MoveRequest): Promise<MutationResult> {
   return api.post(workspacePath(wsId, 'tickets/move'), body)
@@ -353,7 +351,7 @@ export function mutationProblem(index: IndexStatus | undefined, note?: { hash: s
     return 'Wait for a complete, current index before editing. Refresh if needed.'
   }
   if (note?.status && index.maintenance?.includes(note.status)) return 'This column has unfinished order maintenance. Resume maintenance before moving cards.'
-  if (note && (!note.hash || note.retained || note.diagnostics?.length)) return 'Repair or refresh this note before editing it.'
+  if (note && (!note.hash || note.retained || note.diagnostics?.some(d => d.code !== 'unconfigured_status'))) return 'Repair or refresh this note before editing it.'
   return null
 }
 

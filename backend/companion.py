@@ -43,7 +43,7 @@ import db
 from workspace import ApiError, Registry, Workspace, open_dir_at, open_file_at, open_root, validate_relpath
 
 # Bump when parsing or the stored shape changes: older rows are then re-parsed.
-INDEX_VERSION = 4
+INDEX_VERSION = 5
 NOTE_SUFFIX = ".md"
 MAX_SCAN_ENTRIES = 200_000
 MAX_NOTES = 50_000
@@ -467,7 +467,7 @@ class CompanionIndex:
             "progress": progress,
             "writeBlocked": self.write_blocked,
             "indexedAt": None, "complete": False, "files": 0, "retained": 0, "error": None,
-            "maintenance": [s for s in ("backlog", "ready", "in_progress", "review", "done")
+            "maintenance": [s for s in ws.statuses
                             if (self.registry.data_dir / "ticket-maintenance" / f"{ws.uid}-{s}.json").exists()],
         }
         migration_path = self.registry.data_dir / f"migration-{ws.uid}.json"
@@ -530,6 +530,7 @@ class CompanionIndex:
                 " AND n.generation IS ? ORDER BY n.path", (ws.uid, gen)).fetchall()
             duplicates = self._duplicates(conn)
         tickets, other = [], []
+        statuses = set(ws.statuses)
         for n in notes:
             diagnostics = json.loads(n["diagnostics"])
             if n["ticket"] and n["ticket_id"] in duplicates:
@@ -544,9 +545,12 @@ class CompanionIndex:
                 if diagnostics:
                     other.append(item)
                 continue
-            item.update(id=n["ticket_id"], status=n["status"], order=n["sort_key"],
+            status = n["status"]
+            if status and status not in statuses:
+                diagnostics.append({"code": "unconfigured_status", "message": f"Status '{status}' has no column. Move this ticket or restore its column in Settings."})
+            item.update(id=n["ticket_id"], status=status, order=n["sort_key"],
                         todos={"total": n["todo_total"], "done": n["todo_done"]},
-                        lane=n["status"] or "repair")
+                        lane=status if status in statuses else "repair")
             tickets.append(item)
         # ASCII order of the fixed-width rank, then ID; an invalid rank sorts last, then by path.
         tickets.sort(key=lambda t: (t["order"] is None, t["order"] or "", t["id"] or "", t["path"]))
@@ -564,6 +568,7 @@ class CompanionIndex:
         truncated = False
         with self._conn() as conn, db.transaction(conn, write=False):
             for ws in workspaces:
+                labels = {column.id: column.label for column in ws.columns}
                 gen = self._generation(conn, ws.uid)
                 for c in conn.execute("SELECT checked, COUNT(*) AS n FROM companion_todos WHERE workspace_uid = ?"
                                       " AND generation IS ? GROUP BY checked", (ws.uid, gen)):
@@ -582,6 +587,7 @@ class CompanionIndex:
                     if current is None or current["path"] != r["path"]:
                         current = {"workspaceId": ws.id, "workspace": ws.name, "path": r["path"], "title": r["title"],
                                    "ticket": bool(r["ticket"]), "ticketId": r["ticket_id"], "status": r["status"],
+                                   "statusLabel": labels.get(r["status"], r["status"]),
                                    "hash": r["hash"], "retained": bool(r["retained"]),
                                    "diagnostics": json.loads(r["diagnostics"]), "items": []}
                         groups.append(current)
