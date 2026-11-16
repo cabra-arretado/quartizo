@@ -12,16 +12,16 @@ import {
   listBacklinks,
   listNotes,
   readSource,
-  saveNote,
   toFailure,
   withTimeout,
 } from './companionApi'
 import { renderMarkdownBlocks } from './markdown'
 import type { NoteLocation } from './noteNav'
 import {
-  type NoteDocument, type NoteTree, documentContent, makeNoteTree, noteBlockOffsets, openDocument, setNoteTaskChecked,
+  type NoteDocument, type NoteTree, makeNoteTree, noteBlockOffsets, openDocument, setNoteTaskChecked,
 } from './notesModel'
 import { ErrorLine, Icon, storage, usePageVisible } from './ui'
+import { type NoteEdits, noteKey, useNoteEdits } from './useNoteEdits'
 import { makeWikilinkResolver } from './wikilinks'
 import styles from './notes.css?inline'
 
@@ -37,10 +37,6 @@ function readPreference(key: string): string | null {
 }
 function writePreference(key: string, value: string) {
   try { storage()?.setItem(key, value) } catch { /* Storage can be unavailable. */ }
-}
-
-function noteKey(note: NoteLocation): string {
-  return `${note.workspaceId}:${note.path}`
 }
 
 /** Poll the index revision, and fetch the catalog only if that revision changed. */
@@ -113,7 +109,6 @@ export default function NotesView({ api, active, request, onSettings }: {
   const [view, setView] = useState<NoteView>(() => readPreference(VIEW_KEY) === 'raw' ? 'raw' : 'rendered')
   const [fullWidth, setFullWidth] = useState(() => readPreference(WIDTH_KEY) === 'true')
   const [newNoteKey, setNewNoteKey] = useState<string | null>(null)
-  const [drafts, setDrafts] = useState<Map<string, NoteDocument>>(() => new Map())
   const [search, setSearch] = useState('')
   const [limit, setLimit] = useState(LIST_PAGE)
   const [adding, setAdding] = useState(false)
@@ -122,6 +117,7 @@ export default function NotesView({ api, active, request, onSettings }: {
   const [creating, setCreating] = useState(false)
   const createPending = useRef(false)
   const { workspaces, current, notes, failure, refresh, visible } = useCatalog(api, active, workspaceId)
+  const { edits, edit, loaded, save } = useNoteEdits(api, refresh)
   const createField = useRef<HTMLInputElement>(null)
   const query = useDeferredValue(search.trim().toLowerCase())
   const matches = useMemo(() => query
@@ -163,17 +159,6 @@ export default function NotesView({ api, active, request, onSettings }: {
   const openNote = (path: string) => { setNewNoteKey(null); setSelected({ workspaceId: wsId, path }) }
   const writeBlocked = current.index.writeBlocked?.message
   const warning = indexWarning(current.index)
-  const changeDraft = (next: NoteDocument | null, expected?: NoteDocument | null) => {
-    setDrafts(previous => {
-      // A request from an editor that was left must not erase a newer draft.
-      if (expected !== undefined && (previous.get(key) ?? null) !== expected) return previous
-      const updated = new Map(previous)
-      if (next) updated.set(key, next)
-      else updated.delete(key)
-      return updated
-    })
-  }
-
   const create = async () => {
     const newPath = path.trim()
     if (!newPath || createPending.current || writeBlocked) return
@@ -197,7 +182,7 @@ export default function NotesView({ api, active, request, onSettings }: {
   }
 
   return (
-    <section className="qz-stack" aria-label="Notes">
+    <section className="qz-stack qz-notes-view" aria-label="Notes">
       <style>{styles}</style>
       <div className="qz-view-heading">
         <div>
@@ -254,7 +239,8 @@ export default function NotesView({ api, active, request, onSettings }: {
             onClick={() => setLimit(value => value + LIST_PAGE)}>Show more notes</button>}
         </aside>
         {location ? <NoteEditor key={key} api={api} active={active} location={location}
-          draft={drafts.get(key)} onDraft={changeDraft} onSaved={refresh} writeBlocked={!!writeBlocked}
+          edits={edits.get(key)} onDraft={(next, expected) => edit(key, next, expected)} onLoaded={saved => loaded(key, saved)}
+          onSave={() => { if (!writeBlocked) void save(location) }} writeBlocked={!!writeBlocked}
           notes={notes ?? EMPTY_NOTES} onOpen={openNote} loadBacklinks={active && visible}
           indexRevision={current.index.indexedAt} view={newNoteKey === key ? 'raw' : view}
           focusEditor={newNoteKey === key} fullWidth={fullWidth}
@@ -284,7 +270,11 @@ function Tree({ branch, prefix, selected, query, onOpen }: {
         const directory = `${prefix}${name}/`
         return <li key={directory}>
           <details open={query || selected?.startsWith(directory) ? true : undefined}>
-            <summary><Icon name="folder" />{name}</summary>
+            <summary title={name}>
+              <span className="qz-note-tree-arrow"><Icon name="down" /></span>
+              <Icon name="folder" />
+              <span className="qz-note-tree-name">{name}</span>
+            </summary>
             <Tree branch={child} prefix={directory} selected={selected} query={query} onOpen={onOpen} />
           </details>
         </li>
@@ -299,19 +289,20 @@ function Tree({ branch, prefix, selected, query, onOpen }: {
 
 interface BlockEdit {
   start: number
+  end: number
   from: number
   to: number
   original: string
-  sourceHash: string
 }
 
-function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlocked, notes, onOpen, loadBacklinks, indexRevision, view, focusEditor, fullWidth, onViewChange, onWidthChange }: {
+function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, writeBlocked, notes, onOpen, loadBacklinks, indexRevision, view, focusEditor, fullWidth, onViewChange, onWidthChange }: {
   api: AppApi
   active: boolean
   location: NoteLocation
-  draft?: NoteDocument
+  edits?: NoteEdits
   onDraft: (next: NoteDocument | null, expected?: NoteDocument | null) => void
-  onSaved: () => void
+  onLoaded: (saved: NoteDocument | undefined) => void
+  onSave: () => void
   writeBlocked: boolean
   notes: readonly NoteEntry[]
   onOpen: (path: string) => void
@@ -324,30 +315,33 @@ function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlock
   onWidthChange: () => void
 }) {
   const { workspaceId, path } = location
+  const { draft, saved, saving } = edits ?? {}
   const [source, setSource] = useState<NoteDocument | null>(null)
   const preview = view === 'rendered'
   const [notice, setNotice] = useState('')
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   const [loading, setLoading] = useState(false)
-  const [pending, setPending] = useState(false)
+  const [reloading, setReloading] = useState(false)
   const [backlinks, setBacklinks] = useState<BacklinksData | null>(null)
   const [backlinkFailure, setBacklinkFailure] = useState<ApiFailure | null>(null)
-  const [editingBlock, setBlockEdit] = useState<BlockEdit | null>(null)
-  const locked = useRef(false)
+  const [blockEdit, setBlockEdit] = useState<BlockEdit | null>(null)
+  const wasActive = useRef(false)
+  const reloadButton = useRef<HTMLButtonElement>(null)
   const previewRef = useRef<HTMLDivElement>(null)
   const restoreFocus = useRef<string | null>(null)
   const hasDraft = !!draft
-  const doc = draft ?? source
+  const doc = draft ?? saved ?? source
   const text = doc?.text
-  const blockEdit = editingBlock?.sourceHash === doc?.source.hash ? editingBlock : null
-  const readOnly = loading || pending || writeBlocked || doc?.lineEnding === 'mixed'
+  const readOnly = loading || reloading || writeBlocked || doc?.lineEnding === 'mixed'
+  const blockText = blockEdit && text !== undefined
+    ? text.slice(blockEdit.from, text.length - (blockEdit.original.length - blockEdit.to)) : ''
   // Keep the block boundaries stable while typing changes its Markdown structure.
   const renderedText = blockEdit?.original ?? text
   const previewEditable = !readOnly && !blockEdit
   const resolveWikilink = useMemo(() => makeWikilinkResolver(notes), [notes])
   const blocks = useMemo(() => preview && renderedText !== undefined
-    ? renderMarkdownBlocks(renderedText, resolveWikilink, { editable: previewEditable }) : [],
-    [preview, renderedText, resolveWikilink, previewEditable])
+    ? renderMarkdownBlocks(renderedText, resolveWikilink, { editable: !readOnly }) : [],
+    [preview, renderedText, resolveWikilink, readOnly])
   const columnClass = `qz-note-column${fullWidth ? ' qz-note-column-full' : ''}`
 
   useLayoutEffect(() => {
@@ -359,19 +353,27 @@ function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlock
   }, [blocks])
 
   useEffect(() => {
-    if (!active || hasDraft) return
+    const opening = active && !wasActive.current
+    wasActive.current = active
+    if (!active || hasDraft || saving) return
+    if (saved && !opening && source) {
+      setSource(saved)
+      onLoaded(saved)
+      return
+    }
     let cancelled = false
     setLoading(true)
     setFailure(null)
     withTimeout(readSource(api, workspaceId, path)).then(result => {
       if (cancelled) return
       setSource(openDocument(result))
-      setBlockEdit(current => current?.sourceHash === result.hash ? current : null)
+      onLoaded(saved)
+      if (doc?.source.hash !== result.hash) setBlockEdit(null)
     }).catch(error => {
       if (!cancelled) setFailure(toFailure(error))
     }).finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true; setLoading(false) }
-  }, [active, api, hasDraft, path, workspaceId])
+  }, [active, api, hasDraft, path, saving, workspaceId])
 
   useEffect(() => {
     if (!loadBacklinks || indexRevision == null) return
@@ -388,66 +390,41 @@ function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlock
     return () => { cancelled = true }
   }, [api, indexRevision, loadBacklinks, path, workspaceId])
 
-  const save = async () => {
-    if (locked.current || !draft || draft.conflict || writeBlocked || draft.lineEnding === 'mixed') return
-    locked.current = true
-    setBlockEdit(null)
-    setPending(true)
-    setFailure(null)
-    setNotice('')
-    const content = documentContent(draft)
-    try {
-      const result = await withTimeout(saveNote(api, workspaceId, path, content, draft.source.hash))
-      setSource(openDocument({ ...result, content }))
-      onDraft(null, draft)
-      setNotice('Note saved.')
-      onSaved()
-    } catch (error) {
-      const problem = toFailure(error)
-      if (problem.code === 'conflict') onDraft({ ...draft, conflict: true }, draft)
-      else setFailure(problem)
-    } finally {
-      locked.current = false
-      setPending(false)
-    }
-  }
-
   const reload = async () => {
-    if (locked.current || (draft && !window.confirm('Replace your unsaved draft with the version on disk?'))) return
-    locked.current = true
-    setPending(true)
+    if (loading || saving || reloading || (draft && !window.confirm('Replace your unsaved draft with the version on disk?'))) return
+    setReloading(true)
     setFailure(null)
     setNotice('')
     try {
       setSource(openDocument(await withTimeout(readSource(api, workspaceId, path))))
       onDraft(null, draft ?? null)
+      onLoaded(saved)
       setBlockEdit(null)
       setNotice('Note reloaded.')
     } catch (error) {
       setFailure(toFailure(error))
     } finally {
-      locked.current = false
-      setPending(false)
+      setReloading(false)
     }
   }
 
   const editText = (nextText: string) => {
     if (!doc || readOnly || nextText === doc.text) return
-    const next = { ...doc, text: nextText }
     setNotice('')
-    onDraft(!next.conflict && documentContent(next) === next.source.content ? null : next)
+    onDraft({ ...doc, text: nextText })
   }
 
   const startBlockEdit = (start: number, end: number) => {
     if (readOnly || blockEdit || !doc) return
     const offsets = noteBlockOffsets(doc.text, start, end)
-    if (offsets) setBlockEdit({ start, ...offsets, original: doc.text, sourceHash: doc.source.hash })
+    if (offsets) setBlockEdit({ start, end, ...offsets, original: doc.text })
   }
 
-  const finishBlockEdit = (cancel: boolean) => {
+  const finishBlockEdit = (cancel: boolean, focus = true) => {
     if (!blockEdit) return
     if (cancel) editText(blockEdit.original)
-    restoreFocus.current = `[data-edit-start="${blockEdit.start}"]`
+    else if (!readOnly) onSave()
+    if (focus) restoreFocus.current = `[data-edit-start="${blockEdit.start}"]`
     setBlockEdit(null)
   }
 
@@ -457,17 +434,22 @@ function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlock
         <code className="qz-mono qz-path" title={path}>{path}</code>
         <div className="qz-actions">
           <SegmentedControl segments={[{ key: 'rendered', label: 'Rendered' }, { key: 'raw', label: 'Raw' }]}
-            value={view} onChange={next => { setBlockEdit(null); onViewChange(next) }} ariaLabel="Note view" collapse={false} />
+            value={view} onChange={next => {
+              if (blockEdit) finishBlockEdit(false, false)
+              else if (!readOnly) onSave()
+              onViewChange(next)
+            }} ariaLabel="Note view" collapse={false} />
           <button type="button" className="qz-button" data-variant="quiet" aria-pressed={fullWidth}
             onClick={onWidthChange}>{fullWidth ? 'Full width' : 'Reading width'}</button>
-          <button type="button" className="qz-button" data-variant="quiet" disabled={loading || pending}
+          <button ref={reloadButton} type="button" className="qz-button" data-variant="quiet"
+            disabled={loading || saving || reloading} onMouseDown={event => event.preventDefault()}
             onClick={() => void reload()}>Reload from disk</button>
           <button type="button" className="qz-button" data-variant="primary"
-            disabled={!draft || draft.conflict || loading || pending || writeBlocked || draft.lineEnding === 'mixed'}
-            onClick={() => void save()}>Save note</button>
+            disabled={!draft || draft.conflict || readOnly}
+            onClick={() => { if (blockEdit) finishBlockEdit(false); else onSave() }}>Save note</button>
         </div>
       </div>
-      <ErrorLine failure={failure} />
+      <ErrorLine failure={failure ?? edits?.failure ?? null} />
       {loading && !doc && <p className="qz-muted" role="status">Loading note…</p>}
       {draft?.conflict && <div className="qz-notice" role="alert">
         The note changed on disk. Your draft is still here. Copy or review your changes before reloading from disk.
@@ -481,22 +463,31 @@ function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlock
             const destination = wikiLink?.dataset.notePath
             if (destination && notes.some(note => note.path === destination)) onOpen(destination)
             const checkbox = event.target.closest<HTMLInputElement>('input.qz-note-task-checkbox[data-note-task-line]')
-            if (checkbox && previewEditable) {
-              const line = Number(checkbox.dataset.noteTaskLine)
+            if (checkbox && !readOnly) {
+              let line = Number(checkbox.dataset.noteTaskLine)
+              if (blockEdit && line >= blockEdit.end) {
+                line += blockText.split('\n').length - (blockEdit.end - blockEdit.start)
+              }
               const next = setNoteTaskChecked(doc.text, line, checkbox.checked)
               if (next !== doc.text) {
                 restoreFocus.current = `input[data-note-task-line="${line}"]`
+                setBlockEdit(null)
                 editText(next)
+                onSave()
               }
             }
           }}>
           {!blocks.length && <p className="qz-muted">No content yet.</p>}
           {blocks.map(({ html, start, end }, index) => {
             if (blockEdit && start === blockEdit.start) {
-              return <div className="qz-note-block-editor" key={index}>
+              return <div className="qz-note-block-editor" key={index} onBlur={event => {
+                const target = event.relatedTarget
+                if (target === reloadButton.current || (target instanceof Node && event.currentTarget.contains(target))) return
+                finishBlockEdit(false, false)
+              }}>
                 <textarea aria-label="Block Markdown" className="qz-input qz-note-block-text" autoFocus spellCheck={false}
                   rows={Math.max(2, (end ?? start + 1) - start)} readOnly={readOnly}
-                  value={doc.text.slice(blockEdit.from, doc.text.length - (blockEdit.original.length - blockEdit.to))}
+                  value={blockText}
                   onChange={event => editText(blockEdit.original.slice(0, blockEdit.from)
                     + event.target.value + blockEdit.original.slice(blockEdit.to))}
                   onKeyDown={event => {
@@ -508,8 +499,10 @@ function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlock
                     }
                   }} />
                 <div className="qz-actions">
-                  <button type="button" className="qz-button" onClick={() => finishBlockEdit(false)}>Done</button>
-                  <button type="button" className="qz-button" data-variant="quiet" onClick={() => finishBlockEdit(true)}>Cancel</button>
+                  <button type="button" className="qz-button" onMouseDown={event => event.preventDefault()}
+                    onClick={() => finishBlockEdit(false)}>Done</button>
+                  <button type="button" className="qz-button" data-variant="quiet" onMouseDown={event => event.preventDefault()}
+                    onClick={() => finishBlockEdit(true)}>Cancel</button>
                 </div>
               </div>
             }
@@ -527,11 +520,14 @@ function NoteEditor({ api, active, location, draft, onDraft, onSaved, writeBlock
             </div>
           })}
         </div>
-        : <label className={`qz-field ${columnClass}`}>Note Markdown
+        : <label className={`qz-field qz-note-source ${columnClass}`}>Note Markdown
           <textarea autoFocus={focusEditor} className="qz-input qz-note-text" spellCheck={false} value={doc.text}
-            readOnly={readOnly} onChange={event => editText(event.target.value)} />
+            readOnly={readOnly} onChange={event => editText(event.target.value)}
+            onBlur={event => { if (!readOnly && event.relatedTarget !== reloadButton.current) onSave() }} />
         </label>)}
-      <span className="qz-muted qz-note-message" role="status">{notice || (draft ? 'Unsaved changes' : '')}</span>
+      <span className="qz-muted qz-note-message" role="status">
+        {saving ? 'Saving note…' : draft ? 'Unsaved changes' : notice || (edits?.didSave ? 'Note saved.' : '')}
+      </span>
       {doc && (backlinkFailure || !!backlinks?.notes.length) && (
         <section className="qz-note-backlinks" aria-label="Backlinks">
           <h3>Backlinks</h3>

@@ -292,6 +292,8 @@ async function notesRegression(page, fixture) {
   page.on('request', countRescan)
   try {
     await page.goto(fixture.origin)
+    // KiroCrew mounts routed apps inside a height-constrained flex column.
+    await page.addStyleTag({ content: '#root { display: flex; flex-direction: column; height: calc(100vh - 48px); overflow: auto; } svg { display: block; }' })
     await select(page, 'Workspace').selectOption({ label: 'Browser vault' })
     await button(page, 'Open note: First').click()
     const editor = textbox(page, 'Note Markdown')
@@ -303,6 +305,17 @@ async function notesRegression(page, fixture) {
     assert.ok(await preview.evaluate(element => element.getBoundingClientRect().width) > readingWidth)
     await noteView(page, 'Raw').click()
     await eventually(async () => (await editor.inputValue().catch(() => '')).includes('# First'), 'Task did not open its source note')
+    const viewport = page.viewportSize()
+    try {
+      for (const size of [viewport, { width: 390, height: 1500 }]) {
+        await page.setViewportSize(size)
+        const remaining = await editor.evaluate(element =>
+          document.getElementById('root').getBoundingClientRect().bottom - element.getBoundingClientRect().bottom)
+        assert.ok(remaining >= 0 && remaining < 90, `Raw editor did not fill the pane at ${size.width}px (${remaining}px left)`)
+      }
+    } finally {
+      await page.setViewportSize(viewport)
+    }
     assert.equal(await select(page, 'Notes folder').inputValue(), String(fixture.workspaceId))
     await tab(page, 'TODOs').click()
     await button(page, 'Open note: First TODO').click()
@@ -314,13 +327,25 @@ async function notesRegression(page, fixture) {
     const notePath = path.join(fixture.vault, 'Projects', 'notes-regression.md')
     await eventually(() => existsSync(notePath), 'Nested note was not created')
     await page.locator('code[title="Projects/notes-regression.md"]').waitFor()
+    const folder = page.locator('summary[title="Projects"]')
+    await folder.waitFor()
+    const rowCenters = await folder.evaluate(element => Array.from(element.children, child => {
+      const { top, height } = child.getBoundingClientRect()
+      return Math.round(top + height / 2)
+    }))
+    assert.equal(rowCenters.length, 3)
+    assert.equal(new Set(rowCenters).size, 1, 'Folder arrow, icon, and name should share a row')
+    await folder.press('Enter')
+    assert.equal(await folder.evaluate(element => element.parentElement.open), false)
+    await folder.press('Enter')
+    assert.equal(await folder.evaluate(element => element.parentElement.open), true)
     let saved = '---\ntitle: Notes regression\n---\n# Notes regression\n\nEditable body.\n\n- [ ] Shared index check\n\n```js\nconst value = 1\n```\n\n<script>window.hostileExecuted = true</script>\n\n![pixel](https://example.com/pixel.png)\n'
     await editor.fill(saved)
+    assert.notEqual(readFileSync(notePath, 'utf8'), saved, 'Raw note was saved before leaving the editor')
     await tab(page, 'Settings').click()
+    await eventually(() => readFileSync(notePath, 'utf8') === saved, 'Clicking away from Raw did not save the note')
     await tab(page, 'Notes').click()
-    assert.equal(await editor.inputValue(), saved, 'Unsaved draft disappeared after a tab switch')
-    await button(page, 'Save note').click()
-    await eventually(() => readFileSync(notePath, 'utf8') === saved, 'Note content was not saved')
+    assert.equal(await editor.inputValue(), saved)
     await noteView(page, 'Rendered').click()
     await page.getByRole('heading', { name: 'Notes regression', exact: true }).waitFor()
     assert.equal(await page.locator('img').count(), 0, 'Preview rendered a remote image')
@@ -328,28 +353,51 @@ async function notesRegression(page, fixture) {
     assert.equal(await preview.locator('.hljs-keyword').textContent(), 'const')
 
     const task = preview.getByRole('checkbox', { name: 'Shared index check', exact: true })
-    await task.check()
-    assert.equal(await task.isChecked(), true)
-    assert.equal(await task.evaluate(element => element === document.activeElement), true)
-    assert.equal(readFileSync(notePath, 'utf8'), saved, 'Rendered checkbox wrote before Save note')
-    await noteView(page, 'Raw').click()
-    assert.match(await editor.inputValue(), /- \[x\] Shared index check/)
-    await noteView(page, 'Rendered').click()
-    await task.uncheck()
-    await eventually(() => task.isEnabled(), 'Rendered note did not settle after clearing its draft')
+    let releaseWrite
+    const holdFirstWrite = new Promise(resolve => { releaseWrite = resolve })
+    const writes = []
+    const captureWrite = async route => {
+      if (route.request().method() === 'PUT') {
+        writes.push(route.request().postDataJSON())
+        if (writes.length === 1) await holdFirstWrite
+      }
+      await route.continue()
+    }
+    await page.route('**/source', captureWrite)
+    try {
+      await task.check()
+      await eventually(() => writes.length === 1, 'Checkbox did not autosave on click')
+      assert.equal(await task.evaluate(element => element === document.activeElement), true)
+      await task.uncheck()
+      assert.equal(writes.length, 1, 'The second write ran before the first response')
+      await button(page, 'First').click()
+      await preview.getByRole('heading', { name: 'First', exact: true }).waitFor()
+      releaseWrite()
+      await eventually(() => writes.length === 2, 'Queued checkbox update did not run after navigating away')
+      assert.equal(writes[0].content, saved.replace('- [ ]', '- [x]'))
+      assert.equal(writes[1].content, saved)
+      assert.notEqual(writes[0].expectedHash, writes[1].expectedHash)
+      await eventually(() => readFileSync(notePath, 'utf8') === saved, 'Unchecking did not persist')
+    } finally {
+      releaseWrite()
+      await page.unroute('**/source', captureWrite)
+    }
+    if (!await folder.evaluate(element => element.parentElement.open)) await folder.click()
+    await page.locator('button[title="Projects/notes-regression.md"]').click()
+    await preview.getByRole('heading', { name: 'Notes regression', exact: true }).waitFor()
 
     const blockEditor = textbox(page, 'Block Markdown')
     await preview.getByText('Editable body.', { exact: true }).click()
     assert.equal(await blockEditor.inputValue(), 'Editable body.')
     await blockEditor.fill('Discard this block edit.')
-    await blockEditor.press('Escape')
+    await button(preview, 'Cancel').click()
     await preview.getByText('Editable body.', { exact: true }).waitFor()
+    assert.equal(readFileSync(notePath, 'utf8'), saved)
     const editBlock = button(preview, 'Edit block at line 6')
     await editBlock.press('Enter')
     await blockEditor.fill('Updated body.\n\nSecond paragraph.')
-    await button(preview, 'Done').click()
+    await page.getByRole('searchbox', { name: 'Search notes' }).click()
     await preview.getByText('Second paragraph.', { exact: true }).waitFor()
-    await button(page, 'Save note').click()
     saved = saved.replace('Editable body.', 'Updated body.\n\nSecond paragraph.')
     await eventually(() => readFileSync(notePath, 'utf8') === saved, 'Block edit changed other lines or failed to save')
 
@@ -373,7 +421,7 @@ async function notesRegression(page, fixture) {
     const onDisk = saved + '\nBot wrote first\n'
     writeFileSync(notePath, onDisk)
     const response = page.waitForResponse(value => new URL(value.url()).pathname.endsWith('/source') && value.request().method() === 'PUT')
-    await button(page, 'Save note').click()
+    await page.getByRole('searchbox', { name: 'Search notes' }).click()
     assert.equal((await response).status(), 409)
     await page.getByRole('alert').filter({ hasText: 'The note changed on disk' }).waitFor()
     assert.equal(await editor.inputValue(), draft, 'Conflicting save discarded the draft')
@@ -383,7 +431,7 @@ async function notesRegression(page, fixture) {
     await page.getByRole('searchbox', { name: 'Search notes' }).fill('from-bot')
     await page.getByRole('button', { name: /Added by a Bot/ }).waitFor()
     assert.equal(automaticRescans, 0, 'The views sent an automatic full scan request')
-    console.log('PASS Notes opens exact sources, saves nested Markdown, preserves drafts, and sees Bot edits without a full scan request')
+    console.log('PASS Notes autosaves edits, serializes checkbox updates, preserves conflicts, and lays out folder rows')
   } finally {
     page.off('request', countRescan)
   }
@@ -435,7 +483,8 @@ async function wikilinkRegression(page, fixture) {
   const editor = textbox(page, 'Note Markdown')
   assert.equal(await noteView(page, 'Raw').getAttribute('aria-checked'), 'true')
   assert.equal(await button(page, 'Full width').getAttribute('aria-pressed'), 'true')
-  await editor.fill(source + '\nUnsaved draft\n')
+  const updated = source + '\nSaved on view change\n'
+  await editor.fill(updated)
   await noteView(page, 'Rendered').click()
   await button(page, 'Release checklist').click()
   await page.locator('code[title="Projects/link-target.md"]').waitFor()
@@ -443,15 +492,15 @@ async function wikilinkRegression(page, fixture) {
   await backlinks.getByRole('button', { name: /Link source/ }).click()
   await page.locator('code[title="Projects/link-source.md"]').waitFor()
   await noteView(page, 'Raw').click()
-  assert.match(await editor.inputValue(), /Unsaved draft/)
-  assert.equal(readFileSync(sourcePath, 'utf8'), source)
+  assert.equal(await editor.inputValue(), updated)
+  await eventually(() => readFileSync(sourcePath, 'utf8') === updated, 'Note did not save while navigating via wikilink')
 
   await noteView(page, 'Rendered').click()
   await button(page, 'Release checklist').click()
   await backlinks.getByRole('button', { name: /Link source/ }).waitFor()
   writeFileSync(sourcePath, '# Link source\n\nRemoved the reference outside Quartizo.\n')
   await backlinks.getByRole('button', { name: /Link source/ }).waitFor({ state: 'hidden' })
-  console.log('PASS wikilinks and backlinks navigate to exact notes, preserve drafts, and reflect external edits')
+  console.log('PASS wikilinks and backlinks navigate to exact notes, preserve edits, and reflect external changes')
 }
 
 let browser

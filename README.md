@@ -159,8 +159,8 @@ network, sessionApproval or uploads). Earlier versions also asked for
    native Kiro Notes, attach the same folder there separately.
 
    Existing notes open in **Rendered** view by default. Click a block to edit
-   it in place, or choose **Raw** to edit the whole file. Checkbox and block
-   edits are stored as drafts until you click **Save note**.
+   it in place, or choose **Raw** to edit the whole file. Edits save when you
+   leave the editor. Checking or unchecking a task saves immediately.
 
    In **Rendered** view, `[[Launch]]` opens a note with a unique matching title or,
    if no title matches, a unique filename stem. Use `[[Projects/launch.md]]`

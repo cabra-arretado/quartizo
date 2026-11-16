@@ -29,8 +29,12 @@
   overflow-wrap: anywhere;
   cursor: pointer;
 }
-.qz-note-tree button { display: flex; align-items: center; gap: 7px; }
-.qz-note-tree summary .qz-icon { vertical-align: text-bottom; margin-inline: 3px 6px; }
+.qz-note-tree :is(summary, button) { display: flex; align-items: center; gap: 7px; }
+.qz-note-tree summary { list-style: none; }
+.qz-note-tree summary::-webkit-details-marker { display: none; }
+.qz-note-tree-arrow { display: flex; flex: none; transform: rotate(-90deg); }
+.qz-note-tree details[open] > summary > .qz-note-tree-arrow { transform: none; }
+.qz-note-tree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qz-note-tree :is(summary, button):hover { background: var(--qz-elevated); }
 .qz-note-tree button[aria-current="true"] {
   border-color: color-mix(in srgb, var(--qz-accent) 26%, var(--qz-border));
@@ -42,7 +46,22 @@
 .qz-note-column { width: 100%; max-width: 800px; margin-inline: auto; padding-inline: 20px; }
 .qz-note-column-full { max-width: none; }
 .qz-note-text, .qz-note-block-text { resize: vertical; font: 400 16px/1.55 var(--mono, ui-monospace, monospace); }
-.qz-note-text { min-height: 360px; }
+
+/* The routed app is a flex item in the host. Pass its available height down to Raw. */
+.qz-app:has(.qz-notes-tab:not([hidden]) .qz-note-source),
+.qz-content:has(> .qz-notes-tab:not([hidden]) .qz-note-source),
+.qz-notes-tab:has(.qz-note-source),
+.qz-notes-view:has(.qz-note-source),
+.qz-note-editor:has(.qz-note-source),
+.qz-note-source {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.qz-notes-layout:has(.qz-note-source) { flex: 1; }
+.qz-note-editor:has(.qz-note-source) { align-self: stretch; }
+.qz-note-text { flex: 1 0 auto; min-height: 360px; }
+
 .qz-note-message { font-size: 12px; }
 .qz-note-message:empty { display: none; }
 .qz-notes-rendered {
@@ -135,5 +154,6 @@
 
 @container qz-app (max-width: 680px) {
   .qz-notes-layout, .qz-note-create { grid-template-columns: minmax(0, 1fr); }
+  .qz-notes-layout:has(.qz-note-source) { grid-template-rows: auto 1fr; }
   .qz-note-browser { max-height: 35vh; }
 }

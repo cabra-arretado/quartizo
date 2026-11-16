@@ -79,7 +79,7 @@ export default function Quartizo() {
           <TasksView api={api} active={tab === 'tasks'} onSettings={openSettings} onOpenNote={openNote} />
         </div>
         {tab === 'todos' && <TodoView api={api} onSettings={openSettings} onOpenNote={openNote} />}
-        <div hidden={tab !== 'notes'}>
+        <div className="qz-notes-tab" hidden={tab !== 'notes'}>
           <NotesView api={api} active={tab === 'notes'} request={noteRequest} onSettings={openSettings} />
         </div>
         {tab === 'settings' && <Settings api={api} />}

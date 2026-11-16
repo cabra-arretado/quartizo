@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.2 - 2026-11-16
+
+- Save Raw and inline note edits when you leave the editor. Checking or
+  unchecking a task in a rendered note saves immediately. Conflicts keep
+  the draft available for review.
+- Fill the available pane height in the Raw Markdown editor.
+- Keep each folder's disclosure arrow, icon, and name on one line in the
+  Notes browser.
+
+Requires KiroCrew 0.12.0 or later.
+
 ## 0.12.1 - 2026-11-16
 
 - Open existing notes in **Rendered** view by default, with KiroCrew-style
