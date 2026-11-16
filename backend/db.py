@@ -167,6 +167,10 @@ MIGRATIONS: tuple[str, ...] = (
     ALTER TABLE workspaces ADD COLUMN board_columns TEXT;
     ALTER TABLE workspaces ADD COLUMN columns_version INTEGER NOT NULL DEFAULT 0;
     """,
+    # 8: bounded outgoing wikilinks in the derived Markdown index.
+    """
+    ALTER TABLE companion_notes ADD COLUMN links TEXT NOT NULL DEFAULT '[]';
+    """,
 )
 
 

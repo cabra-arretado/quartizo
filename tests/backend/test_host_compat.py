@@ -45,7 +45,8 @@ class PrerequisiteTests(unittest.TestCase):
                     code, result = signed_json(port, "POST", "/api/workspaces", {"path": str(vault), "companion": True})
                     self.assertEqual(code, 201)
                     base = f"/api/workspaces/{result['workspace']['id']}"
-                    for endpoint in ("tickets", "tickets/promote", "tickets/move", "tickets/demote", "tickets/rebalance", "todos/toggle", "migration"):
+                    for endpoint in ("tickets", "tickets/promote", "tickets/move", "tickets/demote", "tickets/rebalance",
+                                     "todos/toggle", "migration", "notes"):
                         code, error = signed_json(port, "POST", base + "/" + endpoint,
                                                   {"path": "new.md", "title": "No", "confirm": True, "status": "ready"})
                         self.assertEqual((code, error["code"]), (409, "host_upgrade_required"), endpoint)
@@ -53,6 +54,9 @@ class PrerequisiteTests(unittest.TestCase):
                     self.assertEqual((code, status["writeBlocked"]["code"]), (200, "host_upgrade_required"))
                     code, source = signed_json(port, "GET", base + "/source?path=ordinary.md")
                     self.assertEqual((code, source["content"]), (200, "# Ordinary\n- [ ] Work\n"))
+                    code, error = signed_json(port, "PUT", base + "/source",
+                                              {"path": "ordinary.md", "content": "No", "expectedHash": source["hash"]})
+                    self.assertEqual((code, error["code"]), (409, "host_upgrade_required"))
                     self.assertEqual([p.name for p in vault.iterdir()], ["ordinary.md"])
                 finally:
                     _stop(proc)

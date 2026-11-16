@@ -380,3 +380,7 @@
 @media (pointer: coarse) {
   .qz-app :is(.qz-button, .qz-tabs button, .qz-input, .qz-ticket-status .qz-input, .qz-ticket-actions summary) { min-height: 42px; }
 }
+
+@container qz-app (max-width: 360px) {
+  .qz-tabs .qz-icon { display: none; }
+}

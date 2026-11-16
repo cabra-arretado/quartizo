@@ -18,6 +18,7 @@ from tests.backend.test_workspace import signed_json
 srv = load_server()
 import companion  # noqa: E402
 import db  # noqa: E402
+from note_watcher import affected_paths  # noqa: E402
 from workspace import ApiError, Registry  # noqa: E402
 
 BOM_ID = "11111111-1111-4111-8111-111111111111"
@@ -46,6 +47,7 @@ class IndexTestCase(unittest.TestCase):
         ws = self.registry.register(str(self.vault))
         self.ws = self.registry.set_companion(ws.id, True)
         self.index = companion.CompanionIndex(self.registry)
+        self.addCleanup(self.index.close)
 
     def put(self, rel: str, data: bytes) -> Path:
         path = self.vault / rel
@@ -303,6 +305,7 @@ class ReconcileTests(IndexTestCase):
             conn.execute("INSERT INTO companion_notes (workspace_uid, generation, path, title, ticket, diagnostics)"
                          " VALUES (?, 999999, 'ghost.md', 'ghost', 1, '[]')", (self.ws.uid,))
         fresh = companion.CompanionIndex(self.registry)
+        self.addCleanup(fresh.close)
         with mock.patch.object(fresh, "request"):
             fresh.start()
         with db.connect(self.registry.db_path) as conn:
@@ -372,6 +375,164 @@ class ReconcileTests(IndexTestCase):
         with self.assertRaises(ApiError) as ctx:
             broken.board(self.ws)
         self.assertEqual(ctx.exception.status, 503)
+
+
+class IncrementalTests(IndexTestCase):
+    def titles(self) -> dict[str, str]:
+        return {row["path"]: row["title"] for row in self.index.list_notes(self.ws)["notes"]}
+
+    def wait_for(self, predicate, timeout=5):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.025)
+        self.fail("Index did not reflect the filesystem change before the deadline")
+
+    def start_without_native_watcher(self):
+        with mock.patch.object(companion, "FolderWatcher") as watcher:
+            watcher.return_value.ensure.return_value = (False, False)
+            self.index.start()
+            self.assertTrue(self.index.wait_idle())
+
+    def test_requested_paths_only_read_changed_notes_and_keep_the_same_generation(self):
+        self.start_without_native_watcher()
+        before = self.index.list_notes(self.ws)["index"]
+        with self.index._conn() as conn:
+            generation = self.index._generation(conn, self.ws.uid)
+        self.put("ordinary.md", b"# Changed title\n\n- [ ] new task\n")
+        self.put(".trash/private.md", b"# Hidden\n")
+        with mock.patch.object(self.index, "_read", wraps=self.index._read) as read:
+            self.index.request_paths(self.ws, ("ordinary.md", "ordinary.md", ".trash/private.md", "../escape.md"))
+            self.assertTrue(self.index.wait_idle())
+        self.assertEqual([call.args[1] for call in read.call_args_list], ["ordinary.md"])
+        self.assertEqual(self.titles()["ordinary.md"], "Changed title")
+        self.assertEqual(self.todo_texts()["ordinary.md"], ["new task"])
+        self.assertGreater(self.index.list_notes(self.ws)["index"]["indexedAt"], before["indexedAt"])
+        with self.index._conn() as conn:
+            self.assertEqual(self.index._generation(conn, self.ws.uid), generation)
+        stamp = self.index.status(self.ws)["indexedAt"]
+        self.index.request_paths(self.ws, ("ordinary.md",))
+        self.assertTrue(self.index.wait_idle())
+        self.assertEqual(self.index.status(self.ws)["indexedAt"], stamp)
+
+    def test_backlinks_follow_workspace_resolution_and_incremental_edits(self):
+        self.put("nested/page.md", b"# Target\n")
+        self.put("target.md", b"# A different title\n")
+        self.put("source.md", b"# Source\n[[TARGET|alias]] [[Target]] [[/nested/PAGE.md]]\n"
+                 b"`[[Excluded]]` \\[[Excluded]]\n\n~~~\n[[Excluded]]\n~~~\n\n    [[Excluded]]\n"
+                 b"\n> ```\n> [[Excluded]]\n> ```\n\n- ```\n  [[Excluded]]\n  ```\n"
+                 b"\nAn inline `code span\n[[Excluded]] across lines`\n"
+                 b"\n[URL](https://example.com/[[Excluded]]) [See [[Excluded]]](https://example.com)\n"
+                 b"\n![alt [[Excluded]]](https://example.com/image.png)\n"
+                 b"\n- A list item\n\n    [[Nested]]\n")
+        self.put("excluded.md", b"# Excluded\n")
+        self.put("nested/list-link.md", b"# Nested\n")
+        self.start_without_native_watcher()
+        self.assertEqual(self.index.backlinks(self.ws, "nested/page.md"),
+                         {"notes": [{"path": "source.md", "title": "Source"}], "truncated": False})
+        self.assertEqual(self.index.backlinks(self.ws, "nested/list-link.md"),
+                         {"notes": [{"path": "source.md", "title": "Source"}], "truncated": False})
+        for path in ("target.md", "excluded.md", "missing.md"):
+            self.assertEqual(self.index.backlinks(self.ws, path), {"notes": [], "truncated": False})
+
+        self.put("source.md", b"---\nmeta: '[[nested/page]]'\n---\n# Source\n[[Target]]\n")
+        self.put("other.md", b"# Target\n")
+        self.index.request_paths(self.ws, ("source.md", "other.md"))
+        self.assertTrue(self.index.wait_idle())
+        self.assertEqual(self.index.backlinks(self.ws, "nested/page.md"), {"notes": [], "truncated": False})
+
+        self.put("source.md", b"# Source\n[[/nested/PAGE.md]]\n")
+        self.index.request_paths(self.ws, ("source.md",))
+        self.assertTrue(self.index.wait_idle())
+        self.index.request(self.ws, manual=True)
+        self.assertTrue(self.index.wait_idle())
+        self.assertEqual(self.index.backlinks(self.ws, "nested/page.md"),
+                         {"notes": [{"path": "source.md", "title": "Source"}], "truncated": False})
+
+    def test_metadata_fallback_detects_external_edit_and_move_without_reading_unrelated_files(self):
+        with mock.patch.object(companion, "METADATA_POLL_SECONDS", 0.05):
+            self.start_without_native_watcher()
+            ordinary = self.put("ordinary.md", b"# Original title\n")
+            self.wait_for(lambda: self.titles().get("ordinary.md") == "Original title")
+            timestamps = ordinary.stat()
+            with mock.patch.object(self.index, "_read", wraps=self.index._read) as read:
+                ordinary.write_bytes(b"# Altered title!\n")
+                os.utime(ordinary, ns=(timestamps.st_atime_ns, timestamps.st_mtime_ns))
+                self.wait_for(lambda: self.titles().get("ordinary.md") == "Altered title!")
+                ordinary.rename(self.vault / "renamed.md")
+                self.wait_for(lambda: self.titles().get("renamed.md") == "Altered title!")
+            self.assertNotIn("ordinary.md", self.titles())
+            self.assertEqual({call.args[1] for call in read.call_args_list}, {"ordinary.md", "renamed.md"})
+
+    def test_case_only_rename_does_not_leave_a_duplicate_index_entry(self):
+        self.start_without_native_watcher()
+        (self.vault / "ordinary.md").rename(self.vault / "Ordinary.md")
+        self.index.request_paths(self.ws, ("ordinary.md", "Ordinary.md"))
+        self.assertTrue(self.index.wait_idle())
+        self.assertEqual([path for path in self.titles() if path.lower() == "ordinary.md"], ["Ordinary.md"])
+
+    def test_capacity_fallback_leaves_the_active_generation_intact(self):
+        self.scan()
+        before = self.titles()
+        self.put("ordinary.md", b"# Would change the active title\n")
+        self.put("z-fresh.md", b"# Would overflow the index\n")
+        with mock.patch.object(companion, "MAX_NOTES", len(before)):
+            self.assertFalse(self.index._index_paths(self.ws, {"ordinary.md", "z-fresh.md"}, companion._Scan(False)))
+        self.assertEqual(self.titles(), before)
+        self.assertEqual(self.index.status(self.ws)["files"], len(before))
+
+    def test_metadata_fallback_recovers_after_the_root_is_replaced(self):
+        with mock.patch.object(companion, "METADATA_POLL_SECONDS", 0.05):
+            self.start_without_native_watcher()
+            self.vault.rename(self.tmp / "old-vault")
+            self.wait_for(lambda: self.index.status(self.ws)["state"] == "stale")
+            self.put("ordinary.md", b"# Recreated root\n")
+            self.wait_for(lambda: self.titles() == {"ordinary.md": "Recreated root"})
+            self.wait_for(lambda: self.index.status(self.ws)["state"] == "ready")
+
+    def test_periodic_full_hash_reconciliation_recovers_a_missed_event(self):
+        with mock.patch.object(companion, "RECONCILE_SECONDS", 0.1), mock.patch.object(
+            companion, "FolderWatcher",
+        ) as watcher:
+            watcher.return_value.ensure.return_value = (True, False)
+            self.index.start()
+            self.assertTrue(self.index.wait_idle())
+            self.put("ordinary.md", b"# Reconciled title\n")
+            self.wait_for(lambda: self.titles().get("ordinary.md") == "Reconciled title")
+
+    def test_native_watcher_observes_external_changes_when_supported(self):
+        self.index.start()
+        self.assertTrue(self.index.wait_idle())
+        if not self.index._tracking[self.ws.uid].native:
+            self.skipTest("native file events are unavailable in this runtime")
+        self.put("nested/fresh.md", b"# External note\n\n- [ ] one\n")
+        self.wait_for(lambda: self.titles().get("nested/fresh.md") == "External note")
+        (self.vault / "nested").rename(self.vault / "renamed")
+        self.wait_for(lambda: self.titles().get("renamed/fresh.md") == "External note")
+        self.assertNotIn("nested/fresh.md", self.titles())
+        self.assertEqual(self.todo_texts()["renamed/fresh.md"], ["one"])
+        (self.vault / "renamed/fresh.md").unlink()
+        self.wait_for(lambda: "renamed/fresh.md" not in self.titles())
+
+    def test_repeated_incomplete_metadata_probes_do_not_trigger_full_hash_scans(self):
+        with mock.patch.object(companion, "METADATA_POLL_SECONDS", 0.05):
+            self.start_without_native_watcher()
+            with mock.patch.object(companion, "MAX_SCAN_ENTRIES", 1), mock.patch.object(
+                self.index, "scan", wraps=self.index.scan,
+            ) as full:
+                self.wait_for(lambda: not self.index.status(self.ws)["complete"])
+                time.sleep(0.22)
+                self.assertEqual(full.call_count, 1)
+            self.wait_for(lambda: self.index.status(self.ws)["complete"])
+
+    def test_event_filter_tracks_only_paths_inside_the_workspace(self):
+        self.assertEqual(affected_paths("/notes", "moved", False, "/notes/.tmp", "/notes/project.md"),
+                         (("project.md",), False))
+        self.assertEqual(affected_paths("/notes", "moved", True, "/notes/folder", "/other/folder"),
+                         ((), True))
+        self.assertEqual(affected_paths("/notes", "modified", True, "/notes/folder"), ((), False))
+        self.assertEqual(affected_paths("/notes", "modified", False, "/notes-copy/project.md"), ((), False))
 
 
 class WorkerTests(IndexTestCase):

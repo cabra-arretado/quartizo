@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.12.0 - 2026-11-16
+
+- Browse, create, preview and edit Markdown in Quartizo's Notes tab. Tasks
+  and TODOs open their exact source note.
+- Update the shared index for Notes, Tasks and TODOs from filesystem changes
+  and reconcile it periodically.
+- Navigate between notes with `[[wikilinks]]` in Markdown preview and follow
+  backlinks from the open note.
+- Customize board columns for each connected folder. Tickets keep their
+  Markdown status IDs when columns are renamed and remain recoverable when
+  a column is removed.
+- Draft a KiroCrew Bot request from a connected folder with its path and
+  current board columns already in the prompt.
+- Preserve unsaved edits when switching notes or when an external writer
+  changes the same file. Existing folders and Markdown files carry forward.
+
+Requires KiroCrew 0.12.0 or later.
+
+## 0.0.4 - 2026-11-10
+
+- Use Quartizo’s gem icon in the KiroCrew app catalog and sidebar.
+
+## 0.0.3 - 2026-11-10
+
+- Show **Ask a Bot or agent** directly on each connected folder card.
+
 ## 0.0.2 - 2026-11-09
 
 - Add, rename, reorder, and remove board columns per connected folder. The

@@ -1,11 +1,11 @@
-"""Read-only parsing of one Markdown note: ticket properties, title and checkboxes.
+"""Read-only parsing of one note's ticket properties, title, checkboxes and wikilinks.
 
 A port of the read half of the phase 1 spike (``spikes/markdown_tickets/source.py``);
 the contracts are in docs/markdown-tickets-phase1.md. Nothing here writes or
 patches bytes: this delivery only indexes. YAML nodes, never a reserialized
 document, are inspected. Checkboxes and their headings follow native Kiro
 Notes' line rules (``_todos``), so Quartizo lists exactly the checkboxes Kiro
-Notes shows; no Markdown parser is involved.
+Notes shows. Wikilinks use the Markdown parser's inline and block contexts.
 
 Every problem becomes a ``Diagnostic`` on the note rather than an exception,
 so a damaged note stays visible.
@@ -19,6 +19,9 @@ from dataclasses import dataclass, field
 
 import vendored
 from columns import valid_status_id
+from markdown_it import MarkdownIt
+from markdown_it.rules_inline import StateInline
+from note_links import target_key
 
 vendored.activate()
 
@@ -58,6 +61,9 @@ _JS_TRIM = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2
 _TABLE_SEP_CELL = re.compile(r":?-+:?\Z")  # SEP_CELL_RE
 _TAB_STOP = 4
 _DELIMITER = re.compile(r"---[ \t]*$")
+_LINK_TOKEN = re.compile(r"\[\[([^\[\]\r\n]{1,256})\]\]")
+_LINK_SCHEME = re.compile(r"^(https?://|mailto:)", re.IGNORECASE)
+_MAX_LINKS_PER_NOTE = 64
 # Unparseable metadata can still say it is a ticket; such a note goes to the
 # board's repair lane instead of disappearing.
 _TYPE_TICKET_LINE = re.compile(r"""^type[ \t]*:[ \t]*(["']?)ticket\1[ \t]*(?:#.*)?$""", re.MULTILINE)
@@ -92,6 +98,7 @@ class Note:
     order: str | None = None
     diagnostics: list[Diagnostic] = field(default_factory=list)
     todos: list[Todo] = field(default_factory=list)
+    links: list[str] = field(default_factory=list)
 
     def diagnose(self, code: str, message: str) -> None:
         if not any(d.code == code for d in self.diagnostics):
@@ -345,6 +352,42 @@ def _title(source: _Source) -> str | None:
     return None
 
 
+def _wikilink(state: StateInline, silent: bool) -> bool:
+    if silent or state.linkLevel or not state.src.startswith("[[", state.pos):
+        return False
+    match = _LINK_TOKEN.match(state.src, state.pos, state.posMax)
+    if not match or len(match[1].encode("utf-16-le")) > 512:
+        return False
+    key = target_key(match[1].partition("|")[0])
+    if key is None:
+        return False
+    state.push("wikilink", "", 0).content = key
+    state.pos = match.end()
+    return True
+
+
+# The preview gives ordinary Markdown links and images precedence. Use that
+# same ordering and link policy so an ignored destination or alt can't add a backlink.
+_LINK_MARKDOWN = MarkdownIt("default", {"html": False, "maxNesting": 20})
+_LINK_MARKDOWN.validateLink = lambda url: bool(_LINK_SCHEME.match(url))
+_LINK_MARKDOWN.inline.ruler.after("image", "wikilink", _wikilink)
+
+
+def _links(source: _Source) -> list[str]:
+    """Collect bounded, unique wikilink lookup keys from Markdown prose."""
+    body = source.text[source.body_start:]
+    if "[[" not in body:
+        return []
+    targets: dict[str, None] = {}
+    for block in _LINK_MARKDOWN.parse(body):
+        for token in block.children or ():
+            if token.type == "wikilink":
+                targets[token.content] = None
+                if len(targets) == _MAX_LINKS_PER_NOTE:
+                    return list(targets)
+    return list(targets)
+
+
 def parse_note(path: str, data: bytes) -> Note:
     """Everything the index stores for one note. Never raises for bad content."""
     note = Note(hash=hashlib.sha256(data).hexdigest(), size=len(data), title=_stem(path))
@@ -360,6 +403,7 @@ def parse_note(path: str, data: bytes) -> Note:
     _ticket_fields(source, note)
     note.title = _title(source) or note.title
     _todos(source, note)
+    note.links = _links(source)
     return note
 
 

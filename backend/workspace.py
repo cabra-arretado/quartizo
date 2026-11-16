@@ -67,7 +67,7 @@ class Workspace:
     uid: str
     name: str
     path: str
-    # Kiro Notes companion mode: Quartizo only reads this folder (README).
+    # Historical field name for folders enabled in Quartizo's shared index.
     companion: bool = False
     columns: tuple[Column, ...] = DEFAULT_COLUMNS
     columns_version: int = 0
@@ -368,7 +368,7 @@ class Registry:
         return _workspace(row)
 
     def set_companion(self, workspace_id: int, enabled: object) -> Workspace:
-        """Switch Kiro Notes companion mode. Only application state changes; no file is touched."""
+        """Enable or disable indexing for a folder without changing its files."""
         if not isinstance(enabled, bool):
             raise ApiError(400, "bad_companion", "enabled must be true or false")
         with self._lock, self._conn() as conn:
@@ -397,7 +397,7 @@ class Registry:
         return canonical_root(raw, self.protected)
 
     def register(self, raw_path: object, name: object = None, companion: object = False) -> Workspace:
-        """Register a root; *companion* also shares it with Kiro Notes, in the same insert."""
+        """Register a root and optionally enable it in Quartizo's index."""
         if not isinstance(companion, bool):
             raise ApiError(400, "bad_companion", "companion must be true or false")
         real = self.canonical_root(raw_path)

@@ -4,5 +4,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 .coverage
+.DS_Store
 # ui/dist is intentionally NOT ignored: installs copy the tree and the
 # publishing guide expects the built bundle (ui/dist/index.mjs) committed.

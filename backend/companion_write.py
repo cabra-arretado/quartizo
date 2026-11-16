@@ -1,8 +1,9 @@
-"""Hash-guarded, source-preserving writes for the native Notes companion.
+"""Hash-guarded writes for Quartizo's Markdown workspaces.
 
-Only the requested YAML scalars or checkbox byte change. All our mutations
-serialize through one lock. Native/external writers do not take that lock;
-the final hash check narrows, but cannot eliminate, the check-to-replace race.
+Board and TODO actions change only the requested YAML scalars or checkbox
+byte. The Notes editor writes the owner's supplied Markdown. All mutations
+serialize through one lock. External writers do not take that lock; the final
+hash check narrows, but cannot eliminate, the check-to-replace race.
 """
 
 from __future__ import annotations
@@ -103,11 +104,26 @@ def read_note(ws: Workspace, path: object) -> bytes:
         return _read(parent, name)[0]
 
 
-def _check_hash(data: bytes, expected: object) -> None:
+def _expected_hash(expected: object) -> str:
     if not isinstance(expected, str) or not _HEX.fullmatch(expected):
         raise ApiError(400, "bad_hash", "expectedHash must be the SHA-256 last read")
-    if digest(data) != expected:
-        raise ApiError(409, "conflict", "the note changed; refresh before retrying", currentHash=digest(data))
+    return expected
+
+
+def _check_hash(data: bytes, expected: object) -> None:
+    expected = _expected_hash(expected)
+    current = digest(data)
+    if current != expected:
+        raise ApiError(409, "conflict", "the note changed; refresh before retrying", currentHash=current)
+
+
+def _note_data(content: object) -> bytes:
+    if not isinstance(content, str):
+        raise ApiError(400, "bad_content", "content must be Markdown text")
+    try:
+        return content.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ApiError(400, "bad_content", "note content must be valid Unicode") from None
 
 
 def _fsync(fd: int) -> None:
@@ -301,7 +317,8 @@ class CompanionWriter:
             # useful only after comparing it to the freshly read live hash;
             # retained rows and timestamp-only matches never authorize reuse.
             row = conn.execute(
-                "SELECT n.* FROM companion_notes n JOIN companion_index i"
+                "SELECT n.ticket, n.ticket_id, n.status, n.sort_key, n.diagnostics"
+                " FROM companion_notes n JOIN companion_index i"
                 " ON i.workspace_uid = n.workspace_uid AND i.generation = n.generation"
                 " WHERE n.workspace_uid = ? AND n.path = ? AND n.hash = ?"
                 " AND n.retained = 0 AND i.version = ?",
@@ -348,7 +365,7 @@ class CompanionWriter:
                 raise ApiError(409, "maintenance_pending", "finish the pending rebalance before removing that column")
             return self.registry.set_columns(ws_id, columns, body.get("columnsVersion"))
 
-    def _finish(self, ws: Workspace, path: str, data: bytes, expected: str | None, *, validate=None) -> dict:
+    def _write_source(self, ws: Workspace, path: str, data: bytes, expected: str | None, *, validate=None) -> dict:
         def validate_scope() -> None:
             current = self._require(ws)
             if current.uid != ws.uid:
@@ -360,10 +377,31 @@ class CompanionWriter:
         # immediately before publishing the staged file.
         validate_scope()
         result = _write(ws, path, data, expected, validate=validate_scope)
+        self.index.request_paths(ws, (path,))
+        return result
+
+    def _finish(self, ws: Workspace, path: str, data: bytes, expected: str | None, *, validate=None) -> dict:
+        result = self._write_source(ws, path, data, expected, validate=validate)
         note = mdsource.parse_note(path, data)
         result.update(id=note.ticket_id, status=note.status, order=note.order)
-        self.index.request(ws, manual=True)
         return result
+
+    def create_note(self, ws: Workspace, body: dict) -> dict:
+        with self.lock:
+            path = body.get("path")
+            if len(_path(path)) > companion.MAX_DEPTH + 1:
+                raise ApiError(400, "bad_path", "note folders are nested too deeply to index")
+            return self._write_source(ws, path, _note_data(body.get("content", "")), None)
+
+    def save_note(self, ws: Workspace, body: dict) -> dict:
+        with self.lock:
+            expected = _expected_hash(body.get("expectedHash"))
+            try:
+                return self._write_source(ws, body.get("path"), _note_data(body.get("content")), expected)
+            except ApiError as err:
+                if err.status == 404 and err.code == "not_found":
+                    raise ApiError(409, "conflict", "the note was removed or moved") from None
+                raise
 
     def create(self, ws: Workspace, body: dict) -> dict:
         with self.lock:

@@ -1,31 +1,18 @@
 # Quartizo
 
-A third-party [KiroCrew](https://github.com/kirodotdev/KiroCrew) App Kit app:
-an editable task companion to native **Kiro Notes**. You keep writing in Kiro
-Notes; Quartizo shares the same folder and provides
+Quartizo is a [KiroCrew](https://github.com/kirodotdev/KiroCrew) App Kit app for
+Markdown notes and tasks in local folders.
 
-- **Tasks**: a Kanban board whose card moves update the ticket notes;
-- **TODOs**: checkboxes grouped by note, with completion saved in the source;
+- **Notes** browses folders, searches by title or path, and edits Markdown with a preview.
+- **Tasks** organizes ticket notes on a Kanban board. Moving a card updates its note.
+- **TODOs** groups checkboxes by note and saves completion in the source file.
 - **Settings** manages connected folders and board columns and opens notes requests in KiroCrew chat.
 
-Use a card title or the arrow beside a TODO to open Kiro Notes. Copy the note
-name from the card’s actions or the checklist header and paste it into Kiro
-Notes’ search to find the file. Ticket metadata and checkbox completion live
-in your Markdown files. SQLite holds a rebuildable index of that data.
-
-A Python backend (standard library, plus ruamel.yaml vendored in
-`backend/_vendor/`) verifies the gateway's signed proxy requests and keeps a
-rebuildable index of the folders, reading them through fd-relative, symlink-
-refusing opens confined to the registered roots.
-
-Written against KiroCrew `main` @ `f62ab4fdb2bb0e492cd99325c596ec9e738abb70`
-(after release v0.9.0) and checked against an installed **kirocrew 0.10.0rc4**
-gateway for the original read-only release. Shared editing needs the native
-Notes content-hash save guard from
-[KiroCrew PR #22790](https://github.com/kirodotdev/KiroCrew/pull/22790), merged
-November 4. See [docs/compatibility.md](docs/compatibility.md) for historical
-measurements and the [current plan](docs/markdown-tickets-plan.md) for shared
-editing acceptance checks.
+Click a card title or the arrow beside a TODO to open that file in Quartizo's
+Notes tab. All three tabs use the same Markdown files and share a rebuildable
+SQLite index. The backend verifies signed gateway requests and confines file
+access to the registered roots. Native Kiro Notes can attach the same folder.
+See the [compatibility results](docs/compatibility.md) for tested host versions.
 
 **License: MIT.** See [LICENSE](LICENSE). Bundled third-party code is listed in
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
@@ -34,12 +21,13 @@ editing acceptance checks.
 
 ```
 app.json              manifest (name, ui page, backend, permissions)
-assets/icon.png       512x512 opaque placeholder (same as `kirocrew app init`)
+ui/quartizo-icon.svg  Quartizo's app catalog and sidebar icon
 backend/server.py     HTTP backend (stdlib): auth, routing
 backend/workspace.py  folder registry + fd-based path confinement
 backend/db.py         sqlite3 DB (registry + index) with a migrations table
-backend/companion.py  bounded scan and the rebuildable ticket/TODO index
-backend/companion_write.py  source-preserving ticket/TODO writes and durable ordering maintenance
+backend/companion.py  rebuildable index for notes, tickets and TODOs
+backend/note_watcher.py  filesystem event adapter
+backend/companion_write.py  shared note writer, metadata patches and ordering maintenance
 backend/legacy_migration.py preview, backups and resumable old-card conversion
 backend/mdsource.py   parsing of one note: ticket frontmatter, title, checkboxes
 backend/vendored.py   loads the vendored parser (pinned version, from _vendor only)
@@ -47,7 +35,7 @@ backend/_vendor/      ruamel.yaml copied from its hash-pinned wheel
 scripts/              vendor_parsers.py: re-create backend/_vendor from its pin
 spikes/               phase 1 format experiment (not imported by the app)
 ui/                   React + TS + Vite page bundle -> ui/dist/index.mjs
-                      App.tsx (tabs), Companion.tsx (Tasks, TODOs), Settings.tsx,
+                      App.tsx (tabs), Notes.tsx, Companion.tsx (Tasks, TODOs), Settings.tsx,
                       companionApi.ts (backend client + pure rules), noteNav.ts, ui.tsx
 tests/backend/        backend unit tests + real HTTP round-trips
 tests/integration/    gateway tests (skip unless a gateway is configured)
@@ -58,7 +46,8 @@ Makefile, ruff.toml, .github/workflows/ci.yml        quality gates
 ## Requirements
 
 - Node 22.12+ and npm (to build the UI; CI uses 22).
-- Python 3.10+ (nothing to install; CI tests 3.12 and 3.13).
+- Python 3.10+ (CI tests 3.12 and 3.13). KiroCrew provisions the native file
+  watcher and Markdown parser for backlinks from `requirements.txt`.
 - macOS or Linux. Windows is unsupported.
 - KiroCrew **0.12.0 stable or newer**, with the Notes content-hash save guard
   (not needed for repository tests). The manifest declares `minKiroCrewVersion`.
@@ -71,6 +60,7 @@ Makefile, ruff.toml, .github/workflows/ci.yml        quality gates
 
 ```bash
 cd ui && npm ci && cd ..   # once
+python3 -m pip install -r requirements.txt  # runtime dependencies for local tests
 make check                 # lint + test + test-formats + dist-check: what CI runs
 make lint                  # ruff check . and tsc --noEmit (strict)
 make test                  # backend unittest, then `npm test` (builds, then vitest)
@@ -117,23 +107,26 @@ sidebar. The registry follows `main`, and the app ships with a prebuilt UI.
 ### Install from a local checkout
 
 ```bash
-kirocrew gateway                                       # in its own terminal
-kirocrew app install /absolute/path/to/quartizo        # copies + registers
-kirocrew config get agent.apps_trusted                 # see what is already trusted
-kirocrew config set agent.apps_trusted '["quartizo"]'  # replaces the list: include existing entries
+kirocrew config get agent.apps_trusted
+kirocrew config get agent.apps_trusted_local
+# Include any existing entries when setting either list.
+kirocrew config set agent.apps_trusted '["quartizo"]'
+kirocrew config set agent.apps_trusted_local '["quartizo"]'
+kirocrew app install /absolute/path/to/quartizo
 kirocrew app enable quartizo
+kirocrew gateway
 ```
 
-Third-party apps must be trusted before they can be enabled or run a backend
-(also in Dashboard -> Settings -> Security -> Third-party apps; there is no
-`kirocrew app trust` command on 0.10.0rc4). Open the app at `/apps/quartizo`
-in the dashboard (`kirocrew token` prints the URL).
+KiroCrew 0.12.0 requires an explicit local-source trust grant for a fresh
+local-folder install. The App Store prompts for repository-specific trust
+when installing from the registry. Open the app at `/apps/quartizo` in the
+dashboard (`kirocrew token` prints the URL).
 
 **Update:** rebuild if the UI changed, then Library -> Quartizo -> **Sync app
 from its source directory** (or **Update** in the App Store), and refresh the
 page. **Measured on 0.10.0rc4: `kirocrew app uninstall quartizo` keeps your
-data but clears the trust**, so after a reinstall set `agent.apps_trusted` and
-enable the app again. Back up `quartizo.sqlite3` before upgrading: migrations
+data but clears the trust**, so check the trust grant after a reinstall.
+Back up `quartizo.sqlite3` before upgrading: migrations
 are forward-only.
 
 **Dev mode** (UI hot reload): `kirocrew app dev quartizo`, then
@@ -160,9 +153,17 @@ network, sessionApproval or uploads). Earlier versions also asked for
 
 ## Using it
 
-1. Attach a folder in Kiro Notes (**Attach a folder**). In Quartizo's
-   **Settings**, add the same folder's absolute path. It is registered and
-   shared with Kiro Notes in one step; nothing on disk changes.
+1. In **Settings**, add the absolute path of a local Markdown folder. Open
+   **Notes** to browse its subfolders, search by title or path, edit Markdown,
+   or create a file at a path such as `Projects/launch.md`. If you also use
+   native Kiro Notes, attach the same folder there separately.
+
+   In **Preview**, `[[Launch]]` opens a note with a unique matching title or,
+   if no title matches, a unique filename stem. Use `[[Projects/launch.md]]`
+   to specify a path from the folder root, and `[[Projects/launch|Launch plan]]`
+   to show an alias. Links resolve within the selected folder without regard
+   to case. Unresolved or ambiguous links stay as text. **Backlinks** lists
+   other saved notes in that folder that link to the open note.
 2. A **ticket** is a note whose frontmatter has `type: ticket`, plus `id` (a
    UUID, or a 32-hex legacy UID), `status` (a configured column's ID) and
    `order` (32 lowercase hex characters, quoted). The default column IDs are
@@ -194,7 +195,7 @@ network, sessionApproval or uploads). Earlier versions also asked for
    card into a column or before another card, or choose **Move up** or
    **Move down** from the card’s actions. **Remove ticket…** in the same
    menu removes ticket properties and keeps the note and TODOs.
-   Native Notes remains the editor for its title and body.
+   Open the card in **Notes** to edit its title and body.
 4. **TODOs** lists exactly the checkboxes Kiro Notes shows, grouped by note,
    open ones by default. Like Kiro Notes, Quartizo drops a frontmatter block
    that starts the file, splits the rest on `\n`, skips ```` ``` ```` fences
@@ -205,12 +206,12 @@ network, sessionApproval or uploads). Earlier versions also asked for
    while an indented line is one. Each ticket card and checklist shows the
    Markdown path below the note title.
    Check or uncheck an item here to update that exact source marker.
-5. The views rescan when they open, every 30 s while shown, and on
-   **Refresh**; **Rebuild index** in Settings re-parses everything. Every scan
-   reads and hashes every note, so an edit that kept the file's timestamp is
-   still seen. An incomplete scan or an unreadable note is called out, and such
-   notes keep their last known state instead of disappearing.
-6. Unticking **Shared with Kiro Notes** drops the folder's index; **Remove**
+5. The backend batches filesystem changes and updates the affected notes.
+   Periodic reconciliation reads and hashes each note to catch missed changes.
+   **Refresh** runs reconciliation immediately. **Rebuild index** also re-parses
+   every note. An incomplete scan or an unreadable note preserves last-known
+   state and shows a warning.
+6. Turning off **Show in Quartizo** drops the folder's index. **Remove**
    forgets the folder. Nothing on disk changes either way. A folder that still
    has tasks from Quartizo's old database board says how many, and removing it
    deletes them only once you confirm.
@@ -226,8 +227,8 @@ with the same status ID to restore them to the board. Custom status IDs start
 with a lowercase letter, use lowercase letters, digits, and underscores, and
 are at most 32 characters. Quote them in Markdown frontmatter.
 
-Under the same folder, expand **Work with a Bot or agent** and choose **Open in
-KiroCrew chat**. In the chat composer, pick a Bot or agent, add your request to
+Under the same folder, choose **Ask a Bot or agent**. In the KiroCrew chat
+composer, pick a Bot or agent, add your request to
 the draft, and send it. The draft includes the folder path, saved column IDs,
 and instructions for creating and updating notes, tickets, and TODOs. The
 selected agent needs read and write access to the connected folder through
@@ -242,10 +243,9 @@ in KiroCrew and reload the dashboard.
 **Shared editing.** Use native Notes with the content-hash save fix. The old
 0.10.0rc4 timestamp-only guard could silently overwrite companion changes
 ([historical evidence](docs/markdown-tickets-phase1.md#native-notes-verification)).
-Quartizo write requests carry the hash of the note shown in the view; an
-external edit requires refreshing before retrying. Malformed metadata,
-duplicate ticket IDs, and mixed line endings stay visible with diagnostics
-and refuse mutation until repaired. Moving a card changes ticket metadata;
+Quartizo write requests carry the hash of the note shown in the view. The
+Notes editor keeps your draft when it detects an external edit. Board and TODO
+controls display metadata problems and refuse ambiguous writes. Moving a card changes ticket metadata;
 checking a TODO changes only its source marker. Neither operation changes
 the other's state.
 
@@ -301,7 +301,8 @@ Quartizo never deletes them as an automatic rollback.
   503 for everything except `/health`.
 - **Every route is dashboard-owner only**: any other principal gets 403
   `owner_session_required`.
-- Bodies over 64 KiB get 413 before they are read.
+- Request bodies are capped at 64 KiB, except note creation and saves. Those
+  allow up to 2 MiB of UTF-8 note text plus JSON encoding overhead.
 - Errors are JSON `{"error": "<message>", "code": "<stable code>", ...}`; an
   unexpected error is a 500 `internal`, never a dropped connection.
 
@@ -309,7 +310,7 @@ Quartizo never deletes them as an automatic rollback.
 |---|---|
 | `GET /api/status` | app, version and the verified caller `{kind, ownerId}` |
 | `GET /api/workspaces` | `{workspaces: [{id, uid, name, path, companion, oldTasks}]}`. `id` is never reused; `uid` is 32 random hex chars per registration; `oldTasks` counts tasks left from the removed database board |
-| `POST /api/workspaces` | `{path, name?, companion?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, `/proc` `/sys` `/dev`, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`), a folder you do not own or that others can write. `companion: true` also shares it with Kiro Notes (same insert) and queues a scan; a non-boolean is 400 `bad_companion` |
+| `POST /api/workspaces` | `{path, name?, companion?}` -> 201 `{workspace}`. `path` must be absolute and is stored as its realpath. Refused: `/`, your home dir itself, `/proc` `/sys` `/dev`, anything overlapping `$KIROCREW_HOME` or another root (409 `root_overlaps`), a folder you do not own or that others can write. `companion: true` includes the folder in Quartizo and queues indexing. A non-boolean is 400 `bad_companion` |
 | `GET /api/workspaces/{id}` | `{workspace}` or 404 `workspace_not_found` |
 | `DELETE /api/workspaces/{id}[?deleteOldTasks=1]` | Forgets the folder and its index, and stops a running scan. Files are never touched. A folder with old database tasks is refused with 409 `has_old_tasks` (`taskCount`) unless `deleteOldTasks=1`, which deletes them in the same transaction |
 | `PUT /api/workspaces/{id}/companion` | `{enabled: true\|false}` -> `{workspace, index}`. On: queues a scan. Off: drops the derived index. 400 `bad_companion` |
@@ -317,7 +318,11 @@ Quartizo never deletes them as an automatic rollback.
 | `POST /api/companion/refresh` | `{workspaceId?, rebuild?, manual?}` -> 202 `{requested, skipped}`. Without `workspaceId`: every companion folder. Automatic requests within 10 s of the last scan are skipped; `manual` or `rebuild` are not. `rebuild` re-parses every note |
 | `GET /api/workspaces/{id}/board` | `{workspace, index, tickets, notes}`. A ticket is `{path, title, id, status, order, lane, todos: {total, done}, diagnostics, retained, hash, mtimeMs}`; `lane` is its status, or `repair`. 409 `not_companion`, 503 `parsers_unavailable` |
 | `GET /api/companion/todos?workspace=&state=` | `{groups: [{workspaceId, workspace, path, title, ticket, ticketId, status, hash, retained, diagnostics, items}], counts: {open, done}, truncated, index}`. An item is `{ordinal, markerStart, line, column, checked, text, depth, heading}` (`markerStart` is a UTF-8 byte offset; line and column are one-based). `state` is `open` (default), `done` or `all` |
-| `GET /api/workspaces/{id}/source?path=` | `{path, hash, content}` for an addressable UTF-8 note in a companion folder; used for explicit promotion preview |
+| `GET /api/workspaces/{id}/notes` | `{notes: [{path, title}], index}` for the active index |
+| `GET /api/workspaces/{id}/backlinks?path=` | `{notes: [{path, title}], truncated}` for up to 200 other notes whose wikilinks resolve to the given path |
+| `POST /api/workspaces/{id}/notes` | `{path, content?}` -> 201 `{path, hash}`. Creates a Markdown file and missing parent folders |
+| `GET /api/workspaces/{id}/source?path=` | `{path, hash, content}` for an addressable UTF-8 note |
+| `PUT /api/workspaces/{id}/source` | `{path, content, expectedHash}` -> `{path, hash}`. Saves Markdown if its source hash still matches |
 | `POST /api/workspaces/{id}/tickets` | `{path, title, body?, status?}` creates a ticket with a new UUID and appended rank; existing files are never replaced |
 | `POST /api/workspaces/{id}/tickets/promote` | `{path, expectedHash}` adds ticket fields; pre-existing reserved properties refuse promotion |
 | `POST /api/workspaces/{id}/tickets/demote` | `{path, expectedHash}` removes ticket fields, preserving the file and body |

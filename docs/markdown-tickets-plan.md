@@ -286,3 +286,11 @@ disposable shared vault, then rename, refresh, and restart checks. Record
 unavailable host checks explicitly; a merged upstream fix does not establish
 which version is installed locally.
 
+## Update — 2026-11-13: verify the writable companion
+
+Quartizo 0.0.2 passed the shared-vault checks on the published KiroCrew 0.12.0
+gateway. Native Notes preserved a dirty draft and rejected its stale autosave
+after an external edit kept the exact file timestamp. Rename, refresh, native
+Git sync and restart also passed on a disposable vault. See the
+[compatibility results](compatibility.md#quartizo-002-on-kirocrew-0120-2026-11-13).
+

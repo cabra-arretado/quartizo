@@ -1,9 +1,8 @@
 # Threat model
 
-Status: updated for editable Kiro Notes companion work on 2026-11-06. The
-summary, residual risks and section 10 describe the companion. Sections 3-6,
-8 and 9 describe removed features (the note editor, database tasks, Git, chat
-context and recorded sessions) and are kept for the record. Historical note
+The summary, residual risks and section 10 describe the shared index and
+current file writes. Section 3 describes the Notes preview. Sections 4–6,
+8 and 9 cover removed features and are kept for the record. Historical note
 write details in section 2 are background, not a substitute for the current
 companion mutation implementation.
 
@@ -13,10 +12,10 @@ companion mutation implementation.
 |---|---|---|---|
 | T1 | **Root confinement.** The backend reads or writes outside the folders the owner registered | Opt-in registration; root policy (not `/`, not `$HOME`, not KiroCrew/data dirs, not `/proc` `/sys` `/dev`, no overlaps, owner-owned, not writable by others); relative-path rules; hidden segments skipped ([§1](#1-workspace-confinement)) | `tests/backend/test_workspace.py`, `test_hardening.py` |
 | T2 | **Symlinks and TOCTOU.** A link or a swapped directory redirects a read | No path is resolved then reopened: fd-relative `openat` with `O_NOFOLLOW` from the root, ownership checked per directory, regular-file check on the fd ([§2](#2-symlinks-and-toctou)) | `test_workspace.py` (fd confinement, `root_changed`), `test_hardening.py`, `test_companion.py` |
-| T3 | **Auth replay and forgery.** A request is forged, tampered with or replayed to the loopback backend | Body-bound `X-KiroCrew-Proxy` HMAC (constant-time, +/-60 s), signed principal claim bound to method/target/body, one-time request ids in a bounded cache that fails closed, owner-only routes, fail closed with no secret, `127.0.0.1` bind, 64 KiB bodies refused before reading ([§7](#7-auth-replay-and-forgery)) | `test_proxy_auth.py`, `test_http.py`, `test_hardening.py`, `tests/integration/test_gateway.py` (live, when configured) |
+| T3 | **Auth replay and forgery.** A request is forged, tampered with or replayed to the loopback backend | Body-bound `X-KiroCrew-Proxy` HMAC, signed principal, one-time request IDs, owner-only routes, loopback bind, and bounded request bodies ([§7](#7-auth-replay-and-forgery)) | `test_proxy_auth.py`, `test_http.py`, `test_hardening.py`, `tests/integration/test_gateway.py` (live, when configured) |
 | T4 | **Shared-folder writes.** Quartizo and Kiro Notes both write a folder and one silently overwrites the other | Quartizo validates source hashes and exact mutation targets; native Notes needs the upstream content-hash save guard; derived indexing remains separate from durable migration state ([§10](#10-kiro-notes-companion)) | Focused mutation tests and the native dirty-buffer scenario; read-only scans retain vault snapshot tests |
 | T5 | **Hostile or damaged Markdown/YAML** exhausts the parser or makes the index lie | 2 MiB per note, 64 KiB / 8,192 events / 64 levels of frontmatter, safe node composition without object construction, anchors/aliases/custom tags refused; checkboxes found by a line rule (no Markdown parser); scan entry/note/depth limits; ruamel.yaml vendored at a pinned version and refused from anywhere else ([§10](#10-kiro-notes-companion)) | `test_companion.py`, `test_vendor.py` |
-| T6 | **Untrusted text in the page.** Note titles, paths or checkbox labels run script | Everything is rendered as React text; no Markdown or HTML is rendered | `ui/test/companion.test.ts` (labels kept raw) |
+| T6 | **Untrusted text in the page.** Note content runs script or fetches external resources | Titles, paths and checkbox labels render as React text. Notes preview escapes raw HTML, restricts links and replaces images with text ([§3](#3-untrusted-markdown)) | Markdown preview tests and browser regressions |
 
 ## Residual risks
 
@@ -26,7 +25,7 @@ companion mutation implementation.
 4. **Platform.** POSIX only (Windows unsupported); Unicode normalization is not applied, so lookalike names can appear twice ([§1](#1-workspace-confinement)).
 5. **Dependencies.** No known advisory affects the shipped runtime, but the dev toolchain has open advisories ([dependencies.md](dependencies.md)).
 6. **Other writers.** Quartizo serializes its own writes, but another application can change a file between the final freshness check and atomic replacement. A native content-hash guard prevents the reproduced stale Notes save; it does not provide a filesystem transaction shared by all applications ([§10](#10-kiro-notes-companion)).
-7. **Index freshness is bounded, not live.** Between scans (30 s while a view is shown, otherwise on demand) the views can show an older state; they say when it was indexed ([§10](#10-kiro-notes-companion)).
+7. **Index freshness.** Filesystem events are batched. Views can show older data until a queued update or reconciliation finishes ([§10](#10-kiro-notes-companion)).
 8. **Line-rule drift.** The TODO rules copy Kiro Notes 0.10.0rc4; if a later Kiro Notes renders checkboxes differently, the lists can disagree until Quartizo follows.
 
 ## Assets and actors
@@ -387,9 +386,10 @@ authenticated on its own (`backend/server.py`).
 - **Fail closed.** With no secret in the environment everything except
   `/health` answers 503. 404 is returned only after authentication, so route
   existence is not an oracle. `/health` is unsigned and returns a constant.
-- **Network.** Binds `127.0.0.1` only. At most 16 connections; the bigger
-  body limit for note writes applies only after a cheap timestamp check.
-  Headers, query and secret are never logged.
+- **Network.** Binds `127.0.0.1` only with at most 16 connections. Request
+  bodies are capped at 64 KiB, except note creation and saves, which allow
+  2 MiB of UTF-8 text plus JSON encoding overhead. Headers, query and secret
+  are never logged.
 
 Verified against the **real upstream signer**: known-answer vectors produced
 by 0.10.0rc4's `proxy_auth.py` verify in the backend, and the live gateway
@@ -452,10 +452,10 @@ Use a fixed Notes build for shared editing and verify it with a disposable
 vault; the old browser result does not establish current installed behavior.
 
 - Browsing, indexing, folder registration and refresh leave vault content
-  unchanged. Explicit ticket and TODO actions are the companion write paths;
-  they require owner authentication, a current source hash and an unambiguous
-  parsed target. A checkbox write changes one marker byte; metadata writes
-  patch YAML source spans rather than normalizing the whole document.
+  unchanged. Note creation and saves use the same confined writer as ticket
+  and TODO mutations. A checkbox write changes one marker byte and metadata
+  writes patch YAML source spans. The editor saves the submitted Markdown
+  only when the source hash matches.
 - Malformed or ambiguous metadata, duplicate ticket identities and mixed
   endings refuse mutation. A stale snapshot conflicts rather than choosing
   a different TODO by line number or matching repeated label text. React
@@ -491,6 +491,8 @@ vault; the old browser result does not establish current installed behavior.
   followed, regular files only, owner-owned directories), skip hidden entries
   and names that are not safe relative paths, and read at most 2 MiB + 1 byte
   per note.
+- Filesystem event paths are hints. Incremental reads still validate the
+  relative path and open it through the same confined file helpers.
 - Parsing treats every note as hostile input: frontmatter limits as above;
   YAML is composed into nodes with the safe loader (no object construction) and
   anchors, aliases, merge keys and custom tags are refused. Checkboxes and

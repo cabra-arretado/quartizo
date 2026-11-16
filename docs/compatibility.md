@@ -1,5 +1,35 @@
 # Compatibility
 
+## Integrated Notes upgrade (2026-11-13)
+
+Updated the disposable Quartizo installation in place using the same KiroCrew
+0.12.0 dashboard and vault described below. The host provisioned Watchdog
+7.1.0 for the updated backend. The existing card opened its renamed Markdown
+source in Quartizo Notes, including its completed checkbox. Saving a new
+checkbox in Notes made it appear in TODOs. The upgrade fixture used default
+columns. Custom column persistence passed in the production-bundle browser
+regressions.
+
+## Quartizo 0.0.2 on KiroCrew 0.12.0 (2026-11-13)
+
+Verified Quartizo at `aae5762` against the [published KiroCrew 0.12.0
+wheel](https://github.com/kirodotdev/KiroCrew/releases/tag/v0.12.0) on macOS.
+The gateway ran with its built-in `--test-mode` and served the released
+dashboard and native Notes backend. Chrome opened both apps against one
+disposable Git vault with a local bare origin and a separate peer clone.
+
+| Check | Result |
+|---|---|
+| Local install | A name-only grant was refused. Adding the explicit `agent.apps_trusted_local` grant allowed installation and activation. |
+| Clean native buffer | Notes refreshed after Quartizo moved a ticket and completed its TODO. |
+| Dirty native buffer | An atomic external edit preserved the previous mtime exactly. The browser sent `baseHash`, autosave returned HTTP 409, the draft stayed in the editor, and the external bytes stayed on disk. Choosing **Use the version on disk** loaded those bytes. |
+| Rename and refresh | The native Notes move endpoint renamed the note. Quartizo **Refresh** indexed the new path once and retained the ticket. |
+| Native Git sync | Notes **Sync** fetched a peer commit and pushed the rename to the local origin. The vault and origin ended at the same commit, and Quartizo found the incoming note's TODO after refresh. |
+| Gateway restart | The restarted dashboard retained both folder registrations, the renamed ticket, and the completed TODO. |
+| Bot handoff | The dashboard chat composer received the full folder prompt. The browser issued no chat send. |
+| Proxy integration | Both live integration checks passed. The signed gateway request reached Quartizo with an app-token principal, and a direct unsigned backend request returned HTTP 401. |
+| Repository checks | Ruff, TypeScript, 178 backend cases, 22 format cases, 25 Vitest cases, seven Chromium regression groups, and a reproducible UI bundle passed. Three backend cases skipped in the standalone run. The two live gateway cases passed separately. The Linux-only `/proc` case remains skipped on macOS. |
+
 ## Editable companion verification (2026-11-06)
 
 The current manifest declares **KiroCrew 0.12.0** as its minimum. Shared

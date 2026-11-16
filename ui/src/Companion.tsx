@@ -37,24 +37,14 @@ import {
   withTimeout,
   type Workspace,
 } from './companionApi'
-import { KIRO_NOTES_ROUTE, noteName } from './noteNav'
-import { ErrorLine, Icon, storage } from './ui'
+import { KIRO_NOTES_ROUTE, type NoteLocation, noteName } from './noteNav'
+import { ErrorLine, Icon, storage, usePageVisible } from './ui'
 
-/** While a scan runs the views check every SCANNING_MS; otherwise they rescan every IDLE_MS while visible. */
+/** Visible views poll SQLite results. Only an explicit Refresh requests a full scan. */
 export const SCANNING_MS = 1500
-export const IDLE_MS = 30000
+export const IDLE_MS = 3000
 
 const WS_KEY = 'quartizo:workspace'
-
-function usePageVisible(): boolean {
-  const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
-  useEffect(() => {
-    const onChange = () => setVisible(document.visibilityState !== 'hidden')
-    document.addEventListener('visibilitychange', onChange)
-    return () => document.removeEventListener('visibilitychange', onChange)
-  }, [])
-  return visible
-}
 
 /** The companion workspaces, read when the view opens (Settings may have changed them). */
 function useCompanions(api: AppApi, active = true) {
@@ -78,32 +68,30 @@ function useCompanions(api: AppApi, active = true) {
 }
 
 /**
- * Load a view's data while it is shown: ask for a (throttled) rescan when it
- * opens and every IDLE_MS, and re-read the index while a scan runs. Nothing
- * runs while the tab or page is hidden. A failed read keeps the last data.
+ * Load the index while the view is shown. A failed read keeps the last data.
  */
 function useIndexed<T>(
+  api: AppApi,
   active: boolean,
   key: string,
+  workspaceId: number | undefined,
   fetch: () => Promise<T>,
-  rescan: (manual: boolean) => Promise<unknown>,
-  scanning: (data: T) => boolean,
+  rescan: () => Promise<unknown>,
+  withStatus: (data: T, statuses: Record<string, IndexStatus>) => T,
 ) {
   const visible = usePageVisible()
   const [data, setData] = useState<T | null>(null)
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   const [tick, setTick] = useState(0)
   const [busy, setBusy] = useState(false)
-  const latest = useRef<T | null>(null)
   const fetchRef = useRef(fetch)
   const rescanRef = useRef(rescan)
-  const scanningRef = useRef(scanning)
+  const withStatusRef = useRef(withStatus)
   fetchRef.current = fetch
   rescanRef.current = rescan
-  scanningRef.current = scanning
+  withStatusRef.current = withStatus
 
   useEffect(() => {
-    latest.current = null
     setData(null)
     setFailure(null)
   }, [key])
@@ -112,35 +100,51 @@ function useIndexed<T>(
     if (!active || !visible) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
-    let first = true
+    let revision: string | undefined
+    let reported: string | undefined
     const run = async () => {
+      let scanning = false
       try {
-        // Opening the view and each idle period ask for a rescan; the backend skips it if one just ran.
-        if (first || !latest.current || !scanningRef.current(latest.current)) await withTimeout(rescanRef.current(false))
-        const value = await withTimeout(fetchRef.current())
+        const status = await withTimeout(companionStatus(api))
         if (cancelled) return
-        latest.current = value
-        setData(value)
+        if (!status.available) throw new Error(status.error ?? 'The Markdown index is unavailable.')
+        const enabled = status.workspaces.filter(({ workspace }) => workspace.companion)
+        const entries = enabled.filter(({ workspace }) => workspaceId === undefined || workspace.id === workspaceId)
+        const indexes = Object.fromEntries(entries.map(({ workspace, index }) => [workspace.id, index]))
+        scanning = entries.some(({ index }) => index.state === 'scanning')
+        // Board diagnostics can change when a duplicate ID appears in a different vault.
+        const nextRevision = JSON.stringify(enabled.map(({ workspace, index }) => [workspace.id, workspace.columnsVersion, index.indexedAt]))
+        const nextReported = JSON.stringify(indexes)
+        if (revision !== nextRevision) {
+          const value = await withTimeout(fetchRef.current())
+          if (cancelled) return
+          setData(value)
+          revision = nextRevision
+          reported = undefined
+        } else if (reported !== nextReported) {
+          const apply = withStatusRef.current
+          setData(previous => previous ? apply(previous, indexes) : previous)
+          reported = nextReported
+        }
         setFailure(null)
         setBusy(false)
       } catch (err) {
         if (!cancelled) { setFailure(toFailure(err)); setBusy(false) }
       }
-      first = false
-      if (!cancelled) timer = setTimeout(run, latest.current && scanningRef.current(latest.current) ? SCANNING_MS : IDLE_MS)
+      if (!cancelled) timer = setTimeout(run, scanning ? SCANNING_MS : IDLE_MS)
     }
     void run()
     return () => {
       cancelled = true
       clearTimeout(timer)
     }
-  }, [active, visible, key, tick])
+  }, [active, api, visible, key, tick, workspaceId])
 
   /** Refresh from the button: never throttled. */
   const refresh = useCallback(async () => {
     setBusy(true)
     try {
-      await withTimeout(rescanRef.current(true))
+      await withTimeout(rescanRef.current())
       setFailure(null)
       setTick(n => n + 1)
     } catch (err) {
@@ -150,7 +154,6 @@ function useIndexed<T>(
     }
   }, [])
   const reload = useCallback(() => {
-    latest.current = null
     // Keep the current cards mounted while their new snapshot loads, so a
     // successful edit does not flash an empty board or drop keyboard focus.
     setBusy(true)
@@ -210,7 +213,7 @@ function NoCompanions({ onSettings }: { onSettings: () => void }) {
     <div className="qz-empty">
       <span className="qz-empty-icon"><Icon name="folder" /></span>
       <h2>Connect a notes folder</h2>
-      <p>Share a folder from Kiro Notes to see its tickets and TODOs here.</p>
+      <p>Add a folder of Markdown files to see its tickets and TODOs here.</p>
       <button type="button" className="qz-button" data-variant="primary" onClick={onSettings}>Open Settings</button>
     </div>
   )
@@ -220,7 +223,7 @@ function NoCompanions({ onSettings }: { onSettings: () => void }) {
 // Tasks: the board of one companion workspace
 // ---------------------------------------------------------------------------
 
-export function TasksView(props: { api: AppApi; active?: boolean; onSettings: () => void }) {
+export function TasksView(props: { api: AppApi; active?: boolean; onSettings: () => void; onOpenNote: (note: NoteLocation) => void }) {
   const active = props.active ?? true
   const { companions, failure } = useCompanions(props.api, active)
   const [wsId, setWsId] = useState<number | null>(() => {
@@ -245,7 +248,7 @@ export function TasksView(props: { api: AppApi; active?: boolean; onSettings: ()
       <div className="qz-view-heading">
         <div>
           <h2 className="qz-section-title">Task board</h2>
-          <p className="qz-section-description">Plan and track tickets stored in Kiro Notes.</p>
+          <p className="qz-section-description">Plan and track tickets stored in your notes.</p>
         </div>
         <label className="qz-inline-field">
           <Icon name="folder" />
@@ -260,7 +263,8 @@ export function TasksView(props: { api: AppApi; active?: boolean; onSettings: ()
         </label>
       </div>
       {companions.map(({ workspace }) => <div key={workspace.uid} hidden={workspace.id !== current.id}>
-        <TicketBoard api={props.api} workspace={workspace} active={active && workspace.id === current.id} onSettings={props.onSettings} />
+        <TicketBoard api={props.api} workspace={workspace} active={active && workspace.id === current.id}
+          onSettings={props.onSettings} onOpenNote={props.onOpenNote} />
       </div>)}
     </div>
   )
@@ -298,13 +302,14 @@ function useMutation(onChanged: () => void) {
   return { pending, failure, run }
 }
 
-function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean; onSettings: () => void }) {
+function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean; onSettings: () => void; onOpenNote: (note: NoteLocation) => void }) {
   const { api, workspace, active } = props
   const wsId = workspace.id
   const navigate = useNavigate()
   const { data, failure, busy, refresh, reload } = useIndexed<BoardData>(
-    active, String(wsId), () => loadBoard(api, wsId),
-    manual => requestRefresh(api, { workspaceId: wsId, manual }), d => d.index.state === 'scanning',
+    api, active, String(wsId), wsId, () => loadBoard(api, wsId),
+    () => requestRefresh(api, { workspaceId: wsId, manual: true }),
+    (data, statuses) => ({ ...data, index: statuses[String(wsId)] ?? data.index }),
   )
   const action = useMutation(reload)
   const columns = data?.workspace.columns ?? workspace.columns
@@ -446,7 +451,7 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
                     onDragEnd={() => { dragging.current = null }}
                     onDragOver={e => { if (!blocked && lane !== 'repair') e.preventDefault() }}
                     onDrop={e => { if (lane !== 'repair') drop(e, lane, t) }}>
-                    <TicketCard ticket={t} lane={li} index={ci} columns={columns} onOpen={() => navigate(KIRO_NOTES_ROUTE)}
+                    <TicketCard ticket={t} lane={li} index={ci} columns={columns} onOpen={() => props.onOpenNote({ workspaceId: wsId, path: t.path })}
                       disabled={blocked || !!mutationProblem(data.index, t)} maintenance={data.index.maintenance ?? []}
                       onMove={(status, position) => move(t, status, position)}
                       onDemote={() => {
@@ -560,7 +565,7 @@ function TicketCard(props: { ticket: Ticket; lane: number; index: number; column
   const status = t.lane === 'repair' ? '' : t.lane
   return <article className="qz-ticket">
     <div className="qz-ticket-content">
-      <button type="button" className="qz-note-link" data-lane={props.lane} data-index={props.index} data-note-path={t.path} aria-label={`Open Kiro Notes: ${t.title}`} onClick={props.onOpen}>
+      <button type="button" className="qz-note-link" data-lane={props.lane} data-index={props.index} data-note-path={t.path} aria-label={`Open note: ${t.title}`} onClick={props.onOpen}>
         {t.title}<Icon name="external" />
       </button>
       <span className="qz-mono qz-path" title={t.path}>{t.path}</span>
@@ -595,7 +600,7 @@ function TicketCard(props: { ticket: Ticket; lane: number; index: number; column
 // TODOs
 // ---------------------------------------------------------------------------
 
-export function TodoView(props: { api: AppApi; onSettings: () => void }) {
+export function TodoView(props: { api: AppApi; onSettings: () => void; onOpenNote: (note: NoteLocation) => void }) {
   const { api } = props
   const navigate = useNavigate()
   const { companions, failure: statusFailure } = useCompanions(api)
@@ -611,11 +616,12 @@ export function TodoView(props: { api: AppApi; onSettings: () => void }) {
   const wsId = scope === 'all' ? undefined : scope
   const enabled = !!companions && companions.length > 0
   const { data, failure, busy, refresh, reload } = useIndexed<TodoData>(
-    enabled,
+    api, enabled,
     `${scope}:${state}`,
+    wsId,
     () => loadTodos(api, state, wsId),
-    manual => requestRefresh(api, { workspaceId: wsId, manual }),
-    d => Object.values(d.index).some(i => i.state === 'scanning'),
+    () => requestRefresh(api, { workspaceId: wsId, manual: true }),
+    (data, index) => ({ ...data, index }),
   )
   const groups = useMemo(() => filterTodos(data?.groups ?? [], search), [data, search])
   const itemCount = groups.reduce((total, group) => total + group.items.length, 0)
@@ -705,9 +711,9 @@ export function TodoView(props: { api: AppApi; onSettings: () => void }) {
                   </label>
                   <button
                     type="button"
-                    title={`Open Kiro Notes · ${g.path}:${item.line}:${item.column}${item.heading ? ` · ${item.heading}` : ''}`}
-                    aria-label={`Open Kiro Notes: ${todoLabel(item.text)}`}
-                    onClick={() => navigate(KIRO_NOTES_ROUTE)}
+                    title={`Open note · ${g.path}:${item.line}:${item.column}${item.heading ? ` · ${item.heading}` : ''}`}
+                    aria-label={`Open note: ${todoLabel(item.text)}`}
+                    onClick={() => props.onOpenNote({ workspaceId: g.workspaceId, path: g.path })}
                     className="qz-button qz-icon-button" data-variant="quiet"
                   ><Icon name="external" /></button>
                 </li>

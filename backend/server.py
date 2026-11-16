@@ -21,8 +21,8 @@ Only ``GET /health`` is unsigned (the gateway probes it directly). Every other
 request must carry both valid headers, or it is refused before routing, and
 every route is dashboard-owner only (``owner-session`` principal).
 
-The index reads registered folders; explicit owner actions write narrowly
-scoped ticket properties and checkboxes through companion_write.py.
+The index reads registered folders. Owner actions write note text, ticket
+properties and checkboxes through companion_write.py.
 
 Workspace registry state lives in ``<KIROCREW_HOME>/apps/<KIROCREW_APP_NAME>/data``
 (the gateway injects both; ``manager.py::app_data_dir`` in 0.10.0rc4).
@@ -53,18 +53,26 @@ import companion  # noqa: E402
 import companion_write  # noqa: E402
 import host_compat  # noqa: E402
 import legacy_migration  # noqa: E402
+from mdsource import MAX_FILE_BYTES  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
 
 APP_NAME = "quartizo"
-APP_VERSION = "0.0.2"
+APP_VERSION = "0.12.0"
 SECRET_ENV = "KIROCREW_PROXY_SECRET"
 PROXY_HEADER = "X-KiroCrew-Proxy"
 PRINCIPAL_HEADER = "X-KiroCrew-Principal"
 MAX_SKEW_SECONDS = 60
 MAX_BODY_BYTES = 64 << 10
+# A single UTF-8 byte can expand to a six-byte JSON escape. Reserve the
+# ordinary request budget for the path, hash and JSON envelope.
+MAX_NOTE_BODY_BYTES = 6 * MAX_FILE_BYTES + MAX_BODY_BYTES
 MAX_IN_FLIGHT = 16
 MAX_PRINCIPAL_HEADER_BYTES = 4096
 
+_NOTE_BODY_PATHS = {
+    "POST": re.compile(r"/api/workspaces/[0-9]{1,12}/notes"),
+    "PUT": re.compile(r"/api/workspaces/[0-9]{1,12}/source"),
+}
 _TS_RE = re.compile(r"[0-9]{1,12}")
 _HEX64_RE = re.compile(r"[0-9a-f]{64}")
 _REQUEST_ID_RE = re.compile(r"[0-9a-f]{32}")
@@ -351,15 +359,25 @@ class Handler(BaseHTTPRequestHandler):
         writer: companion_write.CompanionWriter = self.server.writer  # type: ignore[attr-defined]
         migration: legacy_migration.LegacyMigration = self.server.migration  # type: ignore[attr-defined]
         ws = registry.get(ws_id)
-        if rest == ["source"] and self.command == "GET":
-            writer.index._require(ws)
-            path = _q(query, "path", None)
-            data = companion_write.read_note(ws, path)
-            try:
-                content = data.decode("utf-8")
-            except UnicodeDecodeError:
-                raise ApiError(415, "not_utf8", "this note is not valid UTF-8") from None
-            return 200, {"path": path, "hash": companion_write.digest(data), "content": content}
+        if rest == ["backlinks"] and self.command == "GET":
+            return 200, writer.index.backlinks(ws, _q(query, "path", None))
+        if rest == ["notes"]:
+            if self.command == "GET":
+                return 200, writer.index.list_notes(ws)
+            if self.command == "POST":
+                return 201, writer.create_note(ws, self._json_body())
+        if rest == ["source"]:
+            if self.command == "PUT":
+                return 200, writer.save_note(ws, self._json_body())
+            if self.command == "GET":
+                writer.index._require(ws)
+                path = _q(query, "path", None)
+                data = companion_write.read_note(ws, path)
+                try:
+                    content = data.decode("utf-8")
+                except UnicodeDecodeError:
+                    raise ApiError(415, "not_utf8", "this note is not valid UTF-8") from None
+                return 200, {"path": path, "hash": companion_write.digest(data), "content": content}
         if rest == ["legacy-tasks"] and self.command == "GET":
             return 200, migration.export(ws)
         if rest == ["migration"]:
@@ -435,8 +453,10 @@ class Handler(BaseHTTPRequestHandler):
         if not raw_len.isascii() or not raw_len.isdigit():
             self._json(400, {"error": "bad content-length"})
             return None
+        note_path = _NOTE_BODY_PATHS.get(self.command)
+        limit = MAX_NOTE_BODY_BYTES if note_path and note_path.fullmatch(self.path.partition("?")[0]) else MAX_BODY_BYTES
         length = int(raw_len)
-        if length > MAX_BODY_BYTES:
+        if length > limit:
             self._json(413, {"error": "body too large", "code": "too_large"})
             return None
         return self.rfile.read(length) if length else b""
@@ -491,6 +511,12 @@ class Server(ThreadingHTTPServer):
         host, port = self.server_address[:2]
         self.server_name = host
         self.server_port = port
+
+    def server_close(self) -> None:
+        super().server_close()
+        index = getattr(self, "companion", None)
+        if index is not None:
+            index.close()
 
     def process_request(self, request, client_address) -> None:
         if not self._slots.acquire(timeout=5):
@@ -553,9 +579,9 @@ def main() -> None:
     if not secret:
         sys.stderr.write(f"{APP_NAME}: {SECRET_ENV} not set; all /api routes will refuse (503)\n")
     registry = Registry(data_dir(), protected=(str(kirocrew_home()),))
-    server = make_server(port, secret, registry)
-    sys.stderr.write(f"{APP_NAME} backend on 127.0.0.1:{server.server_address[1]}\n")
-    server.serve_forever()
+    with make_server(port, secret, registry) as server:
+        sys.stderr.write(f"{APP_NAME} backend on 127.0.0.1:{server.server_address[1]}\n")
+        server.serve_forever()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,4 @@
-/**
- * Settings: connected folders and their board preferences. A folder added here is shared with
- * Kiro Notes right away (companion mode), since the board and the TODO list
- * only show companion folders. Legacy conversion is an explicit, backed-up action.
- */
+/** Settings for connected Markdown folders, their board preferences, and legacy task migration. */
 import { type AppApi, useChatLauncher } from '@kirocrew/app-sdk'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -96,7 +92,7 @@ export default function Settings(props: { api: AppApi }) {
             {workspaces && <span className="qz-settings-count">{workspaces.length}</span>}
           </div>
           {!workspaces && !loadFailure && <p className="qz-muted" role="status">Loading folders…</p>}
-          {workspaces?.length === 0 && <p className="qz-empty">Add a folder to start viewing its tickets and TODOs.</p>}
+          {workspaces?.length === 0 && <p className="qz-empty">Add a folder to see its notes, tickets, and TODOs.</p>}
           {workspaces?.map(w => (
             <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={() => setReload(n => n + 1)}
               onColumnsSaved={saved => setWorkspaces(items => items?.map(item => item.id === saved.id ? { ...item, ...saved } : item) ?? null)} />
@@ -113,7 +109,7 @@ export default function Settings(props: { api: AppApi }) {
         >
           <div>
             <h3 id="qz-settings-add">Add a folder</h3>
-            <p className="qz-muted">Use the same folder path you added in Kiro Notes.</p>
+            <p className="qz-muted">Use any local folder of Markdown files. To use the same files in Kiro Notes, attach the folder there separately.</p>
           </div>
           <label className="qz-field">
             Absolute folder path
@@ -160,7 +156,7 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
             disabled={busy}
             onChange={() => void run(() => setCompanion(api, w.id, !w.companion)).then(ok => ok && props.onChanged())}
           />
-          Shared with Kiro Notes
+          Show in Quartizo
         </label>
         <div className="qz-settings-actions">
           {w.companion && (
@@ -186,6 +182,7 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
         </div>
       </div>
       {w.companion && <BoardSettings api={api} workspace={w} onSaved={props.onColumnsSaved} />}
+      <AgentPrompt workspace={w} />
       {!!w.oldTasks && <LegacyMigration api={api} workspace={w} writeBlocked={props.writeBlocked} onChanged={props.onChanged} />}
       {confirmRemove && (
         <div role="alertdialog" aria-label="Remove folder" className="qz-notice qz-settings-notice">
@@ -292,7 +289,6 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
         <ErrorLine failure={failure} />
       </div>
     </details>
-    <AgentPrompt workspace={workspace} />
   </>
 }
 
@@ -311,22 +307,25 @@ function AgentPrompt({ workspace }: { workspace: Workspace }) {
       setMessage('Copy the selected text to use the prompt.')
     }
   }
-  return <details className="qz-settings-disclosure">
-    <summary>Work with a Bot or agent</summary>
-    <div className="qz-stack">
-      <p className="qz-muted">Open a draft in KiroCrew, pick a Bot or agent in the chat composer, then add your request and send it. The selected agent needs access to this folder.</p>
-      <div className="qz-settings-actions">
-        <button type="button" className="qz-button" data-variant="primary" onClick={() => openChat({ message: prompt, autoSend: false })}>
-          <Icon name="external" />Open in KiroCrew chat
-        </button>
-      </div>
-      <textarea ref={field} className="qz-input qz-mono qz-agent-prompt" aria-label="Agent prompt" value={prompt} rows={8} readOnly />
-      <div className="qz-settings-actions">
-        <button type="button" className="qz-button" onClick={() => void copy()}><Icon name="copy" />Copy agent prompt</button>
-        <span className="qz-muted" role="status">{message}</span>
-      </div>
+  return <div className="qz-stack">
+    <div className="qz-settings-actions">
+      <button type="button" className="qz-button" data-variant="primary" disabled={!workspace.companion}
+        onClick={() => openChat({ message: prompt, autoSend: false })}>
+        <Icon name="external" />Ask a Bot or agent
+      </button>
     </div>
-  </details>
+    {workspace.companion ? <details className="qz-settings-disclosure">
+      <summary>Agent instructions</summary>
+      <div className="qz-stack">
+        <p className="qz-muted">Pick a Bot or agent in the KiroCrew chat composer, then add your request and send it. The agent needs access to this folder.</p>
+        <textarea ref={field} className="qz-input qz-mono qz-agent-prompt" aria-label="Agent prompt" value={prompt} rows={8} readOnly />
+        <div className="qz-settings-actions">
+          <button type="button" className="qz-button" onClick={() => void copy()}><Icon name="copy" />Copy agent prompt</button>
+          <span className="qz-muted" role="status">{message}</span>
+        </div>
+      </div>
+    </details> : <p className="qz-muted">Turn on Show in Quartizo to ask a Bot about this folder.</p>}
+  </div>
 }
 
 

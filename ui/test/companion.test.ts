@@ -4,7 +4,7 @@ import {
   addWorkspace, ago, companionStatus, describeIndex, filterTodos, groupLanes, indexWarning, listWorkspaces, loadBoard,
   loadTodos, query, removeWorkspace, REQUEST_TIMEOUT_MS, requestRefresh, setCompanion, type Ticket, type TodoGroup, todoLabel,
   toFailure, withTimeout, createTicket, moveTicket, mutationProblem, planMove, promoteNote, readSource,
-  toggleTodo, previewMigration, migrateTasks, exportLegacyTasks,
+  toggleTodo, previewMigration, migrateTasks, exportLegacyTasks, createNote, listNotes, saveNote,
 } from '../src/companionApi'
 import { noteName } from '../src/noteNav'
 
@@ -25,6 +25,16 @@ function ticket(path: string, lane: Ticket['lane']): Ticket {
 }
 
 describe('companion API client', () => {
+  it('lists notes and submits changes with the hash of the opened source', async () => {
+    const { api, get, post, put } = mockApi()
+    await listNotes(api, 3)
+    await createNote(api, 3, 'projects/demo.md')
+    await saveNote(api, 3, 'projects/demo.md', '# Demo\n', 'hash')
+    expect(get).toHaveBeenCalledWith(`${B}/workspaces/3/notes`)
+    expect(post).toHaveBeenCalledWith(`${B}/workspaces/3/notes`, { path: 'projects/demo.md' })
+    expect(put).toHaveBeenCalledWith(`${B}/workspaces/3/source`, { path: 'projects/demo.md', content: '# Demo\n', expectedHash: 'hash' })
+  })
+
   it('reads through the companion and board routes', async () => {
     const { api, get } = mockApi()
     await companionStatus(api)

@@ -5,10 +5,9 @@ Audited 2026-10-20 in `ui/` with npm (Node 26.11.1) against the committed
 
 ## Backend: vendored Python parser
 
-The backend installs nothing: it runs under the gateway's interpreter with
-`python -I`. Besides the standard library it uses one pure-Python package,
-copied **unchanged** from a hash-pinned PyPI wheel into `backend/_vendor/`, to
-read ticket frontmatter (`backend/mdsource.py`):
+The backend runs under the gateway's interpreter. Its YAML parser is copied
+**unchanged** from a hash-pinned PyPI wheel into `backend/_vendor/` to read
+ticket frontmatter (`backend/mdsource.py`).
 
 | Package | Version | Wheel sha256 | License | Role |
 |---|---|---|---|---|
@@ -20,14 +19,14 @@ verifies them before extracting anything. Left out: ruamel.yaml's `clibz/`
 has no further runtime dependencies. License text: `backend/_vendor/licenses/`
 and [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
 
-Checkboxes and headings need no Markdown parser: they follow native Kiro Notes'
-own line rules (see the README). markdown-it-py and mdurl were vendored until
-that change and are gone.
+Checkboxes and headings follow native Kiro Notes' line rules (see the README).
+For backlinks the index uses Markdown-it-py 4.3.0 and mdurl 0.1.2 from
+`requirements.txt`, so code and link destinations do not count as wikilinks.
+It parses this way only when a note contains `[[`. KiroCrew provisions these
+dependencies alongside Watchdog. The format spike retains its own pins.
 
-Why vendored rather than a root `requirements.txt` (which the gateway would
-`pip install --target` at spawn): the shipped bytes must be the tested bytes,
-first start must not need the network, and the host's provisioning path had
-not been exercised live. `backend/vendored.py` puts `_vendor` first on
+Vendoring keeps the shipped parser bytes identical to the tested bytes.
+`backend/vendored.py` puts `_vendor` first on
 `sys.path` and refuses a copy that was not loaded from there at the pinned
 version (the companion views then report the index as unavailable).
 `tests/backend/test_vendor.py` compares the tree with
@@ -37,17 +36,24 @@ To update: change the pin in `scripts/vendor_parsers.py`, run it, rerun
 `make check`, and review the diff. The spike in `spikes/markdown_tickets/`
 keeps its own `requirements.txt` and is tested separately (`make test-formats`).
 
+## Backend: native filesystem notifications
+
+Kiro Crew provisions **Watchdog 7.1.0** from the root `requirements.txt` into
+the app's backend dependency directory. Watchdog uses FSEvents on macOS and
+inotify on Linux. Quartizo can also detect changes through a bounded file
+metadata check when native notifications are unavailable. The package is
+licensed under Apache 2.0 and ships its notices in the wheel.
+
 ## UI: bundled runtime dependencies
 
 `ui/dist/index.mjs` is built by Vite. `react`, `react-dom` and the KiroCrew SDK
 are Rollup externals resolved by the host's import map, so they are **not in
 the bundle** (`ui/test/bundle.test.ts` checks the bundle imports only
 `react`, `react/jsx-runtime`, `@kirocrew/app-sdk` and `@kirocrew/app-sdk/ui`).
-Nothing else is inlined: the bundle contains no third-party code. (Earlier
-versions inlined markdown-it for the removed note preview.)
-
-Listed by `npm ls --omit=dev`, none shipped: react 18.3.1, react-dom 18.3.1
-(host-provided), and loose-envify, js-tokens, scheduler (used only by them).
+The Notes preview bundles **markdown-it 15.0.3** with its browser parser
+dependencies. Their license texts are in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+The runtime npm audit of the locked dependencies found zero vulnerabilities
+on 2026-11-10.
 
 ## Browser regression tooling (2026-11-06)
 
@@ -92,9 +98,7 @@ read-only token.
 The project license is **MIT** (chosen for 0.0.1; see LICENSE and THIRD_PARTY_NOTICES.md). This is
 engineering context, not legal advice. All bundled code is permissive
 (MIT, BSD-2-Clause), which can be redistributed inside a project under any of
-the candidates, provided the notices are kept. (Since the UI bundle no longer
-inlines markdown-it, the only redistributed third-party code is the vendored
-ruamel.yaml, MIT.)
+the candidates, provided the notices are kept.
 
 | Candidate | Compatible with the bundled MIT / BSD-2-Clause code? | Notes |
 |---|---|---|

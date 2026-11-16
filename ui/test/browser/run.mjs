@@ -110,12 +110,12 @@ async function selfDropRegression(page, fixture) {
   let moves = 0
   const countMove = request => { if (request.url().endsWith('/tickets/move')) moves++ }
   page.on('request', countMove)
-  const card = page.locator('li').filter({ has: button(page, 'Open Kiro Notes: Second') })
+  const card = page.locator('li').filter({ has: button(page, 'Open note: Second') })
   await card.dragTo(card, { sourcePosition: { x: 25, y: 15 }, targetPosition: { x: 110, y: 45 } })
   await delay(500)
   assert.equal(moves, 0, 'Self-drop sent a mutation')
   assert.deepEqual(readFileSync(path.join(fixture.vault, 'second.md')), before)
-  assert.equal(await page.getByRole('region', { name: 'Ready', exact: true }).getByRole('button', { name: /Open Kiro Notes:/ }).first().getAttribute('aria-label'), 'Open Kiro Notes: First')
+  assert.equal(await page.getByRole('region', { name: 'Ready', exact: true }).getByRole('button', { name: /Open note:/ }).first().getAttribute('aria-label'), 'Open note: First')
   page.off('request', countMove)
   console.log('PASS native mouse self-drop is a no-op')
 }
@@ -229,7 +229,7 @@ async function customColumnsRegression(page, fixture) {
   await button(folder, 'Add column').click()
   await button(folder, 'Save columns').click()
   await folder.getByText('Board columns saved.', { exact: true }).waitFor()
-  await disclosure('Work with a Bot or agent').click()
+  await disclosure('Agent instructions').click()
   const prompt = await textbox(folder, 'Agent prompt').inputValue()
   assert.ok(prompt.includes(fixture.vault))
   assert.match(prompt, /- ready \("Up next"\)[\s\S]*- on_hold \("On hold"\)/)
@@ -239,7 +239,7 @@ async function customColumnsRegression(page, fixture) {
   await folder.getByText('Agent prompt copied.', { exact: true }).waitFor()
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), prompt)
   assert.equal(await page.evaluate(() => window.testChatLaunch), undefined)
-  await button(folder, 'Open in KiroCrew chat').click()
+  await button(folder, 'Ask a Bot or agent').click()
   assert.deepEqual(await page.evaluate(() => window.testChatLaunch), { message: prompt, autoSend: false })
 
   await tab(page, 'Tasks').click()
@@ -255,7 +255,7 @@ async function customColumnsRegression(page, fixture) {
   await textbox(page, 'Ticket title').fill('Held ticket')
   await textbox(page, 'Ticket description').fill('- [ ] Held task')
   await button(page, 'Create ticket').click()
-  await button(lane('On hold'), 'Open Kiro Notes: Held ticket').waitFor()
+  await button(lane('On hold'), 'Open note: Held ticket').waitFor()
   const file = path.join(fixture.vault, 'hold.md')
   const original = readFileSync(file, 'utf8')
   assert.match(original, /status: "on_hold"/)
@@ -269,10 +269,10 @@ async function customColumnsRegression(page, fixture) {
   await folder.getByText('Board columns saved.', { exact: true }).waitFor()
   assert.equal(readFileSync(file, 'utf8'), original)
   await tab(page, 'Tasks').click()
-  await button(lane('Needs repair'), 'Open Kiro Notes: Held ticket').waitFor()
+  await button(lane('Needs repair'), 'Open note: Held ticket').waitFor()
   await ready(page, 'Held ticket')
   await select(page, 'Move Held ticket to column').selectOption('ready')
-  await button(lane('Up next'), 'Open Kiro Notes: Held ticket').waitFor()
+  await button(lane('Up next'), 'Open note: Held ticket').waitFor()
   assert.match(readFileSync(file, 'utf8'), /status: "ready"/)
 
   await page.reload()
@@ -283,12 +283,73 @@ async function customColumnsRegression(page, fixture) {
   console.log('PASS custom columns persist per folder, keep notes recoverable, and reach the clipboard and unsent chat draft')
 }
 
+async function notesRegression(page, fixture) {
+  let automaticRescans = 0
+  const countRescan = request => {
+    if (request.method() === 'POST' && request.url().endsWith('/companion/refresh')) automaticRescans++
+  }
+  page.on('request', countRescan)
+  try {
+    await page.goto(fixture.origin)
+    await select(page, 'Workspace').selectOption({ label: 'Browser vault' })
+    await button(page, 'Open note: First').click()
+    const editor = textbox(page, 'Note Markdown')
+    await eventually(async () => (await editor.inputValue().catch(() => '')).includes('# First'), 'Task did not open its source note')
+    assert.equal(await select(page, 'Notes folder').inputValue(), String(fixture.workspaceId))
+    await tab(page, 'TODOs').click()
+    await button(page, 'Open note: First TODO').click()
+    assert.match(await editor.inputValue(), /- \[ \] First TODO/)
+
+    await button(page, 'New note').click()
+    await textbox(page, 'Note path').fill('Projects/notes-regression.md')
+    await button(page, 'Create note').click()
+    const notePath = path.join(fixture.vault, 'Projects', 'notes-regression.md')
+    await eventually(() => existsSync(notePath), 'Nested note was not created')
+    await page.locator('code[title="Projects/notes-regression.md"]').waitFor()
+    const saved = '# Notes regression\n\n- [ ] Shared index check\n\n<script>window.hostileExecuted = true</script>\n\n![pixel](https://example.com/pixel.png)\n'
+    await editor.fill(saved)
+    await tab(page, 'Settings').click()
+    await tab(page, 'Notes').click()
+    assert.equal(await editor.inputValue(), saved, 'Unsaved draft disappeared after a tab switch')
+    await button(page, 'Save note').click()
+    await eventually(() => readFileSync(notePath, 'utf8') === saved, 'Note content was not saved')
+    await button(page, 'Preview').click()
+    await page.getByRole('heading', { name: 'Notes regression', exact: true }).waitFor()
+    assert.equal(await page.locator('img').count(), 0, 'Preview rendered a remote image')
+    assert.equal(await page.evaluate(() => Boolean(window.hostileExecuted)), false)
+
+    await tab(page, 'TODOs').click()
+    await page.getByRole('checkbox', { name: 'Complete Shared index check', exact: true }).waitFor()
+    await button(page, 'Open note: Shared index check').click()
+    if (await button(page, 'Edit Markdown').isVisible()) await button(page, 'Edit Markdown').click()
+    await editor.waitFor()
+    const draft = saved + '\nMy unsaved changes\n'
+    await editor.fill(draft)
+    const onDisk = saved + '\nBot wrote first\n'
+    writeFileSync(notePath, onDisk)
+    const response = page.waitForResponse(value => new URL(value.url()).pathname.endsWith('/source') && value.request().method() === 'PUT')
+    await button(page, 'Save note').click()
+    assert.equal((await response).status(), 409)
+    await page.getByRole('alert').filter({ hasText: 'The note changed on disk' }).waitFor()
+    assert.equal(await editor.inputValue(), draft, 'Conflicting save discarded the draft')
+    assert.equal(readFileSync(notePath, 'utf8'), onDisk, 'Conflicting save overwrote the Bot edit')
+
+    writeFileSync(path.join(fixture.vault, 'Projects', 'from-bot.md'), '# Added by a Bot\n')
+    await page.getByRole('searchbox', { name: 'Search notes' }).fill('from-bot')
+    await page.getByRole('button', { name: /Added by a Bot/ }).waitFor()
+    assert.equal(automaticRescans, 0, 'The views sent an automatic full scan request')
+    console.log('PASS Notes opens exact sources, saves nested Markdown, preserves drafts, and sees Bot edits without a full scan request')
+  } finally {
+    page.off('request', countRescan)
+  }
+}
+
 async function prerequisiteRegression(browser) {
   const fixture = await startFixture('0.12.0rc6')
   const page = await browser.newPage()
   try {
     await page.goto(fixture.origin)
-    await page.getByRole('button', { name: 'Open Kiro Notes: First', exact: true }).waitFor()
+    await page.getByRole('button', { name: 'Open note: First', exact: true }).waitFor()
     assert.equal(await select(page, 'Move First to column').isDisabled(), true)
     await button(page, 'New ticket').click()
     await textbox(page, 'Ticket note path').fill('blocked.md')
@@ -307,6 +368,37 @@ async function prerequisiteRegression(browser) {
     await page.close()
     await fixture.stop()
   }
+}
+
+async function wikilinkRegression(page, fixture) {
+  const sourcePath = path.join(fixture.vault, 'Projects', 'link-source.md')
+  const targetPath = path.join(fixture.vault, 'Projects', 'link-target.md')
+  const source = '# Link source\n\nSee [[Projects/link-target|Release checklist]].\n'
+  writeFileSync(targetPath, '# Target note\n')
+  writeFileSync(sourcePath, source)
+
+  await page.goto(fixture.origin)
+  await tab(page, 'Notes').click()
+  await page.getByRole('searchbox', { name: 'Search notes' }).fill('link-source')
+  await page.getByRole('button', { name: /Link source/ }).click()
+  const editor = textbox(page, 'Note Markdown')
+  await editor.fill(source + '\nUnsaved draft\n')
+  await button(page, 'Preview').click()
+  await button(page, 'Release checklist').click()
+  await page.locator('code[title="Projects/link-target.md"]').waitFor()
+  const backlinks = page.getByRole('region', { name: 'Backlinks' })
+  await backlinks.getByRole('button', { name: /Link source/ }).click()
+  await page.locator('code[title="Projects/link-source.md"]').waitFor()
+  if (await button(page, 'Edit Markdown').isVisible()) await button(page, 'Edit Markdown').click()
+  assert.match(await editor.inputValue(), /Unsaved draft/)
+  assert.equal(readFileSync(sourcePath, 'utf8'), source)
+
+  await button(page, 'Preview').click()
+  await button(page, 'Release checklist').click()
+  await backlinks.getByRole('button', { name: /Link source/ }).waitFor()
+  writeFileSync(sourcePath, '# Link source\n\nRemoved the reference outside Quartizo.\n')
+  await backlinks.getByRole('button', { name: /Link source/ }).waitFor({ state: 'hidden' })
+  console.log('PASS wikilinks and backlinks navigate to exact notes, preserve drafts, and reflect external edits')
 }
 
 let browser
@@ -329,6 +421,8 @@ try {
   await exhaustionRegression(page, fixture)
   await migrationRegression(page, fixture)
   await customColumnsRegression(page, fixture)
+  await notesRegression(page, fixture)
+  await wikilinkRegression(page, fixture)
   await prerequisiteRegression(browser)
   assert.deepEqual(errors, [])
   success = true

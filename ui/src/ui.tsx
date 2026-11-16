@@ -1,4 +1,5 @@
 /** Icons, error feedback, and browser storage shared by the views. */
+import { useEffect, useState } from 'react'
 import type { ApiFailure } from './companionApi'
 
 const icons = {
@@ -43,4 +44,14 @@ export function storage(): Storage | undefined {
   } catch {
     return undefined
   }
+}
+
+export function usePageVisible(): boolean {
+  const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
+  useEffect(() => {
+    const onChange = () => setVisible(document.visibilityState !== 'hidden')
+    document.addEventListener('visibilitychange', onChange)
+    return () => document.removeEventListener('visibilitychange', onChange)
+  }, [])
+  return visible
 }

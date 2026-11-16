@@ -24,7 +24,7 @@ export interface Workspace {
   path: string
   columns: BoardColumn[]
   columnsVersion: number
-  /** Shared with Kiro Notes: indexed for the board and the TODO list. */
+  /** Included in the shared Quartizo index. */
   companion?: boolean
   /** Tasks left from the removed database board; removing the folder deletes them. */
   oldTasks?: number
@@ -80,7 +80,7 @@ export async function listWorkspaces(api: AppApi): Promise<Workspace[]> {
   return res.workspaces
 }
 
-/** Register a folder, already shared with Kiro Notes (one request, so it is never left half-added). */
+/** Register and enable a folder in one request. */
 export async function addWorkspace(api: AppApi, path: string, name?: string): Promise<Workspace> {
   const res = await api.post<{ workspace: Workspace }>(`${BACKEND_BASE}/workspaces`, name ? { path, name, companion: true } : { path, companion: true })
   return res.workspace
@@ -242,7 +242,7 @@ export function indexWarning(index: IndexStatus | undefined): string | null {
   if (index.writeBlocked) return index.writeBlocked.message
   switch (index.state) {
     case 'off':
-      return 'This workspace is not in Kiro Notes companion mode.'
+      return 'This folder is hidden in Quartizo.'
     case 'unavailable':
       return `The Markdown index is unavailable: ${typeof index.error === 'string' ? index.error : 'parsers failed to load'}.`
     case 'unindexed':
@@ -307,6 +307,9 @@ export function todoLabel(text: string): string {
 
 export interface SourceNote { path: string; hash: string; content: string }
 export interface MutationResult { path: string; hash: string; id?: string; status?: TaskStatus; order?: string }
+export interface NoteEntry { path: string; title: string }
+export interface NotesData { notes: NoteEntry[]; index: IndexStatus }
+export interface BacklinksData { notes: NoteEntry[]; truncated: boolean }
 export interface NoteSnapshot { path: string; hash: string }
 export interface MoveRequest {
   path: string
@@ -324,6 +327,23 @@ function workspacePath(wsId: number, action: string): string {
 export function readSource(api: AppApi, wsId: number, path: string): Promise<SourceNote> {
   return api.get(workspacePath(wsId, 'source') + query({ path }))
 }
+
+export function listNotes(api: AppApi, wsId: number): Promise<NotesData> {
+  return api.get(workspacePath(wsId, 'notes'))
+}
+
+export function listBacklinks(api: AppApi, wsId: number, path: string): Promise<BacklinksData> {
+  return api.get(workspacePath(wsId, 'backlinks') + query({ path }))
+}
+
+export function createNote(api: AppApi, wsId: number, path: string): Promise<MutationResult> {
+  return api.post(workspacePath(wsId, 'notes'), { path })
+}
+
+export function saveNote(api: AppApi, wsId: number, path: string, content: string, expectedHash: string): Promise<MutationResult> {
+  return api.put(workspacePath(wsId, 'source'), { path, content, expectedHash })
+}
+
 export function createTicket(api: AppApi, wsId: number, body: { path: string; title: string; body?: string; status?: TaskStatus }): Promise<MutationResult> {
   return api.post(workspacePath(wsId, 'tickets'), body)
 }

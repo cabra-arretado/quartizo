@@ -1,14 +1,17 @@
 import { useAppApi } from '@kirocrew/app-sdk'
 import { type KeyboardEvent, useRef, useState } from 'react'
 import { TasksView, TodoView } from './Companion'
+import NotesView from './Notes'
 import Settings from './Settings'
+import type { NoteLocation } from './noteNav'
 import { Icon, type IconName } from './ui'
 import styles from './quartizo.css?inline'
 
-type Tab = 'tasks' | 'todos' | 'settings'
+type Tab = 'tasks' | 'todos' | 'notes' | 'settings'
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'tasks', label: 'Tasks', icon: 'board' },
   { id: 'todos', label: 'TODOs', icon: 'checklist' },
+  { id: 'notes', label: 'Notes', icon: 'note' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ]
 
@@ -19,6 +22,7 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
 export default function Quartizo() {
   const api = useAppApi()
   const [tab, setTab] = useState<Tab>('tasks')
+  const [noteRequest, setNoteRequest] = useState<NoteLocation | null>(null)
   const tabs = useRef<HTMLDivElement>(null)
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
@@ -33,6 +37,11 @@ export default function Quartizo() {
     setTab('settings')
     tabs.current?.querySelector<HTMLElement>('#qz-tab-settings')?.focus()
   }
+  const openNote = (note: NoteLocation) => {
+    setNoteRequest(note)
+    setTab('notes')
+    tabs.current?.querySelector<HTMLElement>('#qz-tab-notes')?.focus()
+  }
 
   return (
     <div className="qz-app">
@@ -43,7 +52,7 @@ export default function Quartizo() {
           <span className="qz-mark"><Icon name="gem" /></span>
           <div>
             <h1>Quartizo</h1>
-            <p>Kiro Notes companion</p>
+            <p>Notes, tasks, and TODOs</p>
           </div>
         </div>
         <div className="qz-tabs" ref={tabs} role="tablist" aria-label="Quartizo" onKeyDown={onTabKey}>
@@ -67,9 +76,12 @@ export default function Quartizo() {
       <div className="qz-content" id="qz-panel" role="tabpanel" aria-labelledby={`qz-tab-${tab}`}>
         {/* Inactive boards pause polling and keep drafts and in-flight writes mounted. */}
         <div hidden={tab !== 'tasks'}>
-          <TasksView api={api} active={tab === 'tasks'} onSettings={openSettings} />
+          <TasksView api={api} active={tab === 'tasks'} onSettings={openSettings} onOpenNote={openNote} />
         </div>
-        {tab === 'todos' && <TodoView api={api} onSettings={openSettings} />}
+        {tab === 'todos' && <TodoView api={api} onSettings={openSettings} onOpenNote={openNote} />}
+        <div hidden={tab !== 'notes'}>
+          <NotesView api={api} active={tab === 'notes'} request={noteRequest} onSettings={openSettings} />
+        </div>
         {tab === 'settings' && <Settings api={api} />}
       </div>
     </div>
