@@ -38,26 +38,84 @@
 }
 
 .qz-note-editor .qz-path { flex: 1 1 15ch; }
-.qz-note-text {
-  min-height: 360px;
-  resize: vertical;
-  font: 400 13px/1.55 var(--mono, ui-monospace, monospace);
-}
+.qz-note-toolbar { gap: 8px; }
+.qz-note-column { width: 100%; max-width: 800px; margin-inline: auto; padding-inline: 20px; }
+.qz-note-column-full { max-width: none; }
+.qz-note-text, .qz-note-block-text { resize: vertical; font: 400 16px/1.55 var(--mono, ui-monospace, monospace); }
+.qz-note-text { min-height: 360px; }
 .qz-note-message { font-size: 12px; }
 .qz-note-message:empty { display: none; }
-.qz-notes-rendered { min-width: 0; min-height: 360px; padding: 4px; overflow-wrap: anywhere; }
+.qz-notes-rendered {
+  min-width: 0;
+  min-height: 360px;
+  padding-block: 14px 32px;
+  font: 400 16px/1.55 var(--font-body, sans-serif);
+  overflow-wrap: anywhere;
+}
 .qz-notes-rendered :is(p, ul, ol, pre, blockquote, table, h1, h2, h3, h4, h5, h6) { margin: 0 0 .9em; }
 .qz-notes-rendered :is(ul, ol) { padding-inline-start: 1.5em; }
-.qz-notes-rendered :is(pre, blockquote) {
+.qz-notes-rendered :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--text-strong, var(--qz-text));
+  line-height: 1.25;
+  font-weight: 600;
+}
+.qz-notes-rendered h1 { font-size: 1.802em; font-weight: 700; }
+.qz-notes-rendered h2 { font-size: 1.602em; }
+.qz-notes-rendered h3 { font-size: 1.422em; }
+.qz-notes-rendered h4 { font-size: 1.278em; }
+.qz-notes-rendered h5 { font-size: 1.121em; }
+.qz-notes-rendered h6 { font-size: 1em; }
+.qz-notes-rendered :is(h1, h2) {
+  padding-block-end: .25em;
+  border-block-end: 1px solid var(--mdnb-heading-rule-soft, var(--qz-border));
+}
+.qz-notes-rendered :is(h3, h4, h5, h6) {
+  padding-inline-start: 8px;
+  margin-inline-start: -10px;
+  border-inline-start: 2px solid var(--mdnb-heading-rail, var(--qz-border));
+}
+.qz-notes-rendered :is(code, pre) { font-family: var(--mono, ui-monospace, monospace); font-size: .9em; }
+.qz-notes-rendered pre code { font-size: inherit; }
+.qz-notes-rendered pre {
+  overflow-x: auto;
   padding: 10px;
   border: 1px solid var(--qz-border);
   border-radius: 6px;
   background: var(--qz-elevated);
 }
-.qz-notes-rendered pre { overflow-x: auto; }
+.qz-notes-rendered blockquote { padding: 6px 12px; border-inline-start: 3px solid var(--qz-border); }
+.qz-notes-rendered blockquote > :last-child { margin-block-end: 0; }
+.qz-notes-rendered :not(pre) > code { padding: .1em .3em; border-radius: 4px; background: var(--qz-elevated); }
+.qz-notes-rendered :is(.hljs-keyword, .hljs-selector-tag, .hljs-meta) { color: color-mix(in srgb, var(--qz-accent) 65%, var(--qz-text)); }
+.qz-notes-rendered :is(.hljs-string, .hljs-regexp) { color: color-mix(in srgb, var(--qz-ok) 65%, var(--qz-text)); }
+.qz-notes-rendered :is(.hljs-number, .hljs-literal, .hljs-variable) { color: color-mix(in srgb, var(--qz-warning) 65%, var(--qz-text)); }
+.qz-notes-rendered :is(.hljs-title, .hljs-attr, .hljs-built_in, .hljs-attribute) { color: color-mix(in srgb, var(--qz-info) 65%, var(--qz-text)); }
+.qz-notes-rendered :is(.hljs-comment, .hljs-quote) { color: var(--qz-muted); font-style: italic; }
 .qz-notes-rendered table { display: block; border-collapse: collapse; overflow-x: auto; }
 .qz-notes-rendered :is(th, td) { padding: 5px 8px; border: 1px solid var(--qz-border); }
 .qz-notes-rendered a { color: var(--qz-accent); }
+.qz-note-task { list-style: none; }
+.qz-note-task-checkbox { accent-color: var(--qz-accent); margin-inline: 0 .25em; }
+.qz-note-task-completed > .qz-note-task-text,
+.qz-note-task-completed > p > .qz-note-task-text { color: var(--qz-muted); text-decoration: line-through; }
+
+.qz-note-block { position: relative; display: flow-root; }
+.qz-note-block-content { cursor: text; }
+.qz-note-block .qz-note-edit-block {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: -20px;
+  min-height: 24px;
+  width: 24px;
+  padding: 2px;
+  color: var(--qz-muted);
+  opacity: 0;
+}
+.qz-note-block:hover .qz-note-edit-block,
+.qz-note-edit-block:focus-visible { opacity: 1; }
+.qz-note-block-editor { display: grid; gap: 6px; margin-block-end: .9em; }
+.qz-note-block-editor .qz-actions { justify-content: end; }
+
 .qz-wikilink {
   max-width: 100%;
   padding: 0;

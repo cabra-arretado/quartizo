@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.1 - 2026-11-16
+
+- Open existing notes in **Rendered** view by default, with KiroCrew-style
+  typography and a centered reading column. Quartizo remembers the
+  **Rendered / Raw** and reading-width preferences.
+- Toggle Markdown checkboxes and edit rendered blocks in place. Edits use
+  the existing draft and **Save note** flow, including conflict detection.
+- Highlight fenced code in supported languages, including JavaScript,
+  TypeScript, Python, Bash, JSON, YAML, SQL, CSS, and HTML/XML.
+
+Requires KiroCrew 0.12.0 or later.
+
 ## 0.12.0 - 2026-11-16
 
 - Browse, create, preview and edit Markdown in Quartizo's Notes tab. Tasks

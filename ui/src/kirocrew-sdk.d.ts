@@ -43,4 +43,11 @@ declare module '@kirocrew/app-sdk/ui' {
 
   export function PageHeader(props: { title: string; subtitle?: string }): ReactElement
   export function Btn(props: { children?: ReactNode; onClick?: () => void; disabled?: boolean }): ReactElement
+  export function SegmentedControl<T extends string>(props: {
+    segments: { key: T; label: string }[]
+    value: T
+    onChange: (value: T) => void
+    ariaLabel?: string
+    collapse?: boolean
+  }): ReactElement
 }

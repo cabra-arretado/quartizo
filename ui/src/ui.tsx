@@ -18,6 +18,7 @@ const icons = {
   up: <path d="m6 14 6-6 6 6" />,
   down: <path d="m6 10 6 6 6-6" />,
   check: <path d="m5 12 4 4L19 6" />,
+  edit: <path d="m14 6 4 4M4 20l4.7-1 11-11a2.8 2.8 0 0 0-4-4l-11 11L4 20Z" />,
   minus: <path d="M5 12h14" />,
 }
 
