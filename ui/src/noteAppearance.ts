@@ -1,7 +1,3 @@
-import { storage } from './ui'
-
-const APPEARANCE_KEY = 'quartizo-notes-appearance'
-
 export type HeadingColor = 'theme' | 'accent' | `#${string}`
 export type HeadingLines = 'theme' | 'all' | 'none'
 
@@ -26,26 +22,24 @@ export function headingLines(value: unknown): HeadingLines {
   return value === 'all' || value === 'none' ? value : 'theme'
 }
 
-export function loadNoteAppearance(): NoteAppearance {
-  try {
-    const raw = storage()?.getItem(APPEARANCE_KEY)
-    if (!raw) return DEFAULT_NOTE_APPEARANCE
-    const value = JSON.parse(raw)
-    return {
-      headingColor: headingColor(value?.headingColor),
-      headingLines: headingLines(value?.headingLines),
-      lineColor: headingColor(value?.lineColor),
-    }
-  } catch {
-    return DEFAULT_NOTE_APPEARANCE
-  }
-}
-
-export function saveNoteAppearance(appearance: NoteAppearance) {
-  try { storage()?.setItem(APPEARANCE_KEY, JSON.stringify(appearance)) } catch { /* Storage can be unavailable. */ }
-}
-
 export function headingColorCss(color: HeadingColor): string | undefined {
   if (color === 'theme') return undefined
   return color === 'accent' ? 'var(--qz-accent)' : color
+}
+
+export function linearColorChannel(value: number): number {
+  const channel = value / 255
+  return channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4
+}
+
+export function relativeLuminance(r: number, g: number, b: number): number {
+  return .2126 * linearColorChannel(r) + .7152 * linearColorChannel(g) + .0722 * linearColorChannel(b)
+}
+
+export function accentForeground(color: HeadingColor): string | undefined {
+  if (!color.startsWith('#')) return undefined
+  const r = parseInt(color.slice(1, 3), 16)
+  const g = parseInt(color.slice(3, 5), 16)
+  const b = parseInt(color.slice(5, 7), 16)
+  return relativeLuminance(r, g, b) >= Math.sqrt(1.05 * .05) - .05 ? '#000' : '#fff'
 }

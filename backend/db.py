@@ -171,6 +171,13 @@ MIGRATIONS: tuple[str, ...] = (
     """
     ALTER TABLE companion_notes ADD COLUMN links TEXT NOT NULL DEFAULT '[]';
     """,
+    # 9: durable UI preferences scoped to the signed dashboard owner.
+    """
+    CREATE TABLE preferences (
+        owner_id TEXT PRIMARY KEY NOT NULL,
+        data     TEXT NOT NULL
+    );
+    """,
 )
 
 

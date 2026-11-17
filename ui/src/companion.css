@@ -1,0 +1,79 @@
+.qz-start-checklist {
+  margin: 0;
+  padding-inline-start: 1.5em;
+  text-align: start;
+}
+
+.qz-board-view-panel { padding: 14px; }
+.qz-board-view-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 16px 24px;
+  font-size: 13px;
+}
+.qz-board-view-settings > .qz-check-label { align-self: center; }
+.qz-board-setting-group {
+  display: grid;
+  gap: 8px;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.qz-board-setting-group legend { margin-bottom: 6px; padding: 0; font-weight: 600; }
+.qz-board-order-group { flex-basis: 100%; }
+.qz-board-order-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr));
+  gap: 8px 12px;
+}
+
+.qz-board[data-density="compact"] { gap: 6px; }
+.qz-board[data-density="compact"] .qz-lane { padding: 6px; }
+.qz-board[data-density="compact"] .qz-lane-heading { padding-block-end: 6px; }
+.qz-board[data-density="compact"] .qz-cards { gap: 4px; }
+.qz-board[data-density="compact"] .qz-ticket-content { gap: 2px; padding: 6px; }
+.qz-board[data-density="compact"] .qz-ticket-footer { padding-block: 2px; }
+.qz-board[data-density="compact"] .qz-ticket-actions summary { inset-block-start: 2px; }
+.qz-lane-help { margin: 0 2px 8px; font-size: 12px; }
+
+.qz-folder-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.qz-folder-label-dot {
+  flex: none;
+  width: .55em;
+  height: .55em;
+  border-radius: 50%;
+  background: var(--qz-folder-label-color);
+}
+.qz-ticket-badges { flex-wrap: wrap; }
+.qz-ticket-badges .qz-folder-label {
+  padding: 2px 5px;
+  border: 1px solid var(--qz-border);
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.qz-todo-saved-filters { flex-basis: 100%; }
+.qz-todo-saved-filters summary { display: inline-flex; width: fit-content; list-style: none; }
+.qz-todo-saved-filters summary::-webkit-details-marker { display: none; }
+.qz-todo-saved-filters summary::after { content: '▾'; color: var(--qz-muted); }
+.qz-todo-saved-filters[open] summary::after { content: '▴'; }
+.qz-todo-saved-controls {
+  display: grid;
+  gap: 8px;
+  padding-block-start: 10px;
+}
+.qz-todo-saved-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+}
+.qz-todo-filters .qz-todo-saved-row .qz-field { flex: 0 1 240px; }
+.qz-todo-saved-row > p { flex-basis: 100%; font-size: 13px; }

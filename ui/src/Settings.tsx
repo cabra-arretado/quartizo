@@ -1,9 +1,9 @@
-/** Notes appearance, connected folders, board preferences, and legacy task migration. */
 import { type AppApi, useChatLauncher } from '@kirocrew/app-sdk'
 import { useEffect, useRef, useState } from 'react'
 import {
   addWorkspace,
   type ApiFailure,
+  BACKEND_BASE,
   type BoardColumn,
   companionStatus,
   listWorkspaces,
@@ -20,11 +20,14 @@ import {
   type Workspace,
 } from './companionApi'
 import { agentPrompt } from './agentPrompt'
-import { DEFAULT_NOTE_APPEARANCE, type HeadingColor, type NoteAppearance, headingColor, headingLines } from './noteAppearance'
+import { BoardViewSettings } from './Companion'
+import { DEFAULT_NOTE_APPEARANCE, headingColorCss, headingLines } from './noteAppearance'
+import { DEFAULT_FOLDER_APPEARANCE, folderEmoji, NOTE_WIDTHS, type Preferences } from './preferences'
+import SettingsColor from './SettingsColor'
 import { ErrorLine, Icon } from './ui'
+import type { PreferenceStatus } from './usePreferences'
 import styles from './settings.css?inline'
 
-/** Busy flag and last failure around one action at a time. */
 function useAction() {
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<ApiFailure | null>(null)
@@ -44,157 +47,311 @@ function useAction() {
   return { busy, failure, run }
 }
 
-export default function Settings({ api, noteAppearance, onNoteAppearanceChange }: {
+const SECTIONS = {
+  defaults: 'Defaults',
+  appearance: 'Appearance',
+  notes: 'Notes',
+  board: 'Board',
+  folders: 'Folders',
+} as const
+
+export type SettingsSection = keyof typeof SECTIONS
+
+interface PreferenceControls {
+  preferences: Preferences
+  onPreferencesChange: (patch: Partial<Preferences>) => void
+}
+
+const STATUS: Record<PreferenceStatus, string> = {
+  loading: 'Loading preferences…',
+  saving: 'Saving…',
+  saved: 'Saved',
+  local: 'Saved in this browser. Waiting to sync.',
+  unavailable: 'Preferences couldn’t be saved.',
+}
+
+const TABS = { tasks: 'Tasks', todos: 'TODOs', notes: 'Notes', settings: 'Settings' } as const
+
+export default function Settings({
+  api, preferences, onPreferencesChange, status, section, onSectionChange, workspaceId, onWorkspaceChange, onWorkspacesChanged,
+}: PreferenceControls & {
   api: AppApi
-  noteAppearance: NoteAppearance
-  onNoteAppearanceChange: (next: NoteAppearance) => void
+  status: PreferenceStatus
+  section: SettingsSection | null
+  onSectionChange: (next: SettingsSection) => void
+  workspaceId: number | null
+  onWorkspaceChange: (id: number | null) => void
+  onWorkspacesChanged: () => void
 }) {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [loadFailure, setLoadFailure] = useState<ApiFailure | null>(null)
   const [writeBlocked, setWriteBlocked] = useState<ApiFailure | null>(null)
   const [reload, setReload] = useState(0)
-  const [path, setPath] = useState('')
-  const [name, setName] = useState('')
-  const { busy, failure, run } = useAction()
+  const selectedSection = section ?? (workspaces?.length ? 'defaults' : 'folders')
+  const enabled = workspaces?.filter(w => w.companion) ?? []
+  const workspace = enabled.find(w => w.id === workspaceId)
+  const changed = () => {
+    setReload(n => n + 1)
+    onWorkspacesChanged()
+  }
 
   useEffect(() => {
     let cancelled = false
     Promise.all([listWorkspaces(api), companionStatus(api)])
-      .then(([value, status]) => {
+      .then(([value, index]) => {
         if (cancelled) return
         setWorkspaces(value)
-        setWriteBlocked(status.writeBlocked ?? null)
+        setWriteBlocked(index.writeBlocked ?? null)
         setLoadFailure(null)
       })
       .catch(err => !cancelled && setLoadFailure(toFailure(err)))
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [api, reload])
-
-  const add = async () => {
-    if (await run(() => addWorkspace(api, path.trim(), name.trim() || undefined))) {
-      setPath('')
-      setName('')
-      setReload(n => n + 1)
-    }
-  }
 
   return (
     <div className="qz-settings">
       <style>{styles}</style>
-      <header>
+      <header className="qz-settings-header">
         <h2 className="qz-section-title">Settings</h2>
-        <p className="qz-section-description">Manage connected folders and board columns, or start a notes request in KiroCrew.</p>
+        <span className="qz-muted qz-settings-saved" role="status">{STATUS[status]}</span>
       </header>
+      <nav aria-label="Settings sections" className="qz-settings-nav">
+        {(Object.keys(SECTIONS) as SettingsSection[]).map(key => <button key={key} type="button" className="qz-button"
+          aria-current={selectedSection === key ? 'true' : undefined}
+          onClick={() => onSectionChange(key)}>{SECTIONS[key]}</button>)}
+      </nav>
       <ErrorLine failure={loadFailure} />
       <ErrorLine failure={writeBlocked} />
-      <NoteAppearanceSettings appearance={noteAppearance} onChange={onNoteAppearanceChange} />
-      <div className="qz-settings-grid">
-        <section className="qz-settings-folders" aria-labelledby="qz-settings-folders">
-          <div className="qz-settings-heading">
-            <h3 id="qz-settings-folders">Connected folders</h3>
-            {workspaces && <span className="qz-settings-count">{workspaces.length}</span>}
-          </div>
-          {!workspaces && !loadFailure && <p className="qz-muted" role="status">Loading folders…</p>}
-          {workspaces?.length === 0 && <p className="qz-empty">Add a folder to see its notes, tickets, and TODOs.</p>}
-          {workspaces?.map(w => (
-            <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={() => setReload(n => n + 1)}
-              onColumnsSaved={saved => setWorkspaces(items => items?.map(item => item.id === saved.id ? { ...item, ...saved } : item) ?? null)} />
-          ))}
-        </section>
-        <form
-          className="qz-panel-surface qz-settings-add"
-          aria-labelledby="qz-settings-add"
-          aria-busy={busy}
-          onSubmit={event => {
-            event.preventDefault()
-            if (path.trim() && !busy) void add()
-          }}
-        >
-          <div>
-            <h3 id="qz-settings-add">Add a folder</h3>
-            <p className="qz-muted">Use any local folder of Markdown files. To use the same files in Kiro Notes, attach the folder there separately.</p>
-          </div>
-          <label className="qz-field">
-            Absolute folder path
-            <input className="qz-input" placeholder="/home/you/notes" value={path} onChange={e => setPath(e.target.value)} />
+
+      {selectedSection === 'defaults' && <SettingsPanel title="Defaults">
+        <div className="qz-settings-fields">
+          <Choice label="Start on" value={preferences.startOn} options={{ last: 'Last used tab', ...TABS }}
+            onChange={startOn => onPreferencesChange({ startOn })} />
+          <label className="qz-field">Default workspace
+            <select className="qz-input" value={preferences.workspaceId && enabled.some(w => w.id === preferences.workspaceId)
+              ? String(preferences.workspaceId) : ''} onChange={e => onWorkspaceChange(Number(e.currentTarget.value) || null)}>
+              <option value="">First connected folder</option>
+              {enabled.map(w => <option key={w.id} value={w.id}>
+                {[preferences.folderAppearance[w.id]?.emoji, w.name].filter(Boolean).join(' ')}
+              </option>)}
+            </select>
           </label>
-          <label className="qz-field">
-            <span>Name <span className="qz-muted">(optional)</span></span>
-            <input className="qz-input" placeholder="e.g. Project notes" value={name} onChange={e => setName(e.target.value)} />
-          </label>
-          <button className="qz-button" data-variant="primary" type="submit" disabled={busy || !path.trim()}>Add folder</button>
-          <ErrorLine failure={failure} />
-        </form>
+        </div>
+        <p className="qz-muted">Changing the workspace here or in the header remembers that folder for your next visit.</p>
+      </SettingsPanel>}
+
+      {selectedSection === 'appearance' && <SettingsPanel title="Appearance">
+        <div className="qz-settings-fields">
+          <SettingsColor label="Accent color" value={preferences.accent} allowAccent={false} checkContrast
+            onChange={accent => onPreferencesChange({ accent })} />
+          <div className="qz-stack">
+            <label className="qz-settings-check"><input type="checkbox" checked={preferences.highContrast}
+              onChange={e => onPreferencesChange({ highContrast: e.currentTarget.checked })} />High contrast</label>
+            <label className="qz-settings-check"><input type="checkbox" checked={preferences.largerInterfaceText}
+              onChange={e => onPreferencesChange({ largerInterfaceText: e.currentTarget.checked })} />Larger interface text</label>
+            <Choice label="Motion" value={preferences.motion} options={{ system: 'Follow system', reduced: 'Reduce motion' }}
+              onChange={motion => onPreferencesChange({ motion })} />
+          </div>
+        </div>
+      </SettingsPanel>}
+
+      {selectedSection === 'notes' && <NotesSettings preferences={preferences} onPreferencesChange={onPreferencesChange} />}
+
+      <div className="qz-stack" hidden={selectedSection !== 'board'}>
+        <SettingsPanel title="Board view">
+          <BoardViewSettings preferences={preferences} onPreferencesChange={onPreferencesChange} workspace={workspace} />
+        </SettingsPanel>
+        <SettingsPanel title="Board columns">
+          <p className="qz-muted">Customize columns for each enabled folder. Use Save columns to apply your changes.</p>
+          {!enabled.length && <button className="qz-button" type="button" onClick={() => onSectionChange('folders')}>Manage folders</button>}
+          {enabled.map(w => <section key={w.id} aria-label={w.name} className="qz-settings-board-folder">
+            <h4>{w.name}</h4>
+            <BoardSettings api={api} workspace={w}
+              onSaved={saved => setWorkspaces(items => items?.map(item => item.id === saved.id ? { ...item, ...saved } : item) ?? null)} />
+          </section>)}
+        </SettingsPanel>
       </div>
+
+      {selectedSection === 'folders' && <div className="qz-settings-grid" data-empty={workspaces?.length === 0 || undefined}>
+        {workspaces?.length !== 0 && <section className="qz-settings-folders" aria-labelledby="qz-settings-folders">
+          <div className="qz-settings-heading"><h3 id="qz-settings-folders">Connected folders</h3></div>
+          {!workspaces && !loadFailure && <p className="qz-muted" role="status">Loading folders…</p>}
+          {workspaces?.map(w => (
+            <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={changed}
+              preferences={preferences} onPreferencesChange={onPreferencesChange} />
+          ))}
+        </section>}
+        <AddFolder api={api} onAdded={w => {
+          onWorkspaceChange(w.id)
+          changed()
+        }} />
+        {workspaces?.length === 0 && <SettingsPanel title="Get started">
+          <ol className="qz-onboarding">
+            <li>Add a folder that contains or will hold Markdown files.</li>
+            <li>Open Notes and create your first note.</li>
+            <li>Open Tasks and create a ticket or turn an existing note into one.</li>
+          </ol>
+        </SettingsPanel>}
+      </div>}
     </div>
   )
 }
 
-function NoteAppearanceSettings({ appearance, onChange }: {
-  appearance: NoteAppearance
-  onChange: (next: NoteAppearance) => void
+function SettingsPanel({ title, children }: { title: string; children: React.ReactNode }) {
+  return <section className="qz-panel-surface qz-settings-appearance" aria-label={title}>
+    <div className="qz-settings-heading"><h3>{title}</h3></div>
+    {children}
+  </section>
+}
+
+function Choice<T extends string>({ label, value, options, onChange }: {
+  label: string
+  value: T
+  options: Record<T, string>
+  onChange: (value: T) => void
 }) {
-  return (
+  return <label className="qz-field">{label}
+    <select className="qz-input" value={value} onChange={e => onChange(e.currentTarget.value as T)}>
+      {Object.entries(options).map(([key, text]) => <option key={key} value={key}>{text as string}</option>)}
+    </select>
+  </label>
+}
+
+function AddFolder({ api, onAdded }: { api: AppApi; onAdded: (w: Workspace) => void }) {
+  const [path, setPath] = useState('')
+  const [name, setName] = useState('')
+  const [validation, setValidation] = useState<{ path: string; failure: ApiFailure | null } | null>(null)
+  const { busy, failure, run } = useAction()
+  const trimmed = path.trim()
+  const absolute = trimmed.startsWith('/')
+  const currentCheck = validation?.path === trimmed ? validation : null
+  const pathError = trimmed && !absolute ? 'Enter an absolute folder path starting with /.'
+    : currentCheck?.failure?.message
+  useEffect(() => {
+    if (!absolute) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      api.post(`${BACKEND_BASE}/workspaces/validate`, { path: trimmed }, { signal: controller.signal })
+        .then(() => {
+          if (!controller.signal.aborted) setValidation({ path: trimmed, failure: null })
+        })
+        .catch(err => {
+          if (controller.signal.aborted) return
+          const value = toFailure(err)
+          if (value.code && value.status && value.status < 500 && value.code !== 'not_found') {
+            setValidation({ path: trimmed, failure: value })
+          }
+        })
+    }, 300)
+    return () => { clearTimeout(timer); controller.abort() }
+  }, [api, absolute, trimmed])
+
+  const add = () => run(async () => {
+    const w = await addWorkspace(api, trimmed, name.trim() || undefined)
+    setPath('')
+    setName('')
+    setValidation(null)
+    onAdded(w)
+  })
+
+  return <form className="qz-panel-surface qz-settings-add" aria-labelledby="qz-settings-add" aria-busy={busy}
+    onSubmit={event => {
+      event.preventDefault()
+      if (absolute && !pathError && !busy) void add()
+    }}>
+    <div>
+      <h3 id="qz-settings-add">Add a folder</h3>
+      <p className="qz-muted">Enter the path to a local folder. To use the same files in Kiro Notes, attach it there too.</p>
+    </div>
+    <div>
+      <label className="qz-field">Folder path
+        <input className="qz-input" placeholder="/home/you/notes" value={path} disabled={busy}
+          aria-invalid={!!pathError} aria-describedby="qz-folder-path-check"
+          onChange={e => { setPath(e.target.value); setValidation(null) }} />
+      </label>
+      <p className="qz-muted" id="qz-folder-path-check" role="status">
+        {pathError || (currentCheck ? 'Folder is ready to connect.' : '')}
+      </p>
+    </div>
+    <label className="qz-field">
+      <span>Name <span className="qz-muted">(optional)</span></span>
+      <input className="qz-input" placeholder="e.g. Project notes" value={name} disabled={busy} onChange={e => setName(e.target.value)} />
+    </label>
+    <button className="qz-button" data-variant="primary" type="submit" disabled={busy || !absolute || !!pathError}>Add folder</button>
+    <ErrorLine failure={failure} />
+  </form>
+}
+
+const SIZES = { small: 'Small', medium: 'Medium', large: 'Large' } as const
+
+function NotesSettings({ preferences, onPreferencesChange }: PreferenceControls) {
+  const { appearance } = preferences
+  const edit = (change: Partial<Preferences['appearance']>) => onPreferencesChange({ appearance: { ...appearance, ...change } })
+  const isDefault = appearance.headingColor === 'theme' && appearance.headingLines === 'theme' && appearance.lineColor === 'theme'
+
+  return <>
+    <SettingsPanel title="Reading and editing">
+      <div className="qz-settings-fields">
+        <Choice label="Note view" value={preferences.noteView} options={{ rendered: 'Rendered', raw: 'Raw' }}
+          onChange={noteView => onPreferencesChange({ noteView })} />
+        <Choice label="Reading width" value={preferences.noteWidth} options={NOTE_WIDTHS}
+          onChange={noteWidth => onPreferencesChange({ noteWidth })} />
+        <Choice label="Reading text size" value={preferences.noteTextSize} options={SIZES}
+          onChange={noteTextSize => onPreferencesChange({ noteTextSize })} />
+        <Choice label="Raw editor text size" value={preferences.rawTextSize} options={SIZES}
+          onChange={rawTextSize => onPreferencesChange({ rawTextSize })} />
+        <Choice label="Line spacing" value={preferences.noteLineHeight} options={{ compact: 'Compact', normal: 'Normal', relaxed: 'Relaxed' }}
+          onChange={noteLineHeight => onPreferencesChange({ noteLineHeight })} />
+        <Choice label="Reading font" value={preferences.noteFont} options={{ theme: 'Theme default', mono: 'Monospace' }}
+          onChange={noteFont => onPreferencesChange({ noteFont })} />
+      </div>
+    </SettingsPanel>
     <section className="qz-panel-surface qz-settings-appearance" aria-labelledby="qz-note-appearance">
       <div className="qz-settings-heading">
         <h3 id="qz-note-appearance">Notes appearance</h3>
-        <button className="qz-button" type="button" data-variant="quiet"
-          disabled={appearance.headingColor === 'theme' && appearance.headingLines === 'theme' && appearance.lineColor === 'theme'}
-          onClick={() => onChange(DEFAULT_NOTE_APPEARANCE)}>Reset defaults</button>
+        <button className="qz-button" type="button" data-variant="quiet" disabled={isDefault}
+          onClick={() => onPreferencesChange({ appearance: DEFAULT_NOTE_APPEARANCE })}>Reset defaults</button>
       </div>
-      <div className="qz-settings-appearance-body">
-        <div className="qz-settings-appearance-controls">
-          <HeadingColorField label="Heading text color" value={appearance.headingColor}
-            onChange={color => onChange({ ...appearance, headingColor: color })} />
+      <div className="qz-settings-fields">
+        <SettingsColor label="Heading text color" value={appearance.headingColor} checkContrast onChange={headingColor => edit({ headingColor })} />
+        <div className="qz-settings-color-mode">
           <label className="qz-field">Heading lines
-            <select className="qz-input" value={appearance.headingLines}
-              onChange={event => onChange({ ...appearance, headingLines: headingLines(event.currentTarget.value) })}>
+            <select className="qz-input" value={appearance.headingLines} onChange={e => edit({ headingLines: headingLines(e.currentTarget.value) })}>
               <option value="theme">Theme default</option>
               <option value="all">Under every heading</option>
               <option value="none">None</option>
             </select>
           </label>
-          <HeadingColorField label="Heading line color" value={appearance.lineColor} disabled={appearance.headingLines === 'none'}
-            onChange={color => onChange({ ...appearance, lineColor: color })} />
+          <button className="qz-button" type="button" data-variant="quiet" aria-label="Reset heading lines"
+            disabled={appearance.headingLines === 'theme'} onClick={() => edit({ headingLines: 'theme' })}>Reset</button>
         </div>
-        <div className="qz-note-headings qz-settings-appearance-preview" aria-hidden="true">
+        <SettingsColor label="Heading line color" value={appearance.lineColor} disabled={appearance.headingLines === 'none'}
+          checkContrast onChange={lineColor => edit({ lineColor })} />
+      </div>
+      <div className="qz-settings-fields">
+        {(['Light', 'Dark'] as const).map(theme => <div key={theme} data-preview-theme={theme.toLowerCase()}
+          className="qz-note-headings qz-settings-appearance-preview" role="group" aria-label={`${theme} background preview`}>
+          <span>{theme} background</span>
           <h2>Project notes</h2>
           <h3>Next steps</h3>
-        </div>
+          <p>Draft the plan and share it with the team.</p>
+        </div>)}
       </div>
     </section>
-  )
+  </>
 }
 
-function HeadingColorField({ label, value, disabled, onChange }: {
-  label: string
-  value: HeadingColor
-  disabled?: boolean
-  onChange: (color: HeadingColor) => void
+function WorkspaceItem(props: PreferenceControls & {
+  api: AppApi
+  workspace: Workspace
+  writeBlocked: ApiFailure | null
+  onChanged: () => void
 }) {
-  const custom = value !== 'theme' && value !== 'accent'
-  return (
-    <div className="qz-settings-color-field">
-      <label className="qz-field">{label}
-        <select className="qz-input" value={custom ? 'custom' : value} disabled={disabled} onChange={event => {
-          const next = event.currentTarget.value
-          onChange(next === 'custom' ? '#6757c7' : headingColor(next))
-        }}>
-          <option value="theme">Theme default</option>
-          <option value="accent">Theme accent</option>
-          <option value="custom">Custom color</option>
-        </select>
-      </label>
-      {custom && <input className="qz-input" type="color" aria-label={`Custom ${label.toLowerCase()}`}
-        value={value} disabled={disabled} onChange={event => onChange(headingColor(event.currentTarget.value))} />}
-    </div>
-  )
-}
-
-function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked: ApiFailure | null; onChanged: () => void; onColumnsSaved: (workspace: Workspace) => void }) {
-  const { api, workspace: w } = props
+  const { api, workspace: w, preferences, onPreferencesChange } = props
+  const appearance = preferences.folderAppearance[w.id] ?? DEFAULT_FOLDER_APPEARANCE
+  const personalize = (change: Partial<typeof appearance>) => {
+    onPreferencesChange({ folderAppearance: { [w.id]: { ...appearance, ...change } } })
+  }
   const { busy, failure, run } = useAction()
   const [message, setMessage] = useState<string | null>(null)
   const [confirmRemove, setConfirmRemove] = useState(false)
@@ -207,7 +364,9 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
   return (
     <section aria-label={w.name} className="qz-panel-surface qz-settings-folder">
       <div className="qz-settings-folder-identity">
-        <span className="qz-settings-folder-icon"><Icon name="folder" /></span>
+        <span className="qz-settings-folder-icon" aria-hidden="true" style={{ color: headingColorCss(appearance.color) }}>
+          {appearance.emoji || <Icon name="folder" />}
+        </span>
         <div>
           <h4>{w.name}</h4>
           <code className="qz-mono qz-muted">{w.path}</code>
@@ -222,24 +381,9 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
             disabled={busy}
             onChange={() => void run(() => setCompanion(api, w.id, !w.companion)).then(ok => ok && props.onChanged())}
           />
-          Show in Quartizo
+          Include in Tasks, Notes, and TODOs
         </label>
         <div className="qz-settings-actions">
-          {w.companion && (
-            <button
-              className="qz-button"
-              data-variant="quiet"
-              type="button"
-              onClick={() =>
-                void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true })).then(
-                  ok => ok && setMessage('Rebuild requested.'),
-                )
-              }
-              disabled={busy}
-            >
-              Rebuild index
-            </button>
-          )}
           {!confirmRemove && (
             <button className="qz-button" data-variant="quiet" type="button" onClick={() => setConfirmRemove(true)} disabled={busy}>
               Remove…
@@ -247,9 +391,26 @@ function WorkspaceItem(props: { api: AppApi; workspace: Workspace; writeBlocked:
           )}
         </div>
       </div>
-      {w.companion && <BoardSettings api={api} workspace={w} onSaved={props.onColumnsSaved} />}
-      <AgentPrompt workspace={w} />
-      {!!w.oldTasks && <LegacyMigration api={api} workspace={w} writeBlocked={props.writeBlocked} onChanged={props.onChanged} />}
+      <div className="qz-settings-fields">
+        <label className="qz-field">Folder emoji
+          <input className="qz-input" placeholder="Optional" value={appearance.emoji} maxLength={16}
+            onChange={e => personalize({ emoji: folderEmoji(e.currentTarget.value) })} />
+        </label>
+        <SettingsColor label="Folder color" value={appearance.color} onChange={color => personalize({ color })} />
+      </div>
+      <details className="qz-settings-disclosure">
+        <summary>Advanced</summary>
+        <div className="qz-stack">
+          {w.companion && <div className="qz-stack">
+            <p className="qz-muted">Rescan all notes if Tasks, Notes, or TODOs is missing recent changes.</p>
+            <div><button className="qz-button" data-variant="quiet" type="button" disabled={busy}
+              onClick={() => void run(() => requestRefresh(api, { workspaceId: w.id, manual: true, rebuild: true }))
+                .then(ok => ok && setMessage('Folder rescan requested.'))}>Rescan folder</button></div>
+          </div>}
+          <AgentPrompt workspace={w} />
+          {!!w.oldTasks && <LegacyMigration api={api} workspace={w} writeBlocked={props.writeBlocked} onChanged={props.onChanged} />}
+        </div>
+      </details>
       {confirmRemove && (
         <div role="alertdialog" aria-label="Remove folder" className="qz-notice qz-settings-notice">
           <p>
@@ -315,7 +476,7 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
     <details className="qz-settings-disclosure">
       <summary>Board columns</summary>
       <div className="qz-stack">
-        <p className="qz-muted">Rename, reorder, add, or remove columns for this folder. The first column is the default for new tickets.</p>
+        <p className="qz-muted">The first column is the default for new tickets.</p>
         <ul className="qz-column-list">
           {columns.map((column, index) => <li className="qz-column-row" key={column.id}>
             <label className="qz-field">
@@ -324,6 +485,16 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
                 onChange={e => edit(columns.map(c => c.id === column.id ? { ...c, label: e.target.value } : c))} />
             </label>
             <div className="qz-settings-actions">
+              <label className="qz-field">Color
+                <input className="qz-input qz-column-color" type="color" aria-label={`Color for ${column.id}`}
+                  value={column.color ?? '#6757c7'} disabled={busy}
+                  onChange={e => {
+                    const color = e.currentTarget.value
+                    edit(columns.map(c => c.id === column.id ? { ...c, color } : c))
+                  }} />
+              </label>
+              <button className="qz-button" type="button" aria-label={`Reset color for ${column.id}`} disabled={busy || !column.color}
+                onClick={() => edit(columns.map(c => c.id === column.id ? { id: c.id, label: c.label } : c))}>Reset color</button>
               <button className="qz-button" type="button" aria-label={`Move column ${column.id} up`} disabled={busy || index === 0} onClick={() => reorder(index, -1)}><Icon name="up" /></button>
               <button className="qz-button" type="button" aria-label={`Move column ${column.id} down`} disabled={busy || index === columns.length - 1} onClick={() => reorder(index, 1)}><Icon name="down" /></button>
               <button className="qz-button" type="button" aria-label={`Remove column ${column.id}`} disabled={busy || columns.length === 1} onClick={() => edit(columns.filter(c => c.id !== column.id))}>Remove</button>
@@ -340,13 +511,18 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
           <label className="qz-field">New column name
             <input className="qz-input" value={newLabel} maxLength={40} disabled={busy} onChange={e => setNewLabel(e.target.value)} />
           </label>
-          <label className="qz-field">New status ID
-            <input className="qz-input qz-mono" value={statusId} maxLength={32} disabled={busy} onChange={e => setNewId(e.target.value)} />
-          </label>
+          <div className="qz-stack">
+            <label className="qz-field">New status ID
+              <input className="qz-input qz-mono" value={statusId} maxLength={32} disabled={busy}
+                aria-describedby={`qz-column-id-${workspace.id}`} onChange={e => setNewId(e.target.value)} />
+            </label>
+            <p className="qz-muted" id={`qz-column-id-${workspace.id}`}>
+              This value is written to Markdown notes. Quartizo suggests it from the name. You can use lowercase letters, digits, and underscores, starting with a letter.
+            </p>
+          </div>
           <button className="qz-button" type="submit" disabled={busy || !canAdd}>Add column</button>
         </form>}
-        <p className="qz-muted">Status IDs are saved in notes. Use a unique ID starting with a lowercase letter, followed by lowercase letters, digits, or underscores.</p>
-        {removed && <p className="qz-notice">Tickets in removed columns will appear in Needs repair until you move them or restore the column with the same status ID.</p>}
+        {removed && <p className="qz-notice">Tickets in removed columns move to Needs repair. Move those tickets to an active column or restore the old status ID.</p>}
         <div className="qz-settings-actions">
           <button className="qz-button" data-variant="primary" type="button" disabled={busy || !changed || columns.some(c => !c.label.trim())} onClick={() => void save()}>Save columns</button>
           {changed && <button className="qz-button" data-variant="quiet" type="button" disabled={busy} onClick={() => { setDraft(null); setMessage('') }}>Discard changes</button>}
@@ -390,7 +566,7 @@ function AgentPrompt({ workspace }: { workspace: Workspace }) {
           <span className="qz-muted" role="status">{message}</span>
         </div>
       </div>
-    </details> : <p className="qz-muted">Turn on Show in Quartizo to ask a Bot about this folder.</p>}
+    </details> : <p className="qz-muted">Enable this folder to ask a Bot about its notes and tickets.</p>}
   </div>
 }
 

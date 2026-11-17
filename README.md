@@ -153,7 +153,8 @@ network, sessionApproval or uploads). Earlier versions also asked for
 
 ## Using it
 
-1. In **Settings**, add the absolute path of a local Markdown folder. Open
+1. In **Settings → Folders**, add the absolute path of a local Markdown folder.
+   Use the **Workspace** selector in the header to switch folders. Open
    **Notes** to browse its subfolders, search by title or path, edit Markdown,
    or create a file at a path such as `Projects/launch.md`. If you also use
    native Kiro Notes, attach the same folder there separately.
@@ -161,8 +162,9 @@ network, sessionApproval or uploads). Earlier versions also asked for
    Existing notes open in **Rendered** view by default. Click a block to edit
    it in place, or choose **Raw** to edit the whole file. Edits save when you
    leave the editor. Checking or unchecking a task saves immediately.
-   Use **Settings → Notes appearance** to change heading colors and rules for
-   rendered notes in this browser.
+   Use **Settings → Notes** to set reading width, text size, line spacing,
+   editor size, and heading styles. Pin notes to keep them at the top of the
+   browser. Press `/` to search and `Cmd+N` or `Ctrl+N` to create a note.
 
    In **Rendered** view, `[[Launch]]` opens a note with a unique matching title or,
    if no title matches, a unique filename stem. Use `[[Projects/launch.md]]`
@@ -191,7 +193,9 @@ network, sessionApproval or uploads). Earlier versions also asked for
 
    The [phase 1 format contract](docs/markdown-tickets-phase1.md) describes
    the original format and rank rules.
-3. **Tasks** shows the tickets by status, sorted by `order` (then `id`).
+3. **Tasks** groups tickets by status and defaults to manual rank order.
+   Use **View** to change card density, choose visible fields, hide empty
+   columns, or sort a column alphabetically.
    Tickets without a configured status go to **Needs repair**. Diagnostic
    badges explain metadata problems such as invalid YAML or duplicate ticket
    IDs. Two notes with the same `id` are shown separately. Arrow keys move
@@ -212,20 +216,22 @@ network, sessionApproval or uploads). Earlier versions also asked for
    while an indented line is one. Each ticket card and checklist shows the
    Markdown path below the note title.
    Check or uncheck an item here to update that exact source marker.
+   Quartizo remembers the selected folder scope and completion state. Use
+   **Saved filters** to keep a named combination of scope, state, and search.
 5. The backend batches filesystem changes and updates the affected notes.
    Periodic reconciliation reads and hashes each note to catch missed changes.
-   **Refresh** runs reconciliation immediately. **Rebuild index** also re-parses
-   every note. An incomplete scan or an unreadable note preserves last-known
+   **Refresh** runs reconciliation immediately. **Rescan folder**, under
+   **Settings → Folders → Advanced**, also re-parses every note. An incomplete scan or an unreadable note preserves last-known
    state and shows a warning.
-6. Turning off **Show in Quartizo** drops the folder's index. **Remove**
+6. Turning off **Include in Tasks, Notes, and TODOs** drops the folder's index. **Remove**
    forgets the folder. Nothing on disk changes either way. A folder that still
    has tasks from Quartizo's old database board says how many, and removing it
    deletes them only once you confirm.
 
 ### Board columns and working with an agent
 
-In **Settings**, expand **Board columns** under a connected folder. Rename,
-reorder, add, or remove columns and choose **Save columns**. The first column
+In **Settings → Board**, expand **Board columns** under a connected folder.
+Rename, recolor, reorder, add, or remove columns and choose **Save columns**. The first column
 is the default when you create a ticket or use an existing note. A rename
 keeps the status ID stored in Markdown. If you remove a column, its tickets
 appear in **Needs repair**. Move them to a configured column or add a column
@@ -233,7 +239,7 @@ with the same status ID to restore them to the board. Custom status IDs start
 with a lowercase letter, use lowercase letters, digits, and underscores, and
 are at most 32 characters. Quote them in Markdown frontmatter.
 
-Under the same folder, choose **Ask a Bot or agent**. In the KiroCrew chat
+Under **Settings → Folders → Advanced**, choose **Ask a Bot or agent**. In the KiroCrew chat
 composer, pick a Bot or agent, add your request to
 the draft, and send it. The draft includes the folder path, saved column IDs,
 and instructions for creating and updating notes, tickets, and TODOs. The
@@ -241,6 +247,15 @@ selected agent needs read and write access to the connected folder through
 KiroCrew. If the chat needs a project directory, choose the connected folder
 in the composer’s project picker. Use **Copy agent prompt** to bring the same
 instructions to an existing conversation.
+
+### Personalization
+
+Use **Settings → Appearance** to change the accent color, increase contrast
+or interface text size, and reduce motion. **Defaults** controls the opening
+tab and remembered workspace. Changes save automatically to the Quartizo
+backend and follow your owner session in browsers connected to that backend.
+If the backend is unavailable, Quartizo keeps changes in this browser and
+syncs them when it can connect again.
 
 If a Bot is missing from the chat picker, enable
 [`dashboard.crewmates_in_agent_picker`](https://github.com/kirodotdev/KiroCrew/blob/main/src/kiro_crew/docs/configuration.md#dashboard)

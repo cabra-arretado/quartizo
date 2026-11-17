@@ -53,6 +53,7 @@ import companion  # noqa: E402
 import companion_write  # noqa: E402
 import host_compat  # noqa: E402
 import legacy_migration  # noqa: E402
+import preferences  # noqa: E402
 from mdsource import MAX_FILE_BYTES  # noqa: E402
 from workspace import ApiError, Registry, os_error  # noqa: E402
 
@@ -219,7 +220,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_PUT(self) -> None:
         self._dispatch()
 
-    def do_PATCH(self) -> None:  # no route takes it; answer 404 JSON like any unknown route
+    def do_PATCH(self) -> None:
         self._dispatch()
 
     def do_DELETE(self) -> None:
@@ -307,6 +308,16 @@ class Handler(BaseHTTPRequestHandler):
                 "hostVersion": self.server.host_version,  # type: ignore[attr-defined]
                 "writeBlocked": self.server.companion.write_blocked,  # type: ignore[attr-defined]
             }
+        if parts == ["api", "preferences"]:
+            if method == "GET":
+                return 200, {"preferences": preferences.read(registry.db_path, principal.owner_id)}
+            if method == "PATCH":
+                saved = preferences.update(registry.db_path, principal.owner_id, self._json_body())
+                return 200, {"preferences": saved}
+            return None
+        if parts == ["api", "workspaces", "validate"] and method == "POST":
+            registry.validate_root(self._json_body().get("path"))
+            return 200, {"valid": True}
         if parts == ["api", "workspaces"]:
             if method == "GET":
                 old = registry.old_task_counts()

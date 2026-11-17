@@ -156,6 +156,12 @@ class RegistrationTests(TmpTree):
         self.refused(self.registry.register, str(self.tmp / "missing"), code="bad_root")
         self.refused(self.registry.register, str(self.tmp / "outside.md"), code="bad_root")
 
+    def test_unreadable_folder_is_rejected_by_preflight_and_registration(self):
+        path = str(self.a / "notes")
+        with mock.patch.object(wsmod.os, "access", return_value=False):
+            self.refused(self.registry.validate_root, path, status=403, code="root_unreadable")
+            self.refused(self.registry.register, path, status=403, code="root_unreadable")
+
     def test_refuses_filesystem_root(self):
         for root in ("/", "//", "/.", "/tmp/.."):
             with self.subTest(root=root):
@@ -385,6 +391,21 @@ class RegistryHttpTests(unittest.TestCase):
         self.assertEqual(signed_json(self.port, "DELETE", f"/api/workspaces/{ws['id']}")[0], 200)
         self.assertEqual(signed_json(self.port, "GET", f"/api/workspaces/{ws['id']}")[0], 404)
 
+    def test_folder_preflight_uses_registration_policy_without_registering(self):
+        target = "/api/workspaces/validate"
+        path = {"path": str(self.vault)}
+        self.assertEqual(signed_json(self.port, "POST", target, path), (200, {"valid": True}))
+        self.assertEqual(signed_json(self.port, "GET", "/api/workspaces"), (200, {"workspaces": []}))
+        code, body = signed_json(self.port, "POST", target, {"path": str(self.vault / "missing")})
+        self.assertEqual((code, body["code"]), (400, "bad_root"))
+        _, body = signed_json(self.port, "POST", "/api/workspaces", path)
+        ws_id = body["workspace"]["id"]
+        try:
+            code, body = signed_json(self.port, "POST", target, path)
+            self.assertEqual((code, body["code"]), (409, "root_overlaps"))
+        finally:
+            signed_json(self.port, "DELETE", f"/api/workspaces/{ws_id}")
+
     def test_refusals_over_http(self):
         for payload, code in (
             ({"path": "/"}, "root_refused"),
@@ -409,6 +430,7 @@ class RegistryHttpTests(unittest.TestCase):
 
     def test_every_workspace_route_needs_auth_and_owner(self):
         for method, target in (("GET", "/api/workspaces"), ("POST", "/api/workspaces"),
+                               ("POST", "/api/workspaces/validate"),
                                ("GET", "/api/workspaces/1"), ("DELETE", "/api/workspaces/1")):
             with self.subTest(method=method, target=target):
                 self.assertEqual(_request(self.port, method, target)[0], 401)

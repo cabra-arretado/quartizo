@@ -85,6 +85,19 @@ class WriteTests(unittest.TestCase):
         self.refuse("bad_status", self.writer.move, self.ws, self.body(status="null"))
         self.assertEqual(self.writer.move(self.ws, self.body(status="ready"))["status"], "ready")
 
+    def test_column_colors_persist_and_can_be_reset(self):
+        original = self.ws.to_json()["columns"]
+        colored = [{**original[0], "color": "#7F29F0"}, *original[1:]]
+        body = {"columns": colored, "columnsVersion": self.ws.columns_version}
+        saved = self.writer.set_columns(self.ws.id, body)
+        self.assertEqual(Registry(self.registry.data_dir).get(self.ws.id), saved)
+        self.assertEqual(saved.to_json()["columns"][0]["color"], "#7f29f0")
+        body["columnsVersion"] = saved.columns_version
+        invalid = [{**original[0], "color": "url(https://example.com)"}, *original[1:]]
+        self.refuse("bad_columns", self.writer.set_columns, self.ws.id, {**body, "columns": invalid})
+        reset = self.writer.set_columns(self.ws.id, {**body, "columns": original})
+        self.assertEqual(reset.to_json()["columns"], original)
+
     def test_preserved_mtime_external_edit_is_refused(self):
         self.ticket()
         request = self.body(status="done")

@@ -25,6 +25,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--bundle", type=Path, required=True)
     parser.add_argument("--host-version", default="0.12.0")
+    parser.add_argument("--empty", action="store_true")
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="quartizo-browser-") as temporary:
         directory = Path(temporary).resolve()
@@ -32,19 +33,21 @@ def main():
         vault.mkdir()
         other.mkdir()
         registry = Registry(directory / "data")
-        ws = registry.register(str(vault), "Browser vault", companion=True)
-        registry.register(str(other), "Other vault", companion=True)
-        for name, uid, rank in (("First", "a" * 32, "2" * 32), ("Second", "b" * 32, "4" * 32)):
-            path = f"{name.lower()}.md"
-            (vault / path).write_bytes(companion_write.promote_bytes(
-                path, f"# {name}\n\n- [ ] {name} TODO\n".encode(), uid, rank, "ready"))
-        (vault / "ordinary.md").write_bytes(
-            b'---\ncustom: "keep" # comment\n---\n# Ordinary\n\n- [ ] Ordinary TODO\n'
-            b'<img src=x onerror="window.hostileExecuted=true">')
-        conn = db.connect(registry.db_path)
-        conn.execute("INSERT INTO tasks (uid,project_id,title,description_markdown,status,sort_order,created_at,updated_at)"
-                     " VALUES (?,?,?,?,?,?,?,?)", ("d" * 32, ws.uid, "Legacy browser card", "Legacy body\n- [ ] Legacy TODO", "review", 0, 1, 1))
-        conn.close()
+        ws = None
+        if not args.empty:
+            ws = registry.register(str(vault), "Browser vault", companion=True)
+            registry.register(str(other), "Other vault", companion=True)
+            for name, uid, rank in (("First", "a" * 32, "2" * 32), ("Second", "b" * 32, "4" * 32)):
+                path = f"{name.lower()}.md"
+                (vault / path).write_bytes(companion_write.promote_bytes(
+                    path, f"# {name}\n\n- [ ] {name} TODO\n".encode(), uid, rank, "ready"))
+            (vault / "ordinary.md").write_bytes(
+                b'---\ncustom: "keep" # comment\n---\n# Ordinary\n\n- [ ] Ordinary TODO\n'
+                b'<img src=x onerror="window.hostileExecuted=true">')
+            conn = db.connect(registry.db_path)
+            conn.execute("INSERT INTO tasks (uid,project_id,title,description_markdown,status,sort_order,created_at,updated_at)"
+                         " VALUES (?,?,?,?,?,?,?,?)", ("d" * 32, ws.uid, "Legacy browser card", "Legacy body\n- [ ] Legacy TODO", "review", 0, 1, 1))
+            conn.close()
         secret = "disposable-browser-signing-secret"
         backend = server_module.make_server(0, secret, registry, host_version=args.host_version)
         threading.Thread(target=backend.serve_forever, daemon=True).start()
@@ -57,6 +60,9 @@ def main():
                 self.dispatch()
 
             def do_PUT(self):
+                self.dispatch()
+
+            def do_PATCH(self):
                 self.dispatch()
 
             def do_DELETE(self):
@@ -100,7 +106,7 @@ def main():
         signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
         print(json.dumps({"origin": f"http://127.0.0.1:{bridge.server_address[1]}",
                           "vault": str(vault), "other": str(other), "data": str(directory / "data"),
-                          "workspaceId": ws.id}), flush=True)
+                          "workspaceId": ws.id if ws else None}), flush=True)
         try:
             bridge.serve_forever()
         finally:

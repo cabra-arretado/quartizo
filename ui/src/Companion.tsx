@@ -1,6 +1,6 @@
 /** Board and TODO views over the Markdown files shared with Kiro Notes. */
 import { type AppApi, useNavigate } from '@kirocrew/app-sdk'
-import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   type ApiFailure,
   type BoardColumn,
@@ -38,16 +38,16 @@ import {
   type Workspace,
 } from './companionApi'
 import { KIRO_NOTES_ROUTE, type NoteLocation, noteName } from './noteNav'
-import { ErrorLine, Icon, storage, usePageVisible } from './ui'
+import { headingColorCss } from './noteAppearance'
+import type { Preferences } from './preferences'
+import { ErrorLine, Icon, usePageVisible } from './ui'
 
 /** Visible views poll SQLite results. Only an explicit Refresh requests a full scan. */
 export const SCANNING_MS = 1500
 export const IDLE_MS = 3000
 
-const WS_KEY = 'quartizo:workspace'
-
 /** The companion workspaces, read when the view opens (Settings may have changed them). */
-function useCompanions(api: AppApi, active = true) {
+function useCompanions(api: AppApi, active: boolean, workspaceId: number | null) {
   const [companions, setCompanions] = useState<CompanionWorkspace[] | null>(null)
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   useEffect(() => {
@@ -63,7 +63,7 @@ function useCompanions(api: AppApi, active = true) {
     return () => {
       cancelled = true
     }
-  }, [api, active])
+  }, [api, active, workspaceId])
   return { companions, failure }
 }
 
@@ -80,7 +80,8 @@ function useIndexed<T>(
   withStatus: (data: T, statuses: Record<string, IndexStatus>) => T,
 ) {
   const visible = usePageVisible()
-  const [data, setData] = useState<T | null>(null)
+  const [snapshot, setSnapshot] = useState<{ key: string; data: T } | null>(null)
+  const data = snapshot?.key === key ? snapshot.data : null
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   const [tick, setTick] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -92,7 +93,7 @@ function useIndexed<T>(
   withStatusRef.current = withStatus
 
   useEffect(() => {
-    setData(null)
+    setSnapshot(null)
     setFailure(null)
   }, [key])
 
@@ -118,12 +119,12 @@ function useIndexed<T>(
         if (revision !== nextRevision) {
           const value = await withTimeout(fetchRef.current())
           if (cancelled) return
-          setData(value)
+          setSnapshot({ key, data: value })
           revision = nextRevision
           reported = undefined
         } else if (reported !== nextReported) {
           const apply = withStatusRef.current
-          setData(previous => previous ? apply(previous, indexes) : previous)
+          setSnapshot(previous => previous?.key === key ? { key, data: apply(previous.data, indexes) } : previous)
           reported = nextReported
         }
         setFailure(null)
@@ -212,8 +213,12 @@ function NoCompanions({ onSettings }: { onSettings: () => void }) {
   return (
     <div className="qz-empty">
       <span className="qz-empty-icon"><Icon name="folder" /></span>
-      <h2>Connect a notes folder</h2>
-      <p>Add a folder of Markdown files to see its tickets and TODOs here.</p>
+      <h2>Get started with Quartizo</h2>
+      <ol className="qz-start-checklist">
+        <li>Add a folder of Markdown files in Settings.</li>
+        <li>Create a note in Notes.</li>
+        <li>Create a ticket or turn your note into one in Tasks.</li>
+      </ol>
       <button type="button" className="qz-button" data-variant="primary" onClick={onSettings}>Open Settings</button>
     </div>
   )
@@ -223,25 +228,26 @@ function NoCompanions({ onSettings }: { onSettings: () => void }) {
 // Tasks: the board of one companion workspace
 // ---------------------------------------------------------------------------
 
-export function TasksView(props: { api: AppApi; active?: boolean; onSettings: () => void; onOpenNote: (note: NoteLocation) => void }) {
+type PreferenceControls = {
+  preferences: Preferences
+  onPreferencesChange: (patch: Partial<Preferences>) => void
+}
+
+type CompanionViewProps = PreferenceControls & {
+  api: AppApi
+  active?: boolean
+  workspaceId: number | null
+  onSettings: () => void
+  onOpenNote: (note: NoteLocation) => void
+}
+
+export function TasksView(props: CompanionViewProps & { onBoardSettings?: () => void }) {
   const active = props.active ?? true
-  const { companions, failure } = useCompanions(props.api, active)
-  const [wsId, setWsId] = useState<number | null>(() => {
-    const v = Number(storage()?.getItem(WS_KEY))
-    return Number.isInteger(v) && v > 0 ? v : null
-  })
-  const current = companions?.find(c => c.workspace.id === wsId)?.workspace ?? companions?.[0]?.workspace ?? null
-  useEffect(() => {
-    try {
-      if (current) storage()?.setItem(WS_KEY, String(current.id))
-    } catch {
-      /* not remembered */
-    }
-  }, [current])
+  const { companions, failure } = useCompanions(props.api, active, props.workspaceId)
+  const current = companions?.find(c => c.workspace.id === props.workspaceId)?.workspace
 
   if (failure && !companions) return <ErrorLine failure={failure} />
-  if (!companions) return <p className="qz-empty" role="status">Loading workspaces…</p>
-  if (!current) return <NoCompanions onSettings={props.onSettings} />
+  if (!companions) return <p className="qz-empty" role="status">Loading folders…</p>
   return (
     <div className="qz-stack">
       <ErrorLine failure={failure} />
@@ -250,22 +256,60 @@ export function TasksView(props: { api: AppApi; active?: boolean; onSettings: ()
           <h2 className="qz-section-title">Task board</h2>
           <p className="qz-section-description">Plan and track tickets stored in your notes.</p>
         </div>
-        <label className="qz-inline-field">
-          <Icon name="folder" />
-          <span>Workspace</span>
-          <select className="qz-input" value={current.id} onChange={e => setWsId(Number(e.target.value))}>
-            {companions.map(c => (
-              <option key={c.workspace.id} value={c.workspace.id}>
-                {c.workspace.name}
-              </option>
-            ))}
-          </select>
-        </label>
       </div>
-      {companions.map(({ workspace }) => <div key={workspace.uid} hidden={workspace.id !== current.id}>
-        <TicketBoard api={props.api} workspace={workspace} active={active && workspace.id === current.id}
-          onSettings={props.onSettings} onOpenNote={props.onOpenNote} />
+      {companions.length === 0 && <NoCompanions onSettings={props.onSettings} />}
+      {companions.length > 0 && !current && !failure && <p className="qz-empty" role="status">Loading the selected folder…</p>}
+      {companions.map(({ workspace }) => <div key={workspace.uid} hidden={workspace.id !== current?.id}>
+        <TicketBoard api={props.api} workspace={workspace} active={active && workspace.id === current?.id}
+          preferences={props.preferences} onPreferencesChange={props.onPreferencesChange}
+          onSettings={props.onBoardSettings ?? props.onSettings} onOpenNote={props.onOpenNote} />
       </div>)}
+    </div>
+  )
+}
+
+const CARD_FIELDS = [
+  ['progress', 'Checklist progress'],
+  ['path', 'Note path'],
+  ['badges', 'Ticket badges'],
+] as const
+
+export function BoardViewSettings({ preferences, onPreferencesChange, workspace }: PreferenceControls & { workspace?: Workspace }) {
+  return (
+    <div className="qz-board-view-settings">
+      <label className="qz-field">Card density
+        <select className="qz-input" value={preferences.boardDensity} onChange={e => onPreferencesChange({ boardDensity: e.target.value === 'compact' ? 'compact' : 'comfortable' })}>
+          <option value="comfortable">Comfortable</option>
+          <option value="compact">Compact</option>
+        </select>
+      </label>
+      <fieldset className="qz-board-setting-group">
+        <legend>Show on cards</legend>
+        {CARD_FIELDS.map(([field, label]) => <label className="qz-check-label" key={field}>
+          <input type="checkbox" checked={preferences.boardFields[field]} onChange={e => onPreferencesChange({ boardFields: { ...preferences.boardFields, [field]: e.target.checked } })} />
+          {label}
+        </label>)}
+      </fieldset>
+      <label className="qz-check-label">
+        <input type="checkbox" checked={preferences.hideEmptyLanes} onChange={e => onPreferencesChange({ hideEmptyLanes: e.target.checked })} />Hide empty columns
+      </label>
+      {workspace && <fieldset className="qz-board-setting-group qz-board-order-group">
+        <legend>Column order in {workspace.name}</legend>
+        <div className="qz-board-order-fields">
+          {workspace.columns.map(column => {
+            const key = `${workspace.id}:${column.id}`
+            return <label className="qz-field" key={column.id}>{column.label} order
+              <select className="qz-input" value={preferences.laneSort[key] ?? 'manual'} onChange={e => {
+                onPreferencesChange({ laneSort: { [key]: e.target.value === 'title' ? 'title' : 'manual' } })
+              }}>
+                <option value="manual">Manual</option>
+                <option value="title">Title (A–Z)</option>
+              </select>
+            </label>
+          })}
+        </div>
+        <p className="qz-muted">Select Manual to rearrange cards within a column.</p>
+      </fieldset>}
     </div>
   )
 }
@@ -302,8 +346,23 @@ function useMutation(onChanged: () => void) {
   return { pending, failure, run }
 }
 
-function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean; onSettings: () => void; onOpenNote: (note: NoteLocation) => void }) {
-  const { api, workspace, active } = props
+const titleOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+function laneColorStyle(color: string | undefined): CSSProperties | undefined {
+  return color ? { '--qz-status': color } as CSSProperties : undefined
+}
+
+function FolderLabel({ name, appearance }: { name: string; appearance?: Preferences['folderAppearance'][string] }) {
+  const color = appearance && headingColorCss(appearance.color)
+  return <span className="qz-folder-label" style={color ? { '--qz-folder-label-color': color } as CSSProperties : undefined}>
+    {color && <span className="qz-folder-label-dot" aria-hidden="true" />}
+    {appearance?.emoji && <span aria-hidden="true">{appearance.emoji}</span>}
+    {name}
+  </span>
+}
+
+function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> & { workspace: Workspace; active: boolean }) {
+  const { api, workspace, active, preferences } = props
   const wsId = workspace.id
   const navigate = useNavigate()
   const { data, failure, busy, refresh, reload } = useIndexed<BoardData>(
@@ -313,8 +372,22 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
   )
   const action = useMutation(reload)
   const columns = data?.workspace.columns ?? workspace.columns
-  const lanes = useMemo(() => groupLanes(columns, data?.tickets ?? []), [columns, data])
-  const shown = lanes.repair.length > 0 ? [...columns, REPAIR_COLUMN] : columns
+  const { laneSort, hideEmptyLanes } = preferences
+  const lanes = useMemo(() => {
+    const result = groupLanes(columns, data?.tickets ?? [])
+    for (const column of columns) {
+      if (laneSort[`${wsId}:${column.id}`] === 'title') result[column.id].sort((a, b) => titleOrder.compare(a.title, b.title))
+    }
+    return result
+  }, [columns, data, laneSort, wsId])
+  const [showView, setShowView] = useState(false)
+  const [showEmpty, setShowEmpty] = useState(false)
+  useEffect(() => { setShowEmpty(false) }, [hideEmptyLanes])
+  const emptyCount = columns.filter(column => lanes[column.id].length === 0).length
+  const shown = [
+    ...columns.filter(column => !hideEmptyLanes || showEmpty || lanes[column.id].length > 0),
+    ...(lanes.repair.length > 0 ? [REPAIR_COLUMN] : []),
+  ]
   const boardRef = useRef<HTMLDivElement>(null)
   const dragging = useRef<Ticket | null>(null)
   const [form, setForm] = useState<'create' | 'promote' | null>(null)
@@ -343,8 +416,16 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
 
   const move = (ticket: Ticket, status: TaskStatus, position?: number) => {
     if (blocked || mutationProblem(data?.index, ticket) || !data || data.index.maintenance?.includes(status)) return
-    void action.run(() => moveTicket(api, wsId, planMove(data.tickets, ticket, status, position)))
+    const sorted = laneSort[`${wsId}:${status}`] === 'title'
+    if (sorted && ticket.lane === status) return
+    void action.run(() => moveTicket(api, wsId, planMove(data.tickets, ticket, status, sorted ? undefined : position)))
       .then(ok => { if (ok) setFocusPath(ticket.path) })
+  }
+  const allowDrop = (event: React.DragEvent, status: TaskStatus) => {
+    const ticket = dragging.current
+    if (blocked || !ticket || status === 'repair') return
+    if (ticket.lane === status && laneSort[`${wsId}:${status}`] === 'title') return
+    event.preventDefault()
   }
   const drop = (event: React.DragEvent, status: TaskStatus, before?: Ticket) => {
     event.preventDefault()
@@ -352,8 +433,9 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
     const ticket = dragging.current
     dragging.current = null
     if (!ticket || before?.path === ticket.path) return
-    const rest = lanes[status].filter(t => t.path !== ticket.path)
-    const position = before ? rest.findIndex(t => t.path === before.path) : undefined
+    const position = before && laneSort[`${wsId}:${status}`] !== 'title'
+      ? lanes[status].filter(t => t.path !== ticket.path).findIndex(t => t.path === before.path)
+      : undefined
     if (position !== undefined && position < 0) return
     move(ticket, status, position)
   }
@@ -392,18 +474,25 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
             onClick={() => setForm(form === 'promote' ? null : 'promote')} disabled={action.pending || formPending}><Icon name="note" />Use existing note</button>
         </div>
         <div className="qz-actions">
+          <button type="button" className="qz-button" data-variant="quiet" aria-expanded={showView} aria-controls={`qz-board-view-${wsId}`}
+            onClick={() => setShowView(value => !value)}><Icon name="settings" />View</button>
           <button type="button" className="qz-button" data-variant="quiet" onClick={props.onSettings}>Customize columns</button>
           <button type="button" className="qz-button" data-variant="quiet" aria-expanded={showMaintenance}
             onClick={() => setShowMaintenance(value => !value)} disabled={blocked}>Rebalance…</button>
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => navigate(KIRO_NOTES_ROUTE)}><Icon name="external" />Open Kiro Notes</button>
         </div>
       </div>
+      <section id={`qz-board-view-${wsId}`} className="qz-panel-surface qz-board-view-panel" aria-label="Board view settings" hidden={!showView}>
+        <BoardViewSettings preferences={preferences} onPreferencesChange={props.onPreferencesChange} workspace={data?.workspace ?? workspace} />
+      </section>
       {(['create', 'promote'] as const).map(mode => <div key={mode} hidden={form !== mode}>
         <TicketForm mode={mode} api={api} workspace={workspace} columns={columns} firstField={form === mode ? firstField : undefined} disabled={!active || !!failure || busy || action.pending || !!mutationProblem(data?.index)} maintenance={data?.index.maintenance ?? []} onBusy={setFormPending} onChanged={reload} onClose={() => setForm(null)} onMaintenanceNeeded={needMaintenance} />
       </div>)}
       <div className="qz-toolbar qz-board-meta">
         {data && <span className="qz-result-count">{data.tickets.length} {data.tickets.length === 1 ? 'ticket' : 'tickets'}</span>}
         <div className="qz-actions">
+          {data && hideEmptyLanes && emptyCount > 0 && <button type="button" className="qz-button" data-variant="quiet" aria-expanded={showEmpty}
+            onClick={() => setShowEmpty(value => !value)}>{showEmpty ? 'Hide empty columns' : `Show empty columns (${emptyCount})`}</button>}
           <IndexStatusLine statuses={indexes} />
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => void refresh()} disabled={busy || action.pending}><Icon name="refresh" />Refresh</button>
         </div>
@@ -436,23 +525,25 @@ function TicketBoard(props: { api: AppApi; workspace: Workspace; active: boolean
       ) : null}
       {!data && !failure && <p className="qz-empty" role="status">Loading the board…</p>}
       {data && data.tickets.length === 0 && data.index.state !== 'scanning' && <p className="qz-notice" data-variant="neutral">No tickets in “{workspace.name}” yet. Create a ticket or use an existing note.</p>}
-      {data && (
-        <div ref={boardRef} className="qz-board" tabIndex={0} onKeyDown={onKey} aria-label={`Board of ${workspace.name}`} role="group">
-          {shown.map(({ id: lane, label }, li) => (
-            <section key={lane} aria-label={label} className="qz-lane" data-lane-status={lane}
-              onDragOver={e => { if (!blocked && lane !== 'repair') e.preventDefault() }}
+      {data && shown.length > 0 && (
+        <div ref={boardRef} className="qz-board" data-density={preferences.boardDensity} tabIndex={0} onKeyDown={onKey} aria-label={`Board of ${workspace.name}`} role="group">
+          {shown.map(({ id: lane, label, color }, li) => (
+            <section key={lane} aria-label={label} className="qz-lane" data-lane-status={lane} style={laneColorStyle(color)}
+              onDragOver={e => allowDrop(e, lane)}
               onDrop={e => { if (lane !== 'repair') drop(e, lane) }}>
-              <h3 className="qz-lane-heading"><span className="qz-dot" />{label}<span className="qz-count">{lanes[lane].length}</span></h3>
+              <h3 className="qz-lane-heading"><span className="qz-dot" aria-hidden="true" />{label}<span className="qz-count">{lanes[lane].length}</span></h3>
+              {lane === 'repair' && <p className="qz-lane-help qz-muted">Choose a column for tickets with an old status. Open a note to fix other ticket details.</p>}
               {lanes[lane].length === 0 && <p className="qz-lane-empty">No tickets</p>}
               <ul className="qz-cards">
                 {lanes[lane].map((t, ci) => (
                   <li key={t.path} draggable={!blocked && !mutationProblem(data.index, t)}
                     onDragStart={e => { dragging.current = t; e.dataTransfer.setData('text/plain', t.path); e.dataTransfer.effectAllowed = 'move' }}
                     onDragEnd={() => { dragging.current = null }}
-                    onDragOver={e => { if (!blocked && lane !== 'repair') e.preventDefault() }}
                     onDrop={e => { if (lane !== 'repair') drop(e, lane, t) }}>
                     <TicketCard ticket={t} lane={li} index={ci} columns={columns} onOpen={() => props.onOpenNote({ workspaceId: wsId, path: t.path })}
                       disabled={blocked || !!mutationProblem(data.index, t)} maintenance={data.index.maintenance ?? []}
+                      canReorder={laneSort[`${wsId}:${lane}`] !== 'title'} fields={preferences.boardFields}
+                      folder={workspace.name} folderAppearance={preferences.folderAppearance[String(wsId)]}
                       onMove={(status, position) => move(t, status, position)}
                       onDemote={() => {
                         if (window.confirm(`Remove “${t.title}” from the board? Its note and TODOs will remain.`)) void action.run(() => demoteTicket(api, wsId, t))
@@ -560,20 +651,39 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
   </section>
 }
 
-function TicketCard(props: { ticket: Ticket; lane: number; index: number; columns: BoardColumn[]; onOpen: () => void; disabled: boolean; onMove: (status: TaskStatus, position?: number) => void; onDemote: () => void; maintenance: TaskStatus[]; count: number }) {
-  const { ticket: t } = props
+function TicketCard(props: {
+  ticket: Ticket
+  lane: number
+  index: number
+  count: number
+  columns: BoardColumn[]
+  folder: string
+  folderAppearance?: Preferences['folderAppearance'][string]
+  fields: Preferences['boardFields']
+  canReorder: boolean
+  disabled: boolean
+  maintenance: TaskStatus[]
+  onOpen: () => void
+  onMove: (status: TaskStatus, position?: number) => void
+  onDemote: () => void
+}) {
+  const { ticket: t, fields, folderAppearance } = props
   const status = t.lane === 'repair' ? '' : t.lane
+  const showFolder = folderAppearance && (folderAppearance.emoji || folderAppearance.color !== 'theme')
   return <article className="qz-ticket">
     <div className="qz-ticket-content">
       <button type="button" className="qz-note-link" data-lane={props.lane} data-index={props.index} data-note-path={t.path} aria-label={`Open note: ${t.title}`} onClick={props.onOpen}>
         {t.title}<Icon name="external" />
       </button>
-      <span className="qz-mono qz-path" title={t.path}>{t.path}</span>
-      {t.todos.total > 0 && <div className="qz-ticket-progress">
+      {fields.path && <span className="qz-mono qz-path" title={t.path}>{t.path}</span>}
+      {fields.progress && t.todos.total > 0 && <div className="qz-ticket-progress">
         <progress value={t.todos.done} max={t.todos.total} aria-label={`Checklist progress for ${t.title}`} />
         <span title="Completed TODOs">{t.todos.done}/{t.todos.total}</span>
       </div>}
-      {t.diagnostics.length > 0 && <div className="qz-actions">{t.diagnostics.map(d => <span key={d.code} className="qz-badge" title={d.message}>{d.code.replace(/_/g, ' ')}</span>)}</div>}
+      {fields.badges && (showFolder || t.diagnostics.length > 0) && <div className="qz-actions qz-ticket-badges">
+        {showFolder && <FolderLabel name={props.folder} appearance={folderAppearance} />}
+        {t.diagnostics.map(d => <span key={d.code} className="qz-badge" title={d.message}>{d.code.replace(/_/g, ' ')}</span>)}
+      </div>}
     </div>
     <div className="qz-ticket-footer">
       <div className="qz-ticket-status">
@@ -587,8 +697,10 @@ function TicketCard(props: { ticket: Ticket; lane: number; index: number; column
         <summary className="qz-button qz-icon-button" data-variant="quiet" aria-label={`Actions for ${t.title}`} title="Ticket actions"><Icon name="more" /></summary>
         <div className="qz-ticket-action-list">
           <CopyName path={t.path} />
-          <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} up`} disabled={props.disabled || props.index === 0 || !status} onClick={() => props.onMove(status, props.index - 1)}><Icon name="up" />Move up</button>
-          <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} down`} disabled={props.disabled || props.index >= props.count - 1 || !status} onClick={() => props.onMove(status, props.index + 1)}><Icon name="down" />Move down</button>
+          {props.canReorder && <>
+            <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} up`} disabled={props.disabled || props.index === 0 || !status} onClick={() => props.onMove(status, props.index - 1)}><Icon name="up" />Move up</button>
+            <button type="button" className="qz-button" data-variant="quiet" aria-label={`Move ${t.title} down`} disabled={props.disabled || props.index >= props.count - 1 || !status} onClick={() => props.onMove(status, props.index + 1)}><Icon name="down" />Move down</button>
+          </>}
           <button type="button" className="qz-button qz-destructive" data-variant="quiet" aria-label={`Remove ${t.title} from board`} disabled={props.disabled} onClick={props.onDemote}><Icon name="minus" />Remove ticket…</button>
         </div>
       </details>
@@ -600,24 +712,52 @@ function TicketCard(props: { ticket: Ticket; lane: number; index: number; column
 // TODOs
 // ---------------------------------------------------------------------------
 
-export function TodoView(props: { api: AppApi; onSettings: () => void; onOpenNote: (note: NoteLocation) => void }) {
-  const { api } = props
+const MAX_SAVED_FILTERS = 20
+const MAX_FILTER_NAME = 40
+const MAX_FILTER_SEARCH = 200
+
+export function TodoView(props: CompanionViewProps) {
+  const { api, preferences, onPreferencesChange, workspaceId, active = true } = props
   const navigate = useNavigate()
-  const { companions, failure: statusFailure } = useCompanions(api)
-  const [scope, setScope] = useState<number | 'all'>('all')
-  const [state, setState] = useState<TodoState>('open')
+  const { companions, failure: statusFailure } = useCompanions(api, active, workspaceId)
+  const { todoScope: scope, todoState: state, todoFilters } = preferences
   const [search, setSearch] = useState('')
   const searchField = useRef<HTMLInputElement>(null)
+  const [selectedFilter, setSelectedFilter] = useState('')
+  const [filterName, setFilterName] = useState('')
+  const matchingName = todoFilters.find(filter => filter.name.toLocaleLowerCase() === filterName.trim().toLocaleLowerCase())
+  const canSaveFilter = !!filterName.trim() && (todoFilters.length < MAX_SAVED_FILTERS || !!matchingName)
+  const selected = todoFilters.find(filter => filter.name === selectedFilter)
+  const appliedFilter = selected?.scope === scope && selected?.state === state && selected?.search === search ? selected.name : ''
 
-  useEffect(() => {
-    if (companions && scope !== 'all' && !companions.some(c => c.workspace.id === scope)) setScope('all')
-  }, [companions, scope])
+  const applyFilter = (name: string) => {
+    const filter = todoFilters.find(filter => filter.name === name)
+    setSelectedFilter(name)
+    if (filter) {
+      onPreferencesChange({ todoScope: filter.scope, todoState: filter.state })
+      setSearch(filter.search)
+    }
+  }
+  const saveFilter = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!canSaveFilter) return
+    const filter = { name: matchingName?.name ?? filterName.trim(), scope, state, search }
+    onPreferencesChange({ todoFilters: matchingName
+      ? todoFilters.map(previous => previous === matchingName ? filter : previous)
+      : [...todoFilters, filter] })
+    setSelectedFilter(filter.name)
+    setFilterName('')
+  }
+  const removeFilter = () => {
+    onPreferencesChange({ todoFilters: todoFilters.filter(filter => filter.name !== appliedFilter) })
+    setSelectedFilter('')
+  }
 
-  const wsId = scope === 'all' ? undefined : scope
-  const enabled = !!companions && companions.length > 0
+  const wsId = scope === 'workspace' ? workspaceId ?? undefined : undefined
+  const enabled = active && !!companions?.length && (scope === 'all' || wsId !== undefined)
   const { data, failure, busy, refresh, reload } = useIndexed<TodoData>(
     api, enabled,
-    `${scope}:${state}`,
+    `${scope}:${wsId ?? ''}:${state}`,
     wsId,
     () => loadTodos(api, state, wsId),
     () => requestRefresh(api, { workspaceId: wsId, manual: true }),
@@ -628,12 +768,12 @@ export function TodoView(props: { api: AppApi; onSettings: () => void; onOpenNot
   const indexes = data ? Object.values(data.index) : []
   const action = useMutation(reload)
   const toggle = (group: TodoGroup, item: TodoItem, checked: boolean) => {
-    if (action.pending || failure || busy || mutationProblem(data?.index[String(group.workspaceId)], group) || item.markerStart === undefined) return
+    if (!active || action.pending || failure || busy || mutationProblem(data?.index[String(group.workspaceId)], group) || item.markerStart === undefined) return
     void action.run(() => toggleTodo(api, group, item, checked))
   }
 
   if (statusFailure) return <ErrorLine failure={statusFailure} />
-  if (!companions) return <p className="qz-empty" role="status">Loading workspaces…</p>
+  if (!companions) return <p className="qz-empty" role="status">Loading folders…</p>
   if (companions.length === 0) return <NoCompanions onSettings={props.onSettings} />
   return (
     <div className="qz-stack qz-todos">
@@ -648,24 +788,44 @@ export function TodoView(props: { api: AppApi; onSettings: () => void; onOpenNot
         <label className="qz-field">Search
           <span className="qz-search">
             <Icon name="search" />
-            <input className="qz-input" ref={searchField} type="search" aria-label="Filter TODOs" placeholder="Search tasks or notes…" value={search} onChange={e => setSearch(e.target.value)} />
+            <input className="qz-input" ref={searchField} type="search" aria-label="Filter TODOs" placeholder="Search tasks or notes…"
+              value={search} maxLength={MAX_FILTER_SEARCH} onChange={e => setSearch(e.target.value)} />
           </span>
         </label>
-        {companions.length > 1 && (
-          <label className="qz-field">Workspace
-            <select className="qz-input" value={scope} onChange={e => setScope(e.target.value === 'all' ? 'all' : Number(e.target.value))}>
-              <option value="all">All workspaces</option>
-              {companions.map(c => <option key={c.workspace.id} value={c.workspace.id}>{c.workspace.name}</option>)}
-            </select>
-          </label>
-        )}
+        <label className="qz-field">Folder scope
+          <select className="qz-input" value={scope} onChange={e => onPreferencesChange({ todoScope: e.target.value === 'workspace' ? 'workspace' : 'all' })}>
+            <option value="all">All folders</option>
+            <option value="workspace">Current folder</option>
+          </select>
+        </label>
         <label className="qz-field">Show
-          <select className="qz-input" value={state} onChange={e => setState(e.target.value as TodoState)}>
+          <select className="qz-input" value={state} onChange={e => onPreferencesChange({ todoState: e.target.value as TodoState })}>
             <option value="open">Open</option>
             <option value="done">Completed</option>
             <option value="all">All</option>
           </select>
         </label>
+        <details className="qz-todo-saved-filters">
+          <summary className="qz-button" data-variant="quiet">Saved filters</summary>
+          <div className="qz-todo-saved-controls">
+            {todoFilters.length > 0 && <div className="qz-todo-saved-row">
+              <label className="qz-field">Saved filter
+                <select className="qz-input" value={appliedFilter} onChange={e => applyFilter(e.target.value)}>
+                  <option value="" disabled>Choose a filter</option>
+                  {todoFilters.map(filter => <option value={filter.name} key={filter.name}>{filter.name}</option>)}
+                </select>
+              </label>
+              <button type="button" className="qz-button" data-variant="quiet" disabled={!appliedFilter} onClick={removeFilter}>Remove saved filter</button>
+            </div>}
+            <form className="qz-todo-saved-row" onSubmit={saveFilter}>
+              <label className="qz-field">Filter name
+                <input className="qz-input" value={filterName} maxLength={MAX_FILTER_NAME} onChange={e => setFilterName(e.target.value)} />
+              </label>
+              <button className="qz-button" type="submit" disabled={!canSaveFilter}>{matchingName ? 'Update saved filter' : 'Save current filter'}</button>
+              {todoFilters.length >= MAX_SAVED_FILTERS && !matchingName && <p className="qz-muted">Remove a saved filter to add another.</p>}
+            </form>
+          </div>
+        </details>
       </div>
       <div className="qz-toolbar qz-board-meta">
         {data && <span className="qz-result-count" role="status">{itemCount} {itemCount === 1 ? 'item' : 'items'} in {groups.length} {groups.length === 1 ? 'note' : 'notes'}</span>}
@@ -679,14 +839,14 @@ export function TodoView(props: { api: AppApi; onSettings: () => void; onOpenNot
       <ErrorLine failure={action.failure} />
       {data?.truncated && (
         <div role="note" className="qz-notice">
-          Only the first items are listed. Narrow the list by workspace or completion status.
+          Only the first items are listed. Narrow the list by folder or completion status.
         </div>
       )}
       {!data && !failure && <p className="qz-empty" role="status">Loading TODOs…</p>}
       {data && groups.length === 0 && <div className="qz-empty">
         <span className="qz-empty-icon"><Icon name={search.trim() ? 'search' : 'checklist'} /></span>
         <h3>{search.trim() ? 'No matching TODOs' : 'No TODOs to show'}</h3>
-        <p>{search.trim() ? 'Try a different search or clear the filter.' : 'Choose a different workspace or completion status to see more.'}</p>
+        <p>{search.trim() ? 'Try a different search or clear the filter.' : 'Choose a different folder or completion status to see more.'}</p>
         {search.trim() && <button type="button" className="qz-button" onClick={() => { setSearch(''); searchField.current?.focus() }}>Clear search</button>}
       </div>}
       <div className="qz-stack">
@@ -695,8 +855,11 @@ export function TodoView(props: { api: AppApi; onSettings: () => void; onOpenNot
             <header className="qz-todo-header">
               <span className="qz-note-icon"><Icon name="note" /></span>
               <div className="qz-todo-identity">
-                <h3>{g.title}{g.ticket && g.status && <span className="qz-status-pill" data-lane-status={g.status}><span className="qz-dot" />{g.statusLabel ?? g.status}</span>}</h3>
-                <p className="qz-todo-meta"><span>{g.workspace}</span><span aria-hidden="true">/</span><span className="qz-mono qz-path" title={g.path}>{g.path}</span></p>
+                <h3>{g.title}{g.ticket && g.status && <span className="qz-status-pill" data-lane-status={g.status}><span className="qz-dot" aria-hidden="true" />{g.statusLabel ?? g.status}</span>}</h3>
+                <p className="qz-todo-meta">
+                  <FolderLabel name={g.workspace} appearance={preferences.folderAppearance[String(g.workspaceId)]} />
+                  <span aria-hidden="true">/</span><span className="qz-mono qz-path" title={g.path}>{g.path}</span>
+                </p>
               </div>
               <CopyName path={g.path} compact />
             </header>

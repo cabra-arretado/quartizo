@@ -33,11 +33,11 @@ import stat
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
 import db
-from columns import DEFAULT_COLUMNS, Column, valid_status_id
+from columns import DEFAULT_COLUMNS, Column, valid_column_color, valid_status_id
 
 MAX_REL_PATH_CHARS = 1024
 MAX_SEGMENT_BYTES = 255
@@ -78,7 +78,7 @@ class Workspace:
 
     def to_json(self) -> dict:
         return {"id": self.id, "uid": self.uid, "name": self.name, "path": self.path,
-                "companion": self.companion, "columns": [asdict(column) for column in self.columns],
+                "companion": self.companion, "columns": [column.to_json() for column in self.columns],
                 "columnsVersion": self.columns_version}
 
 
@@ -98,10 +98,13 @@ def validate_columns(raw: object) -> tuple[Column, ...]:
         status, label = entry["id"], entry.get("label")
         if not isinstance(label, str) or not label.strip() or len(label.strip()) > 40 or not label.isprintable():
             raise ApiError(400, "bad_columns", "column names must be nonempty, printable and at most 40 characters")
+        color = entry.get("color")
+        if color is not None and not valid_column_color(color):
+            raise ApiError(400, "bad_columns", "column colors must be six-digit hex colors")
         if status in ids:
             raise ApiError(400, "bad_columns", "status IDs must be unique")
         ids.add(status)
-        columns.append(Column(status, label.strip()))
+        columns.append(Column(status, label.strip(), color.lower() if color is not None else None))
     return tuple(columns)
 
 
@@ -306,11 +309,16 @@ def canonical_root(raw: object, protected: tuple[str, ...]) -> str:
         raise ApiError(400, "bad_root", "path contains a NUL byte")
     if not os.path.isabs(raw):
         raise ApiError(400, "bad_root", "workspace path must be absolute")
-    real = os.path.realpath(raw)
     try:
+        real = os.path.realpath(raw)
+        real.encode("utf-8")
         st = os.stat(real)
-    except OSError:
+    except OSError as err:
+        if err.errno in (errno.EACCES, errno.EPERM):
+            raise ApiError(403, "root_unreadable", "the folder cannot be read") from None
         raise ApiError(400, "bad_root", "workspace path does not exist") from None
+    except UnicodeEncodeError:
+        raise ApiError(400, "bad_root", "workspace path is not valid Unicode") from None
     if not stat.S_ISDIR(st.st_mode):
         raise ApiError(400, "bad_root", "workspace path is not a directory")
     ident = (st.st_dev, st.st_ino)
@@ -332,6 +340,8 @@ def canonical_root(raw: object, protected: tuple[str, ...]) -> str:
     if writable_by_others(st):
         raise ApiError(400, "root_writable_by_others",
                        "the folder is world-writable or writable by a shared group; run `chmod go-w` on it first")
+    if not os.access(real, os.R_OK | os.X_OK):
+        raise ApiError(403, "root_unreadable", "the folder cannot be read")
     return real
 
 
@@ -389,12 +399,25 @@ class Registry:
             if columns == ws.columns:
                 return ws
             conn.execute("UPDATE workspaces SET board_columns = ?, columns_version = columns_version + 1 WHERE id = ?",
-                         (json.dumps([asdict(column) for column in columns]), workspace_id))
+                         (json.dumps([column.to_json() for column in columns]), workspace_id))
             return _workspace(db.get_workspace(conn, workspace_id))
 
     def canonical_root(self, raw: object) -> str:
         """Validate a candidate root and return its realpath, or raise."""
         return canonical_root(raw, self.protected)
+
+    @staticmethod
+    def _check_root_overlap(conn: sqlite3.Connection, real: str) -> None:
+        for ws in db.list_workspaces(conn):
+            if _overlaps(real, ws["path"]):
+                raise ApiError(409, "root_overlaps",
+                               f"overlaps the registered workspace {ws['name']!r}", workspaceId=ws["id"])
+
+    def validate_root(self, raw: object) -> None:
+        """Check whether a folder can be registered without changing the registry."""
+        real = self.canonical_root(raw)
+        with self._conn() as conn:
+            self._check_root_overlap(conn, real)
 
     def register(self, raw_path: object, name: object = None, companion: object = False) -> Workspace:
         """Register a root and optionally enable it in Quartizo's index."""
@@ -408,10 +431,7 @@ class Registry:
         else:
             raise ApiError(400, "bad_name", f"name must be a string of at most {MAX_NAME_CHARS} characters")
         with self._lock, self._conn() as conn:
-            for ws in db.list_workspaces(conn):
-                if _overlaps(real, ws["path"]):
-                    raise ApiError(409, "root_overlaps",
-                                   f"overlaps the registered workspace {ws['name']!r}", workspaceId=ws["id"])
+            self._check_root_overlap(conn, real)
             new_id, uid = db.insert_workspace(conn, label, real, companion)
         return Workspace(new_id, uid, label, real, companion)
 

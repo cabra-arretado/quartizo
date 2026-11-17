@@ -20,6 +20,8 @@ const icons = {
   check: <path d="m5 12 4 4L19 6" />,
   edit: <path d="m14 6 4 4M4 20l4.7-1 11-11a2.8 2.8 0 0 0-4-4l-11 11L4 20Z" />,
   minus: <path d="M5 12h14" />,
+  back: <path d="M19 12H5m6-6-6 6 6 6" />,
+  pin: <path d="m16 3 5 5-3 1-3 4v3l-2 2-3-3-5 5m5-5-4-4 2-2h3l4-3 1-3Z" />,
 }
 
 export type IconName = keyof typeof icons

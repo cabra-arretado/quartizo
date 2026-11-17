@@ -2,10 +2,11 @@
 
 ```
 dashboard page (ui/dist/index.mjs, rendered by the host)
-  App.tsx          in-page tabs: Tasks | TODOs | Notes | Settings (arrow keys switch)
+  App.tsx          in-page tabs, workspace switcher, and return from linked notes
   Companion.tsx    editable ticket board and TODO lists
   Notes.tsx        folder tree, title/path search, Markdown editor and preview
-  Settings.tsx     add, show, rebuild and remove folders
+  Settings.tsx     preferences, folder administration, and board columns
+  usePreferences.ts typed preferences, legacy migration, and browser fallback
   companionApi.ts  typed client for the backend, failures, timeouts, lanes, index wording
   noteNav.ts       workspace ID and note path for exact navigation
   ui.tsx           shared styles, ErrorLine, storage
@@ -15,6 +16,7 @@ dashboard page (ui/dist/index.mjs, rendered by the host)
 backend (stdlib HTTP, vendored ruamel.yaml, optional native file events)
   server.py      HMAC + signed principal (owner-session only), routing
   workspace.py   root registry, path validation, fd-based no-follow opens
+  preferences.py owner-scoped SQLite preferences and atomic updates
   companion.py   worker + shared rebuildable index (generations and changed paths)
   note_watcher.py  native directory event adapter
   companion_write.py  shared write lock, exact byte patches, atomic publication, rank journals
@@ -27,8 +29,9 @@ backend (stdlib HTTP, vendored ruamel.yaml, optional native file events)
 plain .md files in registered folders
 ```
 
-The views check index status while visible and load results as needed. Tasks
-and Notes stay mounted across tab switches so drafts survive navigation.
+The views check index status while visible and load results as needed. Tasks,
+Notes, and TODOs stay mounted across tab switches so drafts, searches, and
+in-flight writes survive navigation.
 
 > **History.** Quartizo started as a notes editor with a database task board,
 > a chat tab, a Git view and an agent monitor (M1-M5). The sections below

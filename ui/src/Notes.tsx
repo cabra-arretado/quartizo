@@ -1,6 +1,6 @@
 import type { AppApi } from '@kirocrew/app-sdk'
 import { SegmentedControl } from '@kirocrew/app-sdk/ui'
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   type ApiFailure,
   type BacklinksData,
@@ -16,27 +16,27 @@ import {
   withTimeout,
 } from './companionApi'
 import { renderMarkdownBlocks } from './markdown'
+import { headingColorCss } from './noteAppearance'
 import type { NoteLocation } from './noteNav'
 import {
   type NoteDocument, type NoteTree, makeNoteTree, noteBlockOffsets, openDocument, setNoteTaskChecked,
 } from './notesModel'
-import { ErrorLine, Icon, storage, usePageVisible } from './ui'
+import { DEFAULT_NOTE_FOLDER, type NoteFolderPreferences, type NoteWidth, type Preferences } from './preferences'
+import { ErrorLine, Icon, usePageVisible } from './ui'
 import { type NoteEdits, noteKey, useNoteEdits } from './useNoteEdits'
 import { makeWikilinkResolver } from './wikilinks'
 import styles from './notes.css?inline'
 
 const POLL_MS = 3000
-const LIST_PAGE = 500
 const EMPTY_NOTES: NoteEntry[] = []
-const VIEW_KEY = 'quartizo-notes-view'
-const WIDTH_KEY = 'quartizo-notes-full-width'
-type NoteView = 'rendered' | 'raw'
+const MAX_PINNED_NOTES = 25
+const MAX_EXPANDED_FOLDERS = 50
+const MAX_LIST_LIMIT = 50_000
 
-function readPreference(key: string): string | null {
-  try { return storage()?.getItem(key) ?? null } catch { return null }
-}
-function writePreference(key: string, value: string) {
-  try { storage()?.setItem(key, value) } catch { /* Storage can be unavailable. */ }
+function openFolders(expanded: string[], path: string): string[] {
+  const segments = path.split('/').slice(0, -1)
+  const folders = segments.map((_, index) => `${segments.slice(0, index + 1).join('/')}/`)
+  return [...expanded.filter(folder => !folders.includes(folder)), ...folders].slice(-MAX_EXPANDED_FOLDERS)
 }
 
 /** Poll the index revision, and fetch the catalog only if that revision changed. */
@@ -63,7 +63,7 @@ function useCatalog(api: AppApi, active: boolean, workspaceId: number | null) {
           setWorkspaces(enabled)
           reported = nextReported
         }
-        const selected = enabled.find(item => item.workspace.id === workspaceId) ?? enabled[0]
+        const selected = enabled.find(item => item.workspace.id === workspaceId)
         if (!status.available) throw new Error(status.error ?? 'The Markdown index is unavailable.')
         if (selected) {
           const revision = `${selected.workspace.id}:${selected.index.indexedAt ?? ''}`
@@ -87,7 +87,7 @@ function useCatalog(api: AppApi, active: boolean, workspaceId: number | null) {
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, api, reload, visible, workspaceId])
 
-  const current = workspaces?.find(item => item.workspace.id === workspaceId) ?? workspaces?.[0]
+  const current = workspaces?.find(item => item.workspace.id === workspaceId)
   return {
     current,
     failure,
@@ -98,19 +98,17 @@ function useCatalog(api: AppApi, active: boolean, workspaceId: number | null) {
   }
 }
 
-export default function NotesView({ api, active, request, onSettings }: {
+export default function NotesView({ api, active, workspaceId, request, preferences, onPreferencesChange, onSettings }: {
   api: AppApi
   active: boolean
+  workspaceId: number | null
   request: NoteLocation | null
+  preferences: Preferences
+  onPreferencesChange: (patch: Partial<Preferences>) => void
   onSettings: () => void
 }) {
-  const [workspaceId, setWorkspaceId] = useState<number | null>(null)
-  const [selected, setSelected] = useState<NoteLocation | null>(null)
-  const [view, setView] = useState<NoteView>(() => readPreference(VIEW_KEY) === 'raw' ? 'raw' : 'rendered')
-  const [fullWidth, setFullWidth] = useState(() => readPreference(WIDTH_KEY) === 'true')
   const [newNoteKey, setNewNoteKey] = useState<string | null>(null)
   const [search, setSearch] = useState('')
-  const [limit, setLimit] = useState(LIST_PAGE)
   const [adding, setAdding] = useState(false)
   const [path, setPath] = useState('')
   const [createFailure, setCreateFailure] = useState<ApiFailure | null>(null)
@@ -118,25 +116,84 @@ export default function NotesView({ api, active, request, onSettings }: {
   const createPending = useRef(false)
   const { workspaces, current, notes, failure, refresh, visible } = useCatalog(api, active, workspaceId)
   const { edits, edit, loaded, save } = useNoteEdits(api, refresh)
+  const viewRoot = useRef<HTMLElement>(null)
   const createField = useRef<HTMLInputElement>(null)
+  const searchField = useRef<HTMLInputElement>(null)
+  const handledRequest = useRef<NoteLocation | null>(null)
+  const latestFolders = useRef(preferences.noteFolders)
+  const latestWorkspace = useRef(workspaceId)
+  const readingWidth = useRef<Exclude<NoteWidth, 'full'>>('standard')
+  const folder = preferences.noteFolders[String(workspaceId)] ?? DEFAULT_NOTE_FOLDER
+  const { limit } = folder
+  const pinnedPaths = useMemo(() => new Set(folder.pinned), [folder.pinned])
+  const expanded = useMemo(() => new Set(folder.expanded), [folder.expanded])
   const query = useDeferredValue(search.trim().toLowerCase())
   const matches = useMemo(() => query
     ? (notes ?? EMPTY_NOTES).filter(note => note.title.toLowerCase().includes(query) || note.path.toLowerCase().includes(query))
     : notes ?? EMPTY_NOTES, [notes, query])
-  const tree = useMemo(() => makeNoteTree(matches.slice(0, limit)), [matches, limit])
+  const pinned = useMemo(() => matches.filter(note => pinnedPaths.has(note.path)), [matches, pinnedPaths])
+  const unpinned = useMemo(() => matches.filter(note => !pinnedPaths.has(note.path)), [matches, pinnedPaths])
+  const tree = useMemo(() => makeNoteTree(unpinned.slice(0, limit)), [unpinned, limit])
+  const writeBlocked = current?.index.writeBlocked?.message
+
+  useLayoutEffect(() => {
+    latestFolders.current = preferences.noteFolders
+    latestWorkspace.current = workspaceId
+    if (preferences.noteWidth !== 'full') readingWidth.current = preferences.noteWidth
+  }, [preferences.noteFolders, preferences.noteWidth, workspaceId])
+
+  const updateFolder = useCallback((id: number, change: (previous: NoteFolderPreferences) => NoteFolderPreferences) => {
+    const previous = latestFolders.current[id] ?? DEFAULT_NOTE_FOLDER
+    const next = change(previous)
+    latestFolders.current = { ...latestFolders.current, [id]: next }
+    onPreferencesChange({ noteFolders: { [id]: next } })
+  }, [onPreferencesChange])
+
+  const selectNote = useCallback((note: NoteLocation, created = false) => {
+    setNewNoteKey(created ? noteKey(note) : null)
+    updateFolder(note.workspaceId, previous => ({
+      ...previous, lastNote: note.path, expanded: openFolders(previous.expanded, note.path),
+    }))
+  }, [updateFolder])
 
   useEffect(() => {
-    if (!request) return
-    setWorkspaceId(request.workspaceId)
-    setSelected(request)
-    setNewNoteKey(null)
     setSearch('')
-    setLimit(LIST_PAGE)
     setAdding(false)
-  }, [request])
+    setPath('')
+    setCreateFailure(null)
+    setNewNoteKey(null)
+  }, [workspaceId])
+  useEffect(() => {
+    if (!active || !request || request.workspaceId !== workspaceId || request === handledRequest.current) return
+    handledRequest.current = request
+    selectNote(request)
+    setSearch('')
+    setAdding(false)
+  }, [active, request, selectNote, workspaceId])
   useEffect(() => {
     if (adding) createField.current?.focus()
   }, [adding])
+  useEffect(() => {
+    if (!active || !current) return
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing || event.altKey) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target && target !== document.body && !viewRoot.current?.closest('.qz-app')?.contains(target)) return
+      if (event.key === '/' && !event.metaKey && !event.ctrlKey) {
+        if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return
+        event.preventDefault()
+        searchField.current?.focus()
+      }
+      if (!event.shiftKey && event.key.toLowerCase() === 'n' && (event.metaKey || event.ctrlKey) && !creating && !writeBlocked) {
+        event.preventDefault()
+        setAdding(true)
+        setCreateFailure(null)
+        createField.current?.focus()
+      }
+    }
+    document.addEventListener('keydown', handleShortcut)
+    return () => document.removeEventListener('keydown', handleShortcut)
+  }, [active, creating, current, writeBlocked])
 
   if (!workspaces) return failure
     ? <ErrorLine failure={failure} />
@@ -154,11 +211,27 @@ export default function NotesView({ api, active, request, onSettings }: {
   )
 
   const wsId = current.workspace.id
-  const location = selected?.workspaceId === wsId ? selected : null
+  const location = folder.lastNote ? { workspaceId: wsId, path: folder.lastNote } : null
   const key = location ? noteKey(location) : ''
-  const openNote = (path: string) => { setNewNoteKey(null); setSelected({ workspaceId: wsId, path }) }
-  const writeBlocked = current.index.writeBlocked?.message
+  const openNote = (path: string) => selectNote({ workspaceId: wsId, path })
+  const folderStyle = preferences.folderAppearance[wsId]
+  const folderColor = folderStyle && headingColorCss(folderStyle.color)
   const warning = indexWarning(current.index)
+  const toggleFolder = (directory: string) => updateFolder(wsId, previous => ({
+    ...previous,
+    expanded: previous.expanded.includes(directory)
+      ? previous.expanded.filter(item => item !== directory)
+      : openFolders(previous.expanded, directory),
+  }))
+  const togglePin = (path: string) => updateFolder(wsId, previous => ({
+    ...previous,
+    pinned: previous.pinned.includes(path)
+      ? previous.pinned.filter(item => item !== path)
+      : [...previous.pinned, path].slice(0, MAX_PINNED_NOTES),
+  }))
+  const showMore = () => updateFolder(wsId, previous => ({
+    ...previous, limit: Math.min(MAX_LIST_LIMIT, previous.limit + DEFAULT_NOTE_FOLDER.limit),
+  }))
   const create = async () => {
     const newPath = path.trim()
     if (!newPath || createPending.current || writeBlocked) return
@@ -167,14 +240,15 @@ export default function NotesView({ api, active, request, onSettings }: {
     setCreateFailure(null)
     try {
       const result = await withTimeout(createNote(api, wsId, newPath))
-      setPath('')
-      setAdding(false)
-      const created = { workspaceId: wsId, path: result.path }
-      setNewNoteKey(noteKey(created))
-      setSelected(previous => previous === selected ? created : previous)
+      if (latestWorkspace.current === wsId) {
+        setPath('')
+        setAdding(false)
+        const latestFolder = latestFolders.current[wsId] ?? DEFAULT_NOTE_FOLDER
+        if (latestFolder.lastNote === folder.lastNote) selectNote({ workspaceId: wsId, path: result.path }, true)
+      }
       refresh()
     } catch (error) {
-      setCreateFailure(toFailure(error))
+      if (latestWorkspace.current === wsId) setCreateFailure(toFailure(error))
     } finally {
       createPending.current = false
       setCreating(false)
@@ -182,30 +256,13 @@ export default function NotesView({ api, active, request, onSettings }: {
   }
 
   return (
-    <section className="qz-stack qz-notes-view" aria-label="Notes">
+    <section ref={viewRoot} className="qz-stack qz-notes-view" aria-label="Notes">
       <style>{styles}</style>
       <div className="qz-view-heading">
-        <div>
-          <h2 className="qz-section-title">Notes</h2>
-        </div>
-        <div className="qz-actions">
-          <label className="qz-inline-field">
-            <Icon name="folder" />
-            <span>Notes folder</span>
-            <select className="qz-input" value={wsId} disabled={creating} onChange={event => {
-              setWorkspaceId(Number(event.target.value))
-              setSelected(null)
-              setSearch('')
-              setLimit(LIST_PAGE)
-              setAdding(false)
-            }}>
-              {workspaces.map(({ workspace }) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
-            </select>
-          </label>
-          <button type="button" className="qz-button" data-variant="primary" aria-expanded={adding}
-            onClick={() => { setAdding(value => !value); setCreateFailure(null) }}
-            disabled={creating || !!writeBlocked}><Icon name="plus" />New note</button>
-        </div>
+        <h2 className="qz-section-title">Notes</h2>
+        <button type="button" className="qz-button" data-variant="primary" aria-expanded={adding}
+          aria-keyshortcuts="Meta+N Control+N" onClick={() => { setAdding(value => !value); setCreateFailure(null) }}
+          disabled={creating || !!writeBlocked}><Icon name="plus" />New note</button>
       </div>
       <ErrorLine failure={failure} />
       {warning && <div className="qz-notice" role="note">{warning}</div>}
@@ -224,28 +281,43 @@ export default function NotesView({ api, active, request, onSettings }: {
       )}
       <div className="qz-notes-layout">
         <aside className="qz-note-browser qz-panel-surface" aria-label="Notes browser">
+          <h3 className="qz-note-browser-heading">
+            {folderStyle?.emoji && folderColor && <span className="qz-folder-dot" aria-hidden="true" style={{ backgroundColor: folderColor }} />}
+            <span className="qz-note-browser-icon" aria-hidden="true" style={{ color: folderColor }}>
+              {folderStyle?.emoji || <Icon name="folder" />}
+            </span>
+            {current.workspace.name}
+          </h3>
           <label className="qz-field">
             Search notes
-            <input type="search" className="qz-input" value={search} placeholder="Title or path"
-              onChange={event => { setSearch(event.target.value); setLimit(LIST_PAGE) }} />
+            <input ref={searchField} type="search" className="qz-input" value={search} placeholder="Title or path"
+              aria-keyshortcuts="/" onChange={event => setSearch(event.target.value)} />
           </label>
           {notes === null && !failure && <p role="status" className="qz-muted">Loading notes…</p>}
           {notes !== null && matches.length === 0 && (
             <p className="qz-muted">{query ? 'No notes match your search.' : current.index.state === 'scanning' ? 'Indexing notes…' : 'No notes in this folder yet.'}</p>
           )}
-          {matches.length > 0 && <Tree branch={tree} prefix="" selected={location?.path} query={query}
-            onOpen={openNote} />}
-          {matches.length > limit && <button type="button" className="qz-button" data-variant="quiet"
-            onClick={() => setLimit(value => value + LIST_PAGE)}>Show more notes</button>}
+          {pinned.length > 0 && <section className="qz-note-pins" aria-labelledby="qz-pinned-notes">
+            <h4 id="qz-pinned-notes">Pinned notes</h4>
+            <ul className="qz-note-tree">
+              {pinned.map(note => <NoteTreeItem key={note.path} note={note} icon="pin" selected={location?.path} onOpen={openNote} />)}
+            </ul>
+          </section>}
+          {unpinned.length > 0 && <Tree key={query ? 'search' : 'browse'} branch={tree} prefix="" selected={location?.path}
+            searching={!!query} expanded={expanded} onOpen={openNote} onToggle={toggleFolder} />}
+          {unpinned.length > limit && <button type="button" className="qz-button" data-variant="quiet"
+            onClick={showMore}>Show more notes</button>}
         </aside>
         {location ? <NoteEditor key={key} api={api} active={active} location={location}
           edits={edits.get(key)} onDraft={(next, expected) => edit(key, next, expected)} onLoaded={saved => loaded(key, saved)}
           onSave={() => { if (!writeBlocked) void save(location) }} writeBlocked={!!writeBlocked}
           notes={notes ?? EMPTY_NOTES} onOpen={openNote} loadBacklinks={active && visible}
-          indexRevision={current.index.indexedAt} view={newNoteKey === key ? 'raw' : view}
-          focusEditor={newNoteKey === key} fullWidth={fullWidth}
-          onViewChange={next => { setNewNoteKey(null); setView(next); writePreference(VIEW_KEY, next) }}
-          onWidthChange={() => { setFullWidth(!fullWidth); writePreference(WIDTH_KEY, String(!fullWidth)) }} /> : (
+          indexRevision={current.index.indexedAt} view={newNoteKey === key ? 'raw' : preferences.noteView}
+          focusEditor={newNoteKey === key} width={preferences.noteWidth}
+          pinned={pinnedPaths.has(location.path)} pinLimitReached={folder.pinned.length >= MAX_PINNED_NOTES}
+          onPin={() => togglePin(location.path)}
+          onViewChange={noteView => { setNewNoteKey(null); onPreferencesChange({ noteView }) }}
+          onWidthChange={() => onPreferencesChange({ noteWidth: preferences.noteWidth === 'full' ? readingWidth.current : 'full' })} /> : (
           <div className="qz-empty">
             <span className="qz-empty-icon"><Icon name="note" /></span>
             <h3>Open a note</h3>
@@ -257,32 +329,48 @@ export default function NotesView({ api, active, request, onSettings }: {
   )
 }
 
-function Tree({ branch, prefix, selected, query, onOpen }: {
+function NoteTreeItem({ note, icon = 'note', selected, onOpen }: {
+  note: NoteEntry
+  icon?: 'note' | 'pin'
+  selected?: string
+  onOpen: (path: string) => void
+}) {
+  return <li>
+    <button type="button" aria-current={note.path === selected ? 'true' : undefined} title={note.path}
+      onClick={() => onOpen(note.path)}><Icon name={icon} />{note.title}</button>
+  </li>
+}
+
+function Tree({ branch, prefix, selected, searching, expanded, onOpen, onToggle }: {
   branch: NoteTree
   prefix: string
   selected: string | undefined
-  query: string
+  searching: boolean
+  expanded: ReadonlySet<string>
   onOpen: (path: string) => void
+  onToggle: (directory: string) => void
 }) {
   return (
     <ul className="qz-note-tree">
       {[...branch.folders].map(([name, child]) => {
         const directory = `${prefix}${name}/`
         return <li key={directory}>
-          <details open={query || selected?.startsWith(directory) ? true : undefined}>
-            <summary title={name}>
+          <details open={searching || expanded.has(directory)}>
+            <summary title={name} onClick={event => {
+              if (searching) return
+              event.preventDefault()
+              onToggle(directory)
+            }}>
               <span className="qz-note-tree-arrow"><Icon name="down" /></span>
               <Icon name="folder" />
               <span className="qz-note-tree-name">{name}</span>
             </summary>
-            <Tree branch={child} prefix={directory} selected={selected} query={query} onOpen={onOpen} />
+            <Tree branch={child} prefix={directory} selected={selected} searching={searching}
+              expanded={expanded} onOpen={onOpen} onToggle={onToggle} />
           </details>
         </li>
       })}
-      {branch.notes.map(note => <li key={note.path}>
-        <button type="button" aria-current={note.path === selected ? 'true' : undefined} title={note.path}
-          onClick={() => onOpen(note.path)}><Icon name="note" />{note.title}</button>
-      </li>)}
+      {branch.notes.map(note => <NoteTreeItem key={note.path} note={note} selected={selected} onOpen={onOpen} />)}
     </ul>
   )
 }
@@ -295,7 +383,7 @@ interface BlockEdit {
   original: string
 }
 
-function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, writeBlocked, notes, onOpen, loadBacklinks, indexRevision, view, focusEditor, fullWidth, onViewChange, onWidthChange }: {
+function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, writeBlocked, notes, onOpen, loadBacklinks, indexRevision, view, focusEditor, width, pinned, pinLimitReached, onPin, onViewChange, onWidthChange }: {
   api: AppApi
   active: boolean
   location: NoteLocation
@@ -308,10 +396,13 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
   onOpen: (path: string) => void
   loadBacklinks: boolean
   indexRevision?: number | null
-  view: NoteView
+  view: Preferences['noteView']
   focusEditor: boolean
-  fullWidth: boolean
-  onViewChange: (view: NoteView) => void
+  width: NoteWidth
+  pinned: boolean
+  pinLimitReached: boolean
+  onPin: () => void
+  onViewChange: (view: Preferences['noteView']) => void
   onWidthChange: () => void
 }) {
   const { workspaceId, path } = location
@@ -342,7 +433,7 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
   const blocks = useMemo(() => preview && renderedText !== undefined
     ? renderMarkdownBlocks(renderedText, resolveWikilink, { editable: !readOnly }) : [],
     [preview, renderedText, resolveWikilink, readOnly])
-  const columnClass = `qz-note-column${fullWidth ? ' qz-note-column-full' : ''}`
+  const columnClass = `qz-note-column qz-note-column-${width}`
 
   useLayoutEffect(() => {
     const selector = restoreFocus.current
@@ -431,16 +522,24 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
   return (
     <section className="qz-note-editor qz-panel-surface" aria-label="Note editor">
       <div className="qz-toolbar qz-note-toolbar">
-        <code className="qz-mono qz-path" title={path}>{path}</code>
-        <div className="qz-actions">
+        <div className="qz-note-toolbar-file">
+          <code className="qz-mono qz-path" title={path}>{path}</code>
+          <button type="button" className="qz-button qz-note-pin-button" data-variant="quiet"
+            aria-label="Pin note" aria-pressed={pinned} disabled={!pinned && pinLimitReached}
+            title={pinned ? 'Unpin note' : pinLimitReached ? `Up to ${MAX_PINNED_NOTES} notes can be pinned per folder` : 'Pin note'}
+            onClick={onPin}><Icon name="pin" /></button>
+        </div>
+        <div className="qz-actions" role="group" aria-label="Reading options">
           <SegmentedControl segments={[{ key: 'rendered', label: 'Rendered' }, { key: 'raw', label: 'Raw' }]}
             value={view} onChange={next => {
               if (blockEdit) finishBlockEdit(false, false)
               else if (!readOnly) onSave()
               onViewChange(next)
             }} ariaLabel="Note view" collapse={false} />
-          <button type="button" className="qz-button" data-variant="quiet" aria-pressed={fullWidth}
-            onClick={onWidthChange}>{fullWidth ? 'Full width' : 'Reading width'}</button>
+          <button type="button" className="qz-button" data-variant="quiet" aria-pressed={width === 'full'}
+            onClick={onWidthChange}>{width === 'full' ? 'Full width' : 'Reading width'}</button>
+        </div>
+        <div className="qz-actions" role="group" aria-label="Note actions">
           <button ref={reloadButton} type="button" className="qz-button" data-variant="quiet"
             disabled={loading || saving || reloading} onMouseDown={event => event.preventDefault()}
             onClick={() => void reload()}>Reload from disk</button>

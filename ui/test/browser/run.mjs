@@ -30,10 +30,11 @@ const textbox = (page, name) => page.getByRole('textbox', { name, exact: true })
 const button = (page, name) => page.getByRole('button', { name, exact: true })
 const tab = (page, name) => page.getByRole('tab', { name, exact: true })
 const select = (page, name) => page.getByRole('combobox', { name, exact: true })
+const settingsSection = (page, name) => button(page.getByRole('navigation', { name: 'Settings sections' }), name)
 const noteView = (page, name) => page.getByRole('radio', { name, exact: true })
 
-async function startFixture(hostVersion = '0.12.0') {
-  const process = spawn(python, [path.join(here, 'bridge.py'), '--bundle', bundle, '--host-version', hostVersion], {
+async function startFixture(hostVersion = '0.12.0', flags = []) {
+  const process = spawn(python, [path.join(here, 'bridge.py'), '--bundle', bundle, '--host-version', hostVersion, ...flags], {
     cwd: root, stdio: ['ignore', 'pipe', 'pipe'],
   })
   let stderr = ''
@@ -196,6 +197,8 @@ async function exhaustionRegression(page, fixture) {
 
 async function migrationRegression(page, fixture) {
   await tab(page, 'Settings').click()
+  await settingsSection(page, 'Folders').click()
+  await page.getByRole('region', { name: 'Browser vault', exact: true }).locator('summary').filter({ hasText: /^Advanced$/ }).click()
   await button(page, 'Preview migration').click()
   await button(page, 'Back up and migrate').click()
   await page.getByText('1 ticket note(s) migrated. Migration verified.', { exact: true }).waitFor()
@@ -220,16 +223,20 @@ async function migrationRegression(page, fixture) {
 }
 
 async function customColumnsRegression(page, fixture) {
+  await settingsSection(page, 'Board').click()
   const folder = page.getByRole('region', { name: 'Browser vault', exact: true })
   const disclosure = name => folder.locator('summary').filter({ hasText: new RegExp(`^${name}$`) })
   await disclosure('Board columns').click()
   await textbox(folder, 'Name for ready').fill('Up next')
+  await folder.getByLabel('Color for ready', { exact: true }).fill('#146b5a')
   await button(folder, 'Move column ready up').click()
   await textbox(folder, 'New column name').fill('On hold')
   assert.equal(await textbox(folder, 'New status ID').inputValue(), 'on_hold')
   await button(folder, 'Add column').click()
   await button(folder, 'Save columns').click()
   await folder.getByText('Board columns saved.', { exact: true }).waitFor()
+  await settingsSection(page, 'Folders').click()
+  await disclosure('Advanced').click()
   await disclosure('Agent instructions').click()
   const prompt = await textbox(folder, 'Agent prompt').inputValue()
   assert.ok(prompt.includes(fixture.vault))
@@ -248,6 +255,7 @@ async function customColumnsRegression(page, fixture) {
   const lane = name => board.getByRole('region', { name, exact: true })
   await lane('On hold').waitFor()
   assert.equal(await board.getByRole('region').first().getAttribute('aria-label'), 'Up next')
+  assert.match(await lane('Up next').getAttribute('style'), /#146b5a/)
   await ready(page)
   await button(page, 'New ticket').click()
   assert.equal(await select(page, 'Initial status').inputValue(), 'ready')
@@ -264,6 +272,7 @@ async function customColumnsRegression(page, fixture) {
   await tab(page, 'TODOs').click()
   await page.getByRole('heading', { name: 'Held ticket On hold', exact: true }).waitFor()
   await tab(page, 'Settings').click()
+  await settingsSection(page, 'Board').click()
   await disclosure('Board columns').click()
   await button(folder, 'Remove column on_hold').click()
   await button(folder, 'Save columns').click()
@@ -294,6 +303,7 @@ async function notesRegression(page, fixture) {
     await page.goto(fixture.origin)
     // KiroCrew mounts routed apps inside a height-constrained flex column.
     await page.addStyleTag({ content: '#root { display: flex; flex-direction: column; height: calc(100vh - 48px); overflow: auto; } svg { display: block; }' })
+    await tab(page, 'Tasks').click()
     await select(page, 'Workspace').selectOption({ label: 'Browser vault' })
     await button(page, 'Open note: First').click()
     const editor = textbox(page, 'Note Markdown')
@@ -316,7 +326,7 @@ async function notesRegression(page, fixture) {
     } finally {
       await page.setViewportSize(viewport)
     }
-    assert.equal(await select(page, 'Notes folder').inputValue(), String(fixture.workspaceId))
+    assert.equal(await select(page, 'Workspace').inputValue(), String(fixture.workspaceId))
     await tab(page, 'TODOs').click()
     await button(page, 'Open note: First TODO').click()
     assert.match(await editor.inputValue(), /- \[ \] First TODO/)
@@ -414,7 +424,7 @@ async function notesRegression(page, fixture) {
     await tab(page, 'TODOs').click()
     await page.getByRole('checkbox', { name: 'Complete Shared index check', exact: true }).waitFor()
     await button(page, 'Open note: Shared index check').click()
-    await noteView(page, 'Raw').click()
+    if (await noteView(page, 'Raw').getAttribute('aria-checked') !== 'true') await noteView(page, 'Raw').click()
     await editor.waitFor()
     const draft = saved + '\nMy unsaved changes\n'
     await editor.fill(draft)
@@ -459,6 +469,8 @@ async function prerequisiteRegression(browser) {
     assert.equal(await noteTask.isDisabled(), true)
     assert.equal(await preview.getByRole('button', { name: /Edit block/ }).count(), 0)
     await tab(page, 'Settings').click()
+    await settingsSection(page, 'Folders').click()
+    await page.getByRole('region', { name: 'Browser vault', exact: true }).locator('summary').filter({ hasText: /^Advanced$/ }).click()
     await button(page, 'Preview migration').click()
     assert.equal(await button(page, 'Back up and migrate').isDisabled(), true)
     assert.equal(existsSync(path.join(fixture.vault, 'blocked.md')), false)
@@ -523,13 +535,14 @@ async function noteAppearanceRegression(page, fixture) {
   assert.deepEqual(defaults.slice(1, 3), ['2px', '0px'])
 
   await tab(page, 'Settings').click()
+  await settingsSection(page, 'Notes').click()
   const settings = page.getByRole('region', { name: 'Notes appearance' })
   await select(settings, 'Heading text color').selectOption('custom')
   await settings.getByLabel('Custom heading text color').fill('#124ca8')
   await select(settings, 'Heading lines').selectOption('all')
   await select(settings, 'Heading line color').selectOption('custom')
   await settings.getByLabel('Custom heading line color').fill('#a8235b')
-  assert.equal(await settings.locator('.qz-settings-appearance-preview h3').evaluate(element => getComputedStyle(element).borderBlockEndColor), 'rgb(168, 35, 91)')
+  assert.equal(await settings.getByRole('group', { name: 'Light background preview' }).locator('h3').evaluate(element => getComputedStyle(element).borderBlockEndColor), 'rgb(168, 35, 91)')
   await tab(page, 'Notes').click()
   const customized = ['rgb(18, 76, 168)', '0px', '1px', 'rgb(168, 35, 91)']
   assert.deepEqual(await headingStyle(), customized)
@@ -538,6 +551,7 @@ async function noteAppearanceRegression(page, fixture) {
   assert.deepEqual(await headingStyle(), customized)
 
   await tab(page, 'Settings').click()
+  await settingsSection(page, 'Notes').click()
   const viewport = page.viewportSize()
   try {
     await page.setViewportSize({ width: 390, height: 844 })
@@ -555,6 +569,158 @@ async function noteAppearanceRegression(page, fixture) {
   assert.deepEqual(await headingStyle(), defaults)
   assert.equal(readFileSync(notePath, 'utf8'), markdown)
   console.log('PASS heading colors and lines apply in Settings and Notes, persist on reload, and reset independently of Markdown')
+}
+
+async function personalizationRegression(browser) {
+  const fixture = await startFixture()
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  const preferencesUrl = '**/api/preferences'
+  const synced = async patch => {
+    await eventually(async () => {
+      const response = await page.request.get(`${fixture.origin}/apps/quartizo/api/preferences`)
+      const { preferences } = await response.json()
+      return Object.entries(patch).every(([key, value]) => JSON.stringify(preferences[key]) === JSON.stringify(value))
+    }, 'Preferences did not reach the backend')
+  }
+  try {
+    await page.addInitScript(() => {
+      localStorage.setItem('quartizo-notes-view', 'raw')
+      localStorage.setItem('quartizo-notes-full-width', 'true')
+    })
+    await page.goto(fixture.origin)
+    await ready(page)
+    await synced({ noteView: 'raw', noteWidth: 'full' })
+
+    await tab(page, 'Settings').click()
+    await settingsSection(page, 'Folders').click()
+    await textbox(page, 'Folder path').fill(`${fixture.vault}-missing`)
+    await page.getByRole('status').filter({ hasText: 'workspace path does not exist' }).waitFor()
+    assert.equal(await button(page, 'Add folder').isDisabled(), true)
+    await page.getByRole('region', { name: 'Browser vault', exact: true }).getByLabel('Folder emoji').fill('📌')
+    assert.equal(await select(page, 'Workspace').locator('option:checked').textContent(), '📌 Browser vault')
+
+    await settingsSection(page, 'Notes').click()
+    assert.equal(await select(page, 'Note view').inputValue(), 'raw')
+    assert.equal(await select(page, 'Reading width').inputValue(), 'full')
+    await select(page, 'Reading width').selectOption('narrow')
+    await select(page, 'Reading text size').selectOption('large')
+    await select(page, 'Raw editor text size').selectOption('small')
+    await select(page, 'Heading text color').selectOption('custom')
+    await textbox(page, 'Heading text color hex').fill('#ffffff')
+    await page.getByRole('status').filter({ hasText: 'Low contrast' }).waitFor()
+    await page.getByRole('group', { name: 'Dark background preview' }).waitFor()
+    await button(page, 'Reset heading text color').click()
+
+    await tab(page, 'Tasks').click()
+    await button(page, 'View').click()
+    const view = page.getByRole('region', { name: 'Board view settings' })
+    await select(view, 'Card density').selectOption('compact')
+    await view.getByRole('checkbox', { name: 'Note path' }).uncheck()
+    await view.getByRole('checkbox', { name: 'Hide empty columns' }).check()
+    await select(view, 'Ready order').selectOption('title')
+    const board = page.getByRole('group', { name: 'Board of Browser vault' })
+    assert.equal(await board.getAttribute('data-density'), 'compact')
+    assert.equal(await board.getByRole('region', { name: 'Backlog', exact: true }).count(), 0)
+    assert.equal(await board.locator('.qz-ticket-content .qz-path').count(), 0)
+    assert.equal(await board.locator('.qz-ticket-content .qz-folder-label').first().textContent(), '📌Browser vault')
+    await button(page, 'Open note: First').click()
+    const editor = textbox(page, 'Note Markdown')
+    await editor.waitFor()
+    assert.equal(await editor.evaluate(element => getComputedStyle(element).fontSize), '14px')
+    await button(page, 'Pin note').click()
+    await page.getByRole('region', { name: 'Pinned notes' }).getByRole('button', { name: 'First' }).waitFor()
+    await noteView(page, 'Rendered').click()
+    const preview = page.getByLabel('Markdown preview')
+    await preview.waitFor()
+    assert.equal(await preview.evaluate(element => getComputedStyle(element).fontSize), '19px')
+    assert.ok(await preview.evaluate(element => element.getBoundingClientRect().width <= 620))
+    await page.keyboard.press('/')
+    assert.equal(await page.getByRole('searchbox', { name: 'Search notes' }).evaluate(el => el === document.activeElement), true)
+    await page.keyboard.press('Meta+n')
+    await textbox(page, 'Note path').waitFor()
+    await button(page, 'Cancel').click()
+    await button(page, 'Back to board').click()
+    await board.waitFor()
+
+    await tab(page, 'TODOs').click()
+    await select(page, 'Folder scope').selectOption('workspace')
+    await select(page, 'Show').selectOption('open')
+    await page.getByRole('searchbox', { name: 'Filter TODOs' }).fill('first')
+    await page.locator('summary').filter({ hasText: /^Saved filters$/ }).click()
+    await textbox(page, 'Filter name').fill('First in this folder')
+    await button(page, 'Save current filter').click()
+    await button(page, 'Open note: First TODO').click()
+    await button(page, 'Back to TODOs').click()
+    assert.equal(await page.getByRole('searchbox', { name: 'Filter TODOs' }).inputValue(), 'first')
+    await synced({ lastTab: 'todos', noteWidth: 'narrow', noteView: 'rendered', todoScope: 'workspace', boardDensity: 'compact' })
+
+    const second = await browser.newPage()
+    try {
+      await second.addInitScript(() => Object.defineProperty(window, 'localStorage', { get() { throw Error('Blocked by the browser') } }))
+      await second.goto(fixture.origin)
+      await select(second, 'Folder scope').waitFor()
+      assert.equal(await tab(second, 'TODOs').getAttribute('aria-selected'), 'true')
+      assert.equal(await select(second, 'Folder scope').inputValue(), 'workspace')
+      await second.locator('summary').filter({ hasText: /^Saved filters$/ }).click()
+      await select(second, 'Saved filter').selectOption('First in this folder')
+      assert.equal(await second.getByRole('searchbox', { name: 'Filter TODOs' }).inputValue(), 'first')
+      await tab(second, 'Notes').click()
+      await second.getByRole('region', { name: 'Pinned notes' }).getByRole('button', { name: 'First' }).waitFor()
+      await second.getByLabel('Markdown preview').getByRole('heading', { name: 'First', exact: true }).waitFor()
+      await second.route(preferencesUrl, route => route.abort())
+      await second.reload()
+      await second.getByRole('status').filter({ hasText: 'Quartizo can’t save preferences' }).waitFor()
+    } finally {
+      await second.close()
+    }
+
+    await page.route(preferencesUrl, route => route.abort())
+    await tab(page, 'Settings').click()
+    await settingsSection(page, 'Appearance').click()
+    await page.getByRole('checkbox', { name: 'High contrast' }).check()
+    await page.getByRole('status').filter({ hasText: 'Saved in this browser' }).waitFor()
+    await page.reload()
+    assert.equal(await tab(page, 'Settings').getAttribute('aria-selected'), 'true')
+    await settingsSection(page, 'Appearance').click()
+    assert.equal(await page.getByRole('checkbox', { name: 'High contrast' }).isChecked(), true)
+    await page.unroute(preferencesUrl)
+    await select(page, 'Motion').selectOption('reduced')
+    await settingsSection(page, 'Defaults').click()
+    await select(page, 'Start on').selectOption('notes')
+    await synced({ highContrast: true, motion: 'reduced', startOn: 'notes' })
+    await page.reload()
+    await page.getByLabel('Markdown preview').waitFor()
+    assert.equal(await tab(page, 'Notes').getAttribute('aria-selected'), 'true')
+    console.log('PASS personalization migrates old values, persists across browsers, and recovers from unavailable storage')
+  } finally {
+    await page.close()
+    await fixture.stop()
+  }
+}
+
+async function onboardingRegression(browser) {
+  const fixture = await startFixture('0.12.0', ['--empty'])
+  const page = await browser.newPage()
+  try {
+    await page.goto(fixture.origin)
+    await button(page, 'Open Settings').click()
+    const add = page.getByRole('form', { name: 'Add a folder' })
+    await add.waitFor()
+    assert.equal(await settingsSection(page, 'Folders').getAttribute('aria-current'), 'true')
+    const checklist = page.getByRole('region', { name: 'Get started' })
+    await checklist.waitFor()
+    assert.equal(await checklist.getByRole('listitem').count(), 3)
+    await textbox(add, 'Folder path').fill(fixture.vault)
+    await add.getByRole('status').filter({ hasText: 'Folder is ready to connect.' }).waitFor()
+    await button(add, 'Add folder').click()
+    await select(page, 'Workspace').locator('option:checked').filter({ hasText: /^vault$/ }).waitFor({ state: 'attached' })
+    await tab(page, 'Notes').click()
+    await button(page, 'New note').waitFor()
+    console.log('PASS first-run Settings leads with the checked folder form and opens the connected workspace')
+  } finally {
+    await page.close()
+    await fixture.stop()
+  }
 }
 
 let browser
@@ -581,6 +747,8 @@ try {
   await wikilinkRegression(page, fixture)
   await noteAppearanceRegression(page, fixture)
   await prerequisiteRegression(browser)
+  await personalizationRegression(browser)
+  await onboardingRegression(browser)
   assert.deepEqual(errors, [])
   success = true
   console.log('All browser regressions passed with the production bundle and real signed backend.')
