@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.6 - 2026-11-17
 
 - Quartizo now installs a KiroCrew agent, **quartizo-notes**, and its skill.
   **Ask a Bot or agent** opens a chat with that agent and a short draft
