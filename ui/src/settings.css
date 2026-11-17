@@ -15,10 +15,38 @@
   gap: 20px;
 }
 
+.qz-settings-appearance {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.qz-settings-appearance .qz-settings-heading { justify-content: space-between; }
+.qz-settings-appearance .qz-settings-heading .qz-button { min-height: 32px; }
+.qz-settings-appearance-body, .qz-settings-appearance-controls { display: grid; gap: 12px; }
+.qz-settings-appearance-controls {
+  align-items: start;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr));
+}
+.qz-settings-color-field { display: flex; align-items: end; gap: 6px; min-width: 0; }
+.qz-settings-color-field .qz-field { flex: 1; }
+.qz-settings-color-field input[type="color"] { flex: none; width: 40px; padding: 4px; cursor: pointer; }
+.qz-settings-appearance-preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 16px;
+  border: 1px solid var(--qz-border);
+  border-radius: 8px;
+  background: var(--qz-elevated);
+  font: 400 13px/1.55 var(--font-body, sans-serif);
+}
+
 @container qz-settings (min-width: 760px) {
   .qz-settings .qz-settings-grid {
     grid-template-columns: minmax(0, 1fr) minmax(260px, 330px);
   }
+  .qz-settings-appearance-body { grid-template-columns: minmax(0, 1fr) minmax(185px, 26%); }
 }
 
 .qz-settings .qz-settings-folders,

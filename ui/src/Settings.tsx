@@ -1,4 +1,4 @@
-/** Settings for connected Markdown folders, their board preferences, and legacy task migration. */
+/** Notes appearance, connected folders, board preferences, and legacy task migration. */
 import { type AppApi, useChatLauncher } from '@kirocrew/app-sdk'
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -20,6 +20,7 @@ import {
   type Workspace,
 } from './companionApi'
 import { agentPrompt } from './agentPrompt'
+import { DEFAULT_NOTE_APPEARANCE, type HeadingColor, type NoteAppearance, headingColor, headingLines } from './noteAppearance'
 import { ErrorLine, Icon } from './ui'
 import styles from './settings.css?inline'
 
@@ -43,8 +44,11 @@ function useAction() {
   return { busy, failure, run }
 }
 
-export default function Settings(props: { api: AppApi }) {
-  const { api } = props
+export default function Settings({ api, noteAppearance, onNoteAppearanceChange }: {
+  api: AppApi
+  noteAppearance: NoteAppearance
+  onNoteAppearanceChange: (next: NoteAppearance) => void
+}) {
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [loadFailure, setLoadFailure] = useState<ApiFailure | null>(null)
   const [writeBlocked, setWriteBlocked] = useState<ApiFailure | null>(null)
@@ -85,6 +89,7 @@ export default function Settings(props: { api: AppApi }) {
       </header>
       <ErrorLine failure={loadFailure} />
       <ErrorLine failure={writeBlocked} />
+      <NoteAppearanceSettings appearance={noteAppearance} onChange={onNoteAppearanceChange} />
       <div className="qz-settings-grid">
         <section className="qz-settings-folders" aria-labelledby="qz-settings-folders">
           <div className="qz-settings-heading">
@@ -123,6 +128,67 @@ export default function Settings(props: { api: AppApi }) {
           <ErrorLine failure={failure} />
         </form>
       </div>
+    </div>
+  )
+}
+
+function NoteAppearanceSettings({ appearance, onChange }: {
+  appearance: NoteAppearance
+  onChange: (next: NoteAppearance) => void
+}) {
+  return (
+    <section className="qz-panel-surface qz-settings-appearance" aria-labelledby="qz-note-appearance">
+      <div className="qz-settings-heading">
+        <h3 id="qz-note-appearance">Notes appearance</h3>
+        <button className="qz-button" type="button" data-variant="quiet"
+          disabled={appearance.headingColor === 'theme' && appearance.headingLines === 'theme' && appearance.lineColor === 'theme'}
+          onClick={() => onChange(DEFAULT_NOTE_APPEARANCE)}>Reset defaults</button>
+      </div>
+      <div className="qz-settings-appearance-body">
+        <div className="qz-settings-appearance-controls">
+          <HeadingColorField label="Heading text color" value={appearance.headingColor}
+            onChange={color => onChange({ ...appearance, headingColor: color })} />
+          <label className="qz-field">Heading lines
+            <select className="qz-input" value={appearance.headingLines}
+              onChange={event => onChange({ ...appearance, headingLines: headingLines(event.currentTarget.value) })}>
+              <option value="theme">Theme default</option>
+              <option value="all">Under every heading</option>
+              <option value="none">None</option>
+            </select>
+          </label>
+          <HeadingColorField label="Heading line color" value={appearance.lineColor} disabled={appearance.headingLines === 'none'}
+            onChange={color => onChange({ ...appearance, lineColor: color })} />
+        </div>
+        <div className="qz-note-headings qz-settings-appearance-preview" aria-hidden="true">
+          <h2>Project notes</h2>
+          <h3>Next steps</h3>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function HeadingColorField({ label, value, disabled, onChange }: {
+  label: string
+  value: HeadingColor
+  disabled?: boolean
+  onChange: (color: HeadingColor) => void
+}) {
+  const custom = value !== 'theme' && value !== 'accent'
+  return (
+    <div className="qz-settings-color-field">
+      <label className="qz-field">{label}
+        <select className="qz-input" value={custom ? 'custom' : value} disabled={disabled} onChange={event => {
+          const next = event.currentTarget.value
+          onChange(next === 'custom' ? '#6757c7' : headingColor(next))
+        }}>
+          <option value="theme">Theme default</option>
+          <option value="accent">Theme accent</option>
+          <option value="custom">Custom color</option>
+        </select>
+      </label>
+      {custom && <input className="qz-input" type="color" aria-label={`Custom ${label.toLowerCase()}`}
+        value={value} disabled={disabled} onChange={event => onChange(headingColor(event.currentTarget.value))} />}
     </div>
   )
 }

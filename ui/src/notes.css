@@ -73,26 +73,6 @@
 }
 .qz-notes-rendered :is(p, ul, ol, pre, blockquote, table, h1, h2, h3, h4, h5, h6) { margin: 0 0 .9em; }
 .qz-notes-rendered :is(ul, ol) { padding-inline-start: 1.5em; }
-.qz-notes-rendered :is(h1, h2, h3, h4, h5, h6) {
-  color: var(--text-strong, var(--qz-text));
-  line-height: 1.25;
-  font-weight: 600;
-}
-.qz-notes-rendered h1 { font-size: 1.802em; font-weight: 700; }
-.qz-notes-rendered h2 { font-size: 1.602em; }
-.qz-notes-rendered h3 { font-size: 1.422em; }
-.qz-notes-rendered h4 { font-size: 1.278em; }
-.qz-notes-rendered h5 { font-size: 1.121em; }
-.qz-notes-rendered h6 { font-size: 1em; }
-.qz-notes-rendered :is(h1, h2) {
-  padding-block-end: .25em;
-  border-block-end: 1px solid var(--mdnb-heading-rule-soft, var(--qz-border));
-}
-.qz-notes-rendered :is(h3, h4, h5, h6) {
-  padding-inline-start: 8px;
-  margin-inline-start: -10px;
-  border-inline-start: 2px solid var(--mdnb-heading-rail, var(--qz-border));
-}
 .qz-notes-rendered :is(code, pre) { font-family: var(--mono, ui-monospace, monospace); font-size: .9em; }
 .qz-notes-rendered pre code { font-size: inherit; }
 .qz-notes-rendered pre {

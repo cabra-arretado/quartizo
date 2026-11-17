@@ -456,7 +456,7 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
       </div>}
       {doc?.lineEnding === 'mixed' && <div className="qz-notice" role="note">This note has mixed line endings and opens read-only to preserve them.</div>}
       {doc && (preview
-        ? <div ref={previewRef} className={`qz-notes-rendered ${columnClass}`} aria-label="Markdown preview" tabIndex={-1}
+        ? <div ref={previewRef} className={`qz-notes-rendered qz-note-headings ${columnClass}`} aria-label="Markdown preview" tabIndex={-1}
           onClick={event => {
             if (!(event.target instanceof Element)) return
             const wikiLink = event.target.closest<HTMLButtonElement>('button.qz-wikilink[data-note-path]')

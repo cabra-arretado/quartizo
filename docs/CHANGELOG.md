@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.12.3 - 2026-11-17
+
+- Customize heading text and line colors in **Settings → Notes appearance**.
+  Keep the theme's rules, underline every heading, or hide heading lines.
+- Preview changes in Settings, reset to the theme defaults, and keep your
+  preferences across reloads in the same browser.
+
+Requires KiroCrew 0.12.0 or later.
+
 ## 0.12.2 - 2026-11-16
 
 - Save Raw and inline note edits when you leave the editor. Checking or

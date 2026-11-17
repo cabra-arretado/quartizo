@@ -1,8 +1,9 @@
 import { useAppApi } from '@kirocrew/app-sdk'
-import { type KeyboardEvent, useRef, useState } from 'react'
+import { type CSSProperties, type KeyboardEvent, useRef, useState } from 'react'
 import { TasksView, TodoView } from './Companion'
 import NotesView from './Notes'
 import Settings from './Settings'
+import { headingColorCss, loadNoteAppearance, saveNoteAppearance } from './noteAppearance'
 import type { NoteLocation } from './noteNav'
 import { Icon, type IconName } from './ui'
 import styles from './quartizo.css?inline'
@@ -23,6 +24,11 @@ export default function Quartizo() {
   const api = useAppApi()
   const [tab, setTab] = useState<Tab>('tasks')
   const [noteRequest, setNoteRequest] = useState<NoteLocation | null>(null)
+  const [noteAppearance, setNoteAppearance] = useState(loadNoteAppearance)
+  const headingColors = {
+    '--qz-note-heading-color': headingColorCss(noteAppearance.headingColor),
+    '--qz-note-line-color': headingColorCss(noteAppearance.lineColor),
+  } as CSSProperties
   const tabs = useRef<HTMLDivElement>(null)
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return
@@ -44,7 +50,7 @@ export default function Quartizo() {
   }
 
   return (
-    <div className="qz-app">
+    <div className="qz-app" data-note-heading-lines={noteAppearance.headingLines} style={headingColors}>
       {/* The host loads a single ES module through the manifest. */}
       <style>{styles}</style>
       <header className="qz-header">
@@ -82,7 +88,8 @@ export default function Quartizo() {
         <div className="qz-notes-tab" hidden={tab !== 'notes'}>
           <NotesView api={api} active={tab === 'notes'} request={noteRequest} onSettings={openSettings} />
         </div>
-        {tab === 'settings' && <Settings api={api} />}
+        {tab === 'settings' && <Settings api={api} noteAppearance={noteAppearance}
+          onNoteAppearanceChange={next => { setNoteAppearance(next); saveNoteAppearance(next) }} />}
       </div>
     </div>
   )

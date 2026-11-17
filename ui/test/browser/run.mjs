@@ -503,6 +503,60 @@ async function wikilinkRegression(page, fixture) {
   console.log('PASS wikilinks and backlinks navigate to exact notes, preserve edits, and reflect external changes')
 }
 
+async function noteAppearanceRegression(page, fixture) {
+  const notePath = path.join(fixture.vault, 'appearance-example.md')
+  const markdown = '# Appearance example\n\n### Section details\n\nBody text.\n'
+  writeFileSync(notePath, markdown)
+  await page.goto(fixture.origin)
+  const showNote = async () => {
+    await tab(page, 'Notes').click()
+    await page.getByRole('searchbox', { name: 'Search notes' }).fill('appearance-example')
+    await button(page, 'Appearance example').click()
+  }
+  const heading = page.getByLabel('Markdown preview').getByRole('heading', { name: 'Section details' })
+  const headingStyle = () => heading.evaluate(element => {
+    const style = getComputedStyle(element)
+    return [style.color, style.borderInlineStartWidth, style.borderBlockEndWidth, style.borderBlockEndColor]
+  })
+  await showNote()
+  const defaults = await headingStyle()
+  assert.deepEqual(defaults.slice(1, 3), ['2px', '0px'])
+
+  await tab(page, 'Settings').click()
+  const settings = page.getByRole('region', { name: 'Notes appearance' })
+  await select(settings, 'Heading text color').selectOption('custom')
+  await settings.getByLabel('Custom heading text color').fill('#124ca8')
+  await select(settings, 'Heading lines').selectOption('all')
+  await select(settings, 'Heading line color').selectOption('custom')
+  await settings.getByLabel('Custom heading line color').fill('#a8235b')
+  assert.equal(await settings.locator('.qz-settings-appearance-preview h3').evaluate(element => getComputedStyle(element).borderBlockEndColor), 'rgb(168, 35, 91)')
+  await tab(page, 'Notes').click()
+  const customized = ['rgb(18, 76, 168)', '0px', '1px', 'rgb(168, 35, 91)']
+  assert.deepEqual(await headingStyle(), customized)
+  await page.reload()
+  await showNote()
+  assert.deepEqual(await headingStyle(), customized)
+
+  await tab(page, 'Settings').click()
+  const viewport = page.viewportSize()
+  try {
+    await page.setViewportSize({ width: 390, height: 844 })
+    assert.equal(await settings.evaluate(element => element.scrollWidth <= element.clientWidth), true)
+    await select(settings, 'Heading lines').selectOption('none')
+    assert.equal(await select(settings, 'Heading line color').isDisabled(), true)
+    await tab(page, 'Notes').click()
+    assert.deepEqual((await headingStyle()).slice(1, 3), ['0px', '0px'])
+    await tab(page, 'Settings').click()
+    await button(settings, 'Reset defaults').click()
+  } finally {
+    await page.setViewportSize(viewport)
+  }
+  await tab(page, 'Notes').click()
+  assert.deepEqual(await headingStyle(), defaults)
+  assert.equal(readFileSync(notePath, 'utf8'), markdown)
+  console.log('PASS heading colors and lines apply in Settings and Notes, persist on reload, and reset independently of Markdown')
+}
+
 let browser
 let fixture
 let page
@@ -525,6 +579,7 @@ try {
   await customColumnsRegression(page, fixture)
   await notesRegression(page, fixture)
   await wikilinkRegression(page, fixture)
+  await noteAppearanceRegression(page, fixture)
   await prerequisiteRegression(browser)
   assert.deepEqual(errors, [])
   success = true

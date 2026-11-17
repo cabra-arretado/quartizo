@@ -108,6 +108,28 @@
 .qz-mono { font: 400 12px/1.5 var(--mono, ui-monospace, monospace); }
 .qz-path { display: block; min-width: 0; overflow: hidden; color: var(--qz-muted); text-overflow: ellipsis; white-space: nowrap; }
 
+.qz-note-headings :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--qz-note-heading-color, var(--text-strong, var(--qz-text)));
+  line-height: 1.25;
+  font-weight: 600;
+}
+.qz-note-headings h1 { font-size: 1.802em; font-weight: 700; }
+.qz-note-headings h2 { font-size: 1.602em; }
+.qz-note-headings h3 { font-size: 1.422em; }
+.qz-note-headings h4 { font-size: 1.278em; }
+.qz-note-headings h5 { font-size: 1.121em; }
+.qz-note-headings h6 { font-size: 1em; }
+.qz-app[data-note-heading-lines="theme"] .qz-note-headings :is(h1, h2),
+.qz-app[data-note-heading-lines="all"] .qz-note-headings :is(h1, h2, h3, h4, h5, h6) {
+  padding-block-end: .25em;
+  border-block-end: 1px solid var(--qz-note-line-color, var(--mdnb-heading-rule-soft, var(--qz-border)));
+}
+.qz-app[data-note-heading-lines="theme"] .qz-note-headings :is(h3, h4, h5, h6) {
+  padding-inline-start: 8px;
+  margin-inline-start: -10px;
+  border-inline-start: 2px solid var(--qz-note-line-color, var(--mdnb-heading-rail, var(--qz-border)));
+}
+
 .qz-actions { gap: 6px; flex-wrap: wrap; }
 .qz-button {
   display: inline-flex;
