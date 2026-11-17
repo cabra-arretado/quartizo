@@ -1,4 +1,4 @@
-import { type AppApi, useChatLauncher } from '@kirocrew/app-sdk'
+import type { AppApi } from '@kirocrew/app-sdk'
 import { useEffect, useRef, useState } from 'react'
 import {
   addWorkspace,
@@ -20,6 +20,7 @@ import {
   type Workspace,
 } from './companionApi'
 import { agentPrompt } from './agentPrompt'
+import { AskAgentButton } from './AskAgent'
 import { BoardViewSettings } from './Companion'
 import { DEFAULT_NOTE_APPEARANCE, headingColor, headingColorCss, headingLines } from './noteAppearance'
 import { DEFAULT_FOLDER_APPEARANCE, folderEmoji, NOTE_WIDTHS, type Preferences } from './preferences'
@@ -88,7 +89,8 @@ export default function Settings({
   // Folders whose directory no longer exists on disk. They are easy to miss and otherwise look normal.
   const [missing, setMissing] = useState<ReadonlySet<number>>(new Set())
   const [reload, setReload] = useState(0)
-  const selectedSection = section ?? (workspaces?.length ? 'defaults' : 'folders')
+  // Wait for the folder list before choosing: picking Folders while loading made the page jump to Defaults.
+  const selectedSection = section ?? (workspaces === null ? (loadFailure ? 'folders' : null) : workspaces.length ? 'defaults' : 'folders')
   const enabled = workspaces?.filter(w => w.companion) ?? []
   const workspace = enabled.find(w => w.id === workspaceId)
   const changed = () => {
@@ -103,9 +105,13 @@ export default function Settings({
         if (cancelled) return
         setWorkspaces(value)
         setWriteBlocked(index.writeBlocked ?? null)
-        setMissing(new Set(index.workspaces
-          .filter(({ index: status }) => typeof status.error === 'object' && status.error?.code === 'root_missing')
-          .map(({ workspace }) => workspace.id)))
+        // The index only covers enabled folders; the list flags disabled ones that are gone too.
+        setMissing(new Set([
+          ...value.filter(w => w.missing).map(w => w.id),
+          ...index.workspaces
+            .filter(({ index: status }) => typeof status.error === 'object' && status.error?.code === 'root_missing')
+            .map(({ workspace }) => workspace.id),
+        ]))
         setLoadFailure(null)
       })
       .catch(err => !cancelled && setLoadFailure(toFailure(err)))
@@ -125,6 +131,7 @@ export default function Settings({
       </nav>
       <ErrorLine failure={loadFailure} />
       <ErrorLine failure={writeBlocked} />
+      {!selectedSection && <p className="qz-muted qz-loading" role="status">Loading settings…</p>}
 
       {selectedSection === 'defaults' && <SettingsPanel title="Defaults">
         <div className="qz-settings-fields">
@@ -376,7 +383,7 @@ function WorkspaceItem(props: PreferenceControls & {
           <code className="qz-mono qz-muted">{w.path}</code>
         </div>
       </div>
-      {props.missing && <div role="alert" className="qz-notice qz-error qz-settings-missing">
+      {props.missing && <div role="note" className="qz-notice qz-error qz-settings-missing">
         <strong>This folder is missing.</strong> {w.path} no longer exists on disk. Restore or reconnect it, or remove it here.
         {w.companion && ' Turn off “Include in Tasks, Notes, and TODOs” to hide it from the other views.'}
       </div>}
@@ -538,7 +545,6 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
 }
 
 function AgentPrompt({ workspace }: { workspace: Workspace }) {
-  const { openChat } = useChatLauncher()
   const prompt = agentPrompt(workspace.path, workspace.columns)
   const field = useRef<HTMLTextAreaElement>(null)
   const [message, setMessage] = useState('')
@@ -554,10 +560,7 @@ function AgentPrompt({ workspace }: { workspace: Workspace }) {
   }
   return <div className="qz-stack">
     <div className="qz-settings-actions">
-      <button type="button" className="qz-button" data-variant="primary" disabled={!workspace.companion}
-        onClick={() => openChat({ message: prompt, autoSend: false })}>
-        <Icon name="external" />Ask a Bot or agent
-      </button>
+      <AskAgentButton workspace={workspace} variant="primary" />
     </div>
     {workspace.companion ? <details className="qz-settings-disclosure">
       <summary>Agent instructions</summary>

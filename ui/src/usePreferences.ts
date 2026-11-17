@@ -39,6 +39,9 @@ function changedFields(previous: Partial<Preferences>, patch: Partial<Preference
   return changes
 }
 
+/** Remembered as a side effect of navigating, not a setting the user changed: saving it shows no status. */
+const quietFields: ReadonlySet<string> = new Set<keyof Preferences>(['lastTab'])
+
 export function usePreferences(api: AppApi) {
   const [cache, setCache] = useState(loadPreferenceCache)
   const current = useRef(cache)
@@ -83,8 +86,8 @@ export function usePreferences(api: AppApi) {
           hydrated = true
         }
         while (Object.keys(current.current.pending).length) {
-          setStatus('saving')
           const sent = current.current.pending
+          if (Object.keys(sent).some(field => !quietFields.has(field))) setStatus('saving')
           const response = await withTimeout(api.patch<ServerResponse>(path, { changes: sent }, requestInit()), requestTimeout)
           if (cancelled) return
           // Keep edits made while the request was in flight, including changes to a field it sent.

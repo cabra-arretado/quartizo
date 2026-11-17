@@ -9,6 +9,9 @@
   --qz-action-size: 32px;
   --qz-accent: var(--qz-accent-override, var(--accent, LinkText));
   --qz-accent-soft: var(--accent-subtle, color-mix(in srgb, var(--qz-accent) 13%, transparent));
+  /* Link text: the raw accent is about 3.6:1 on dark surfaces. Mixing toward the text colour
+     lightens it in dark themes and darkens it in light ones, keeping AA (4.5:1) in both. */
+  --qz-link: color-mix(in srgb, var(--qz-accent) 70%, var(--qz-text));
   --qz-ok: var(--ok, #4e9a6b);
   --qz-warning: var(--warn, #ad7628);
   --qz-danger: var(--danger, #c7465d);
@@ -460,10 +463,11 @@
 @media (pointer: coarse) {
   .qz-app { --qz-action-size: 44px; }
   .qz-app :is(.qz-button, .qz-tabs button, .qz-input, .qz-ticket-status .qz-input, .qz-ticket-actions summary,
-    .qz-note-tree :is(summary, button), .qz-todo-check, .qz-settings-check) { min-height: 44px; }
+    .qz-note-tree :is(summary, button), .qz-todo-check, .qz-settings-check, .qz-note-link) { min-height: 44px; }
   .qz-app :is(.qz-icon-button, .qz-color-swatches button) { min-width: 44px; }
   .qz-color-swatches button { min-height: 44px; }
   .qz-todo-check input { width: 22px; height: 22px; }
+  .qz-note-link { align-items: center; }
 }
 @media (hover: none) {
   .qz-note-block .qz-note-edit-block { opacity: 1; }

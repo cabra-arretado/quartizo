@@ -247,8 +247,11 @@ async function customColumnsRegression(page, fixture) {
   await folder.getByText('Agent prompt copied.', { exact: true }).waitFor()
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), prompt)
   assert.equal(await page.evaluate(() => window.testChatLaunch), undefined)
-  await button(folder, 'Ask a Bot or agent').click()
-  assert.deepEqual(await page.evaluate(() => window.testChatLaunch), { message: prompt, autoSend: false })
+  await button(folder, 'Ask a Bot or agent about Browser vault').click()
+  const launch = await page.evaluate(() => window.testChatLaunch)
+  assert.equal(launch.autoSend, false)
+  assert.ok(launch.message.includes(prompt))
+  assert.ok(launch.message.endsWith('My request: '))
 
   await tab(page, 'Tasks').click()
   const board = page.getByRole('group', { name: 'Board of Browser vault' })

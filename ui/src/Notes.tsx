@@ -1,6 +1,7 @@
 import type { AppApi } from '@kirocrew/app-sdk'
 import { SegmentedControl } from '@kirocrew/app-sdk/ui'
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { AskAgentButton } from './AskAgent'
 import {
   type ApiFailure,
   type BacklinksData,
@@ -259,9 +260,12 @@ export default function NotesView({ api, active, workspaceId, request, preferenc
     <section ref={viewRoot} className="qz-stack qz-notes-view" aria-label="Notes">
       <div className="qz-view-heading">
         <h2 className="qz-section-title">Notes</h2>
-        <button type="button" className="qz-button" data-variant="primary" aria-expanded={adding}
-          aria-keyshortcuts="Meta+N Control+N" title="New note (Cmd/Ctrl+N)" onClick={() => { setAdding(value => !value); setCreateFailure(null) }}
-          disabled={creating || !!writeBlocked}><Icon name="plus" />New note</button>
+        <div className="qz-actions">
+          {current && <AskAgentButton workspace={current.workspace} variant="quiet" />}
+          <button type="button" className="qz-button" data-variant="primary" aria-expanded={adding}
+            aria-keyshortcuts="Meta+N Control+N" title="New note (Cmd/Ctrl+N)" onClick={() => { setAdding(value => !value); setCreateFailure(null) }}
+            disabled={creating || !!writeBlocked}><Icon name="plus" />New note</button>
+        </div>
       </div>
       <ErrorLine failure={failure} />
       {warning && <div className="qz-notice" role="note">{warning}</div>}

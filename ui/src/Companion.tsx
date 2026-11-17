@@ -1,6 +1,7 @@
 /** Board and TODO views over the Markdown files shared with Kiro Notes. */
 import { type AppApi, useNavigate } from '@kirocrew/app-sdk'
 import { type CSSProperties, type FormEvent, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AskAgentButton } from './AskAgent'
 import {
   type ApiFailure,
   type BoardColumn,
@@ -171,8 +172,12 @@ function IndexStatusLine({ statuses }: { statuses: IndexStatus[] }) {
   </span>
 }
 
-function IndexWarnings({ statuses, onSettings }: { statuses: IndexStatus[]; onSettings?: () => void }) {
-  const warnings = new Set(statuses.map(indexWarning).filter(Boolean))
+function IndexWarnings({ statuses, names, onSettings }: { statuses: IndexStatus[]; names?: (string | undefined)[]; onSettings?: () => void }) {
+  // Name the folder: "the workspace root no longer exists" alone doesn't say which one to fix.
+  const warnings = new Set(statuses.map((status, i) => {
+    const warning = indexWarning(status)
+    return warning && names?.[i] ? `${names[i]}: ${warning}` : warning
+  }).filter(Boolean))
   // A failed scan usually means the folder moved or was deleted. Settings is where to fix that.
   const folderProblem = statuses.some(s => s.state === 'stale' || s.state === 'error')
   return (
@@ -530,6 +535,7 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
             <button type="button" className="qz-button" data-variant="quiet" disabled={blocked}
               onClick={() => { close(); setShowMaintenance(true) }}>Rebalance…</button>
             <button type="button" className="qz-button" data-variant="quiet" onClick={() => { close(); navigate(KIRO_NOTES_ROUTE) }}><Icon name="external" />Open Kiro Notes</button>
+            <AskAgentButton workspace={data?.workspace ?? workspace} variant="quiet" onOpen={close} />
           </>}</Menu>
         </div>
       </div>
@@ -549,7 +555,7 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => void refresh()} disabled={busy || action.pending}><Icon name="refresh" />Refresh</button>
         </div>
       </div>
-      <IndexWarnings statuses={indexes} onSettings={props.onSettings} />
+      <IndexWarnings statuses={indexes} names={[workspace.name]} onSettings={props.onSettings} />
       <ErrorLine failure={failure} />
       <ErrorLine failure={action.failure} />
       {notice && !action.failure && <p className="qz-success" role="status"><Icon name="check" />{notice}</p>}
@@ -872,7 +878,9 @@ export function TodoView(props: CompanionViewProps) {
   )
   const groups = useMemo(() => filterTodos(data?.groups ?? [], search), [data, search])
   const itemCount = groups.reduce((total, group) => total + group.items.length, 0)
-  const indexes = data ? Object.values(data.index) : []
+  const indexEntries = data ? Object.entries(data.index) : []
+  const indexes = indexEntries.map(([, index]) => index)
+  const indexNames = indexEntries.map(([id]) => companions?.find(item => String(item.workspace.id) === id)?.workspace.name)
   const action = useMutation(reload)
   // Only the row being saved looks disabled, so the rest of the list doesn't flicker.
   const [savingKey, setSavingKey] = useState<string | null>(null)
@@ -945,7 +953,7 @@ export function TodoView(props: CompanionViewProps) {
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => void refresh()} disabled={busy || action.pending}><Icon name="refresh" />Refresh</button>
         </div>
       </div>
-      <IndexWarnings statuses={indexes} onSettings={props.onSettings} />
+      <IndexWarnings statuses={indexes} names={indexNames} onSettings={props.onSettings} />
       <ErrorLine failure={failure} />
       <ErrorLine failure={action.failure} />
       {data?.truncated && (

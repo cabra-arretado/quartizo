@@ -189,6 +189,15 @@ def open_root(root: str) -> int:
         raise
 
 
+def root_missing(root: str) -> bool:
+    """True when a registered root is gone from disk. Other refusals are reported by the call that hits them."""
+    try:
+        os.close(open_root(root))
+    except ApiError as err:
+        return err.code == "root_missing"
+    return False
+
+
 def _owned(fd: int) -> int:
     """Return *fd* if the directory belongs to this uid; otherwise close it and refuse."""
     if os.fstat(fd).st_uid != os.getuid():

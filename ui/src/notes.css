@@ -113,7 +113,7 @@
 .qz-notes-rendered :is(.hljs-comment, .hljs-quote) { color: var(--qz-muted); font-style: italic; }
 .qz-notes-rendered table { display: block; border-collapse: collapse; overflow-x: auto; }
 .qz-notes-rendered :is(th, td) { padding: 5px 8px; border: 1px solid var(--qz-border); }
-.qz-notes-rendered a { color: var(--qz-accent); }
+.qz-notes-rendered a { color: var(--qz-link); }
 .qz-note-task { list-style: none; }
 .qz-note-task-checkbox { accent-color: var(--qz-accent); margin-inline: 0 .25em; }
 .qz-note-task-completed > .qz-note-task-text,
@@ -142,7 +142,7 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--qz-accent);
+  color: var(--qz-link);
   font: inherit;
   text-align: start;
   text-decoration: underline;

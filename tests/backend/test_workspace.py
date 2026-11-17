@@ -384,12 +384,24 @@ class RegistryHttpTests(unittest.TestCase):
         ws = body["workspace"]
         self.assertEqual((ws["name"], ws["path"]), ("V", str(self.vault)))
         status, body = signed_json(self.port, "GET", "/api/workspaces")
-        self.assertIn({**ws, "oldTasks": 0}, body["workspaces"])
+        self.assertIn({**ws, "oldTasks": 0, "missing": False}, body["workspaces"])
         self.assertEqual(signed_json(self.port, "GET", f"/api/workspaces/{ws['id']}")[1]["workspace"], ws)
         status, body = signed_json(self.port, "POST", "/api/workspaces", {"path": str(self.vault)})
         self.assertEqual((status, body["code"]), (409, "root_overlaps"))
         self.assertEqual(signed_json(self.port, "DELETE", f"/api/workspaces/{ws['id']}")[0], 200)
         self.assertEqual(signed_json(self.port, "GET", f"/api/workspaces/{ws['id']}")[0], 404)
+
+    def test_list_flags_a_disabled_folder_that_is_gone(self):
+        gone = Path(self.tmp.name).resolve() / "gone"
+        gone.mkdir()
+        status, body = signed_json(self.port, "POST", "/api/workspaces", {"path": str(gone), "name": "Gone"})
+        self.assertEqual(status, 201, body)
+        ws_id = body["workspace"]["id"]
+        self.addCleanup(signed_json, self.port, "DELETE", f"/api/workspaces/{ws_id}")
+        gone.rmdir()
+        listed = {w["id"]: w for w in signed_json(self.port, "GET", "/api/workspaces")[1]["workspaces"]}
+        self.assertFalse(listed[ws_id]["companion"])
+        self.assertTrue(listed[ws_id]["missing"])
 
     def test_folder_preflight_uses_registration_policy_without_registering(self):
         target = "/api/workspaces/validate"

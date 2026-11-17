@@ -28,6 +28,8 @@ export interface Workspace {
   companion?: boolean
   /** Tasks left from the removed database board; removing the folder deletes them. */
   oldTasks?: number
+  /** The folder no longer exists on disk (reported for disabled folders too). */
+  missing?: boolean
 }
 
 export interface ApiFailure {

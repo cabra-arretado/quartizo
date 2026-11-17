@@ -1,5 +1,79 @@
 # Quartizo UI/UX QA report
 
+## Round 2: full review (17 Nov 2026, commit 7043165)
+
+**Build:** the installed Quartizo 0.12.4 bundle is byte-identical to `ui/dist` at `7043165`. KiroCrew gateway on :5476.
+**How:** built-in browser, same disposable vault. Viewports 1280x800 and 375x812. Dark and light themes (light by switching `data-theme` to `kiro-light`). Contrast measured by script on every tab in both themes.
+**Scope:** the items round 1 skipped (drag-and-drop, Settings sub-tabs, light theme, contrast, keyboard, the KiroCrew chat hand-off), plus a re-walk of every tab.
+
+### Fix status
+
+These are uncommitted changes in the working tree. The installed app was synced with `kirocrew app update quartizo --source`, and each item was re-checked live.
+
+| Item | Status |
+|---|---|
+| R1 | Fixed. `GET /api/workspaces` now returns `missing` per folder (`workspace.root_missing`), and Settings merges it with the index errors. Live: all three gone folders are flagged. New backend test. |
+| R2 | Fixed. While loading, no sub-tab is chosen and Settings shows "Loading settings…", then it opens Defaults directly. If loading fails, it falls back to Folders. |
+| R3 | Fixed. New `--qz-link` token (accent mixed 70/30 with the text colour). Wikilinks and backlinks now measure 5.50:1 in dark and 7.17:1 in light. |
+| R4 | Fixed. `lastTab` is a quiet field: saving it no longer sets "Saving…". |
+| R5 | Fixed. On coarse pointers, `.qz-note-link` is 44 px tall (measured at 375 px). |
+| R6 | Fixed. Index warnings start with the folder name, on both TODOs and Tasks. |
+| X1 | Fixed. A shared `AskAgentButton` is now in the Tasks ⋯ menu, the Notes header and each Settings folder card. Its accessible name includes the folder ("Ask a Bot or agent about vault"). |
+| X2 | Fixed. The chat draft starts with a one-line heading and ends with `My request: `. KiroCrew leaves the cursor at the end, so the user types right there (checked in the real composer). The copy-to-clipboard prompt is unchanged. |
+| X10 | Fixed (trivial). The missing-folder notice is now `role="note"`. |
+| X3–X9, X11 | Not done (low severity). |
+
+Checks: backend 207 pass (3 skipped), UI vitest 43 pass (new `agentPrompt.test.ts`), ruff and tsc clean, and `make test-browser` passes all 12 scenarios (the chat-launch assertion was updated for the new label and message).
+
+### Bugs
+
+| # | Sev | Where | What happens | Cause / fix |
+|---|---|---|---|---|
+| R1 | Med | Settings → Folders | The red "This folder is missing" notice only shows for folders that are switched on. `qtz-notes` and `qtz-repo` are gone from disk but look healthy. Switching one on brings back the round-1 failure. | `Settings.tsx:107` reads `root_missing` from the index status, and the index only covers enabled folders. Have `/api/workspaces` return an `exists` flag per folder. |
+| R2 | Med | Settings | While folders load, Settings shows the **Folders** sub-tab ("Loading folders…"), then jumps to **Defaults** about 2 s later. | `Settings.tsx:91` falls back to `'folders'` while `workspaces` is `null`. Treat `null` as "not decided yet" and only pick `'folders'` when the list is `[]`. |
+| R3 | Med (a11y) | Notes | Wikilinks and backlinks use the raw accent `#8E48FF`. That is **3.57:1** on the dark surface; AA needs 4.5. Everything else passed in both themes. | `notes.css:146` uses `color: var(--qz-accent)`. Add a `--qz-link` token, e.g. `color-mix(in srgb, var(--qz-accent) 65%, var(--qz-text))`, and use it in dark mode. |
+| R4 | Low | Settings header | Clicking any Quartizo tab writes `lastTab`. The Settings header then flashes "Saving…" then "Saved" (it is a `role=status`, so screen readers announce it) even though the user changed nothing. | `App.tsx:98`. Write `lastTab` without driving the shared preference status, or debounce it quietly. |
+| R5 | Low (a11y) | Tasks, touch | Card title buttons are 177x**20** px, below the 24 px minimum (WCAG 2.5.8) and much smaller than the 44 px used elsewhere on touch. | Add block padding to the title button on `pointer: coarse`. |
+| R6 | Low | TODOs | The banner says "Indexing failed: the workspace root no longer exists." It does not say which folder. B1 named the folder in write errors, but this warning still doesn't. | Prefix the folder name in `IndexWarnings`. |
+
+### UX issues
+
+| # | Sev | Where | What I saw | Suggestion |
+|---|---|---|---|---|
+| X1 | Med | KiroCrew hand-off | "Ask a Bot or agent" is the main KiroCrew integration, but it sits in Settings → Folders → *each folder card* → Advanced. There are four identical buttons with the same accessible name. | Add it to the Tasks "More actions" menu and the Notes toolbar, scoped to the current folder. Name it "Ask an agent about vault". |
+| X2 | Med | KiroCrew chat | It works: the new chat session opens with "Prompt pre-filled — add context, then Send". But the composer holds a ~2.5k-character instruction block with the cursor at the end, so the user's actual request goes below a wall of rules. | Put a `Request:` line first and the instructions after it, with the cursor on that line. Or send the instructions as attached context if the chat launcher supports it. |
+| X3 | Low | Return from chat | Coming back to Quartizo lands on Settings → Defaults with the folder's Advanced section collapsed, so the user loses their place. | Remember the Settings sub-tab like `lastTab`. |
+| X4 | Low | Settings → Board | Two scopes on one page: "Board view / Column order in vault" follows the header picker, but "Board columns" lists every folder, starting with the missing Phase 1 vault. | Scope both to the picked folder, or show which folder each section applies to. Hide missing folders from column editing. |
+| X5 | Low | Layout | Each tab starts its content at a different left edge. TODOs is centred at `max-width: 1100px` (`quartizo.css:395`); at 1280 px its heading sits 55 px right of Tasks and Notes. Settings is different again. | Use one content width for all tabs, or left-align capped ones. |
+| X6 | Low | Consistency | "Open Kiro Notes" is a header button on TODOs but sits in the ⋯ menu on Tasks. | Put it in the same place on both tabs. |
+| X7 | Low | Tasks | "Scroll sideways for more columns" shows even when all five columns fit. | Show it only when `data-more-end` is set. |
+| X8 | Low | Notes | The toolbar's Rendered/Raw toggle quietly changes the global "Note view" default in Settings → Notes. My one Raw click made every note open in Raw. | Either say it ("Raw is now the default") or keep the toolbar choice for this note only. |
+| X9 | Low | Tasks first open | Once, Tasks showed "Loading folders…" for about 4 s while the header already had the folder list. Each view fetches its own list (`App.tsx:53`, `Settings.tsx:101`, Companion). I could not reproduce it. | Pass App's list down instead of fetching it again. |
+| X10 | Low (a11y) | Settings → Folders | The missing-folder notice is `role="alert"`, so it is announced on every visit, not only when something changes. | Use `role="note"`, or put the status in the folder heading. |
+| X11 | Low | Mobile Tasks | The KiroCrew bar, Quartizo header, workspace picker, tabs, title, subtitle, actions and meta row push the board down to about y=500 of 812. | Hide the subtitle on narrow screens and put View, ⋯ and Refresh on one row. |
+
+### Verified working
+
+- Notes: a checkbox in Rendered view writes `- [x]` to disk and shows "Note saved."; Raw view autosaves on blur; the editor still shows the edit afterwards.
+- Drag-and-drop, tested with synthetic DragEvents because CDP pointer drags don't fire HTML5 DnD: the target lane gets an accent border, the card moves, focus returns to the moved card, and a success notice appears and clears itself. Moving with the card's column select also works.
+- Light theme: no contrast failures on any tab. Dark theme: only R3.
+- Keyboard: the tablist uses a roving tabindex with arrows, Home and End; there is a visible offset focus ring, including on primary buttons.
+- 375 px: no horizontal page overflow.
+- Polling: `/api/companion` every 3 s, about 10 ms each, and it stops while on Settings.
+
+### Not covered
+
+- Real pointer drag (only synthetic events were possible), screen-reader output, rebalance and legacy migration, and the native Kiro Notes side of a shared folder.
+
+### Left on this machine
+
+- An empty "Untitled session" in KiroCrew chat, created by the hand-off test. I cleared its composer and sent nothing.
+- In the disposable vault, `projects/launch.md` is restored. "Polish onboarding" is back in Backlog but now sorts below "Review: B1 fix & more!".
+
+---
+
+## Round 1
+
 **Build under test:** Quartizo 0.12.4 (`main` at the pull on 17 Nov 2026), installed into KiroCrew 0.12.2 via `kirocrew app update quartizo --source <checkout>`.
 **How:** driven in the built-in browser against a disposable vault (7 notes: 4 tickets, 2 notes with TODOs, 1 README with a wikilink).
 **Viewports:** desktop (1440x900 and the 1024x768 pane) and mobile (375x812). Dark theme only.

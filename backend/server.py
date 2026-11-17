@@ -55,7 +55,7 @@ import host_compat  # noqa: E402
 import legacy_migration  # noqa: E402
 import preferences  # noqa: E402
 from mdsource import MAX_FILE_BYTES  # noqa: E402
-from workspace import ApiError, Registry, os_error  # noqa: E402
+from workspace import ApiError, Registry, os_error, root_missing  # noqa: E402
 
 APP_NAME = "quartizo"
 APP_VERSION = "0.12.0"
@@ -321,7 +321,8 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "workspaces"]:
             if method == "GET":
                 old = registry.old_task_counts()
-                return 200, {"workspaces": [{**w.to_json(), "oldTasks": old.get(w.id, 0)} for w in registry.list()]}
+                return 200, {"workspaces": [{**w.to_json(), "oldTasks": old.get(w.id, 0), "missing": root_missing(w.path)}
+                                             for w in registry.list()]}
             if method == "POST":
                 body = self._json_body()
                 with self.server.writer.lock:  # type: ignore[attr-defined]

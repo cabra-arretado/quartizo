@@ -29,3 +29,16 @@ order: "7fffffffffffffffffffffffffffffff"
 - Add TODOs to the relevant note as \`- [ ] text\` lines outside tables and code fences. Use lowercase \`- [x] text\` for completed items. To complete or reopen an existing TODO, change only that item's checkbox marker. Keep checklist completion independent of ticket status. If an existing note uses CRLF, explain that its TODOs need LF and ask before converting the note.
 - Verify the resulting Markdown and report the note paths you changed. Quartizo picks up edits from the connected folder.`
 }
+
+/**
+ * The chat draft: a one-line heading so the block isn't mistaken for the user's own text, the
+ * instructions, then "My request:" last. KiroCrew's composer leaves the cursor at the end, so
+ * the user types their request right there instead of scrolling past the instructions.
+ */
+export function agentChatMessage(path: string, columns: readonly { id: string; label: string }[]): string {
+  return `Quartizo folder instructions (keep these; write your request at the end).
+
+${agentPrompt(path, columns)}
+
+My request: `
+}
