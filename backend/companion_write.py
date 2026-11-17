@@ -64,7 +64,12 @@ def _path(value: object) -> list[str]:
 @contextmanager
 def _parent(ws: Workspace, path: object, *, create: bool = False):
     parts = _path(path)
-    fd = open_root(ws.path)
+    try:
+        fd = open_root(ws.path)
+    except ApiError as err:
+        if err.code == "root_missing":
+            raise ApiError(404, "root_missing", f"The folder “{ws.name}” no longer exists on disk. Restore it or remove it in Settings.") from None
+        raise
     try:
         for part in parts[:-1]:
             if create:
@@ -291,16 +296,23 @@ class CompanionWriter:
                 if not ws.companion:
                     continue
                 scan = companion._Scan(False)
-                for path, st, data in self.index._walk(ws, scan):
-                    check_budget(ws)
-                    scan.notes += 1
-                    if st is None or data is None:
-                        raise ApiError(409, "incomplete_scan", "a companion note could not be read; writes are paused")
-                    note = self._identity_metadata(conn, ws, path, data)
-                    check_budget(ws)
-                    if any(d.code in ("too_large", "not_utf8") for d in note.diagnostics):
-                        raise ApiError(409, "incomplete_scan", "a companion note could not be inspected; writes are paused")
-                    result.append((ws, path, note))
+                try:
+                    for path, st, data in self.index._walk(ws, scan):
+                        check_budget(ws)
+                        scan.notes += 1
+                        if st is None or data is None:
+                            raise ApiError(409, "incomplete_scan", "a companion note could not be read; writes are paused")
+                        note = self._identity_metadata(conn, ws, path, data)
+                        check_budget(ws)
+                        if any(d.code in ("too_large", "not_utf8") for d in note.diagnostics):
+                            raise ApiError(409, "incomplete_scan", "a companion note could not be inspected; writes are paused")
+                        result.append((ws, path, note))
+                except ApiError as err:
+                    # A folder whose root is gone has no live files, so it cannot
+                    # hold a colliding ID. It must not block writes elsewhere.
+                    if err.code != "root_missing":
+                        raise
+                    continue
                 if not scan.complete:
                     raise ApiError(409, "incomplete_scan", "a companion scan is incomplete; writes are paused")
         return Snapshot(result)

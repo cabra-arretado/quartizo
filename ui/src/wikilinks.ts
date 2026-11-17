@@ -45,7 +45,8 @@ export function installWikilinks(markdown: MarkdownIt): void {
     token.content = match[0]
     if (note) {
       const alias = separator < 0 ? '' : match[1].slice(separator + 1).trim()
-      token.content = alias || target
+      // A path link reads better as the note's title; a name the author typed stays as written.
+      token.content = alias || (target.includes('/') || /\.md$/i.test(target) ? note.title : target)
       token.attrSet('data-note-path', note.path)
     }
     state.pos += match[0].length

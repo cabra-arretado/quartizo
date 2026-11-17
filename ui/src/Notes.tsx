@@ -278,7 +278,10 @@ export default function NotesView({ api, active, workspaceId, request, preferenc
           <ErrorLine failure={createFailure} />
         </form>
       )}
-      <div className="qz-notes-layout">
+      <div className="qz-notes-layout" data-note-open={location ? '' : undefined}>
+        {/* Narrow screens show the list or the note, never both stacked. */}
+        {location && <button type="button" className="qz-button qz-notes-back" data-variant="quiet"
+          onClick={() => updateFolder(wsId, previous => ({ ...previous, lastNote: null }))}><Icon name="back" />All notes</button>}
         <aside className="qz-note-browser qz-panel-surface" aria-label="Notes browser">
           <h3 className="qz-note-browser-heading">
             {folderColor && <span className="qz-folder-dot" aria-hidden="true" style={{ backgroundColor: folderColor }} />}
@@ -542,6 +545,7 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
               onViewChange(next)
             }} ariaLabel="Note view" collapse={false} />
           <button type="button" className="qz-button" data-variant="quiet" aria-pressed={width === 'full'}
+            title={width === 'full' ? 'Full width is on. Click to return to reading width' : 'Use the full width of the page'}
             onClick={onWidthChange}>Full width</button>
         </div>
         <div className="qz-actions" role="group" aria-label="Note actions">

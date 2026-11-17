@@ -46,6 +46,20 @@ class WriteTests(unittest.TestCase):
             fn(*args)
         self.assertEqual(ctx.exception.code, code)
 
+    def test_missing_folder_does_not_block_writes_in_other_folders(self):
+        gone = self.root / "gone"
+        gone.mkdir()
+        dead = self.registry.register(str(gone), companion=True)
+        gone.rmdir()
+        result = self.writer.create(self.ws, {"path": "new.md", "title": "Fresh", "status": "ready"})
+        self.assertTrue((self.vault / "new.md").exists())
+        self.assertTrue(result)
+        # Writing into the missing folder itself names it.
+        with self.assertRaises(ApiError) as ctx:
+            self.writer.create(dead, {"path": "x.md", "title": "X", "status": "ready"})
+        self.assertEqual(ctx.exception.code, "root_missing")
+        self.assertIn(dead.name, ctx.exception.message)
+
     def test_move_only_changes_requested_scalar_spans(self):
         data = self.ticket()
         result = self.writer.move(self.ws, self.body(status="done"))

@@ -24,6 +24,15 @@ describe('wikilinks', () => {
     expect(makeWikilinkResolver([guide, namedGuide, other])('guide')).toBeNull()
   })
 
+  it('labels a path link with the note title but keeps a typed name as written', () => {
+    const markdown = new MarkdownIt({ html: false })
+    installWikilinks(markdown)
+    const html = markdown.render('[[Projects/Guide]] [[project guide]]', { resolveWikilink: makeWikilinkResolver(notes) })
+    expect(html).toContain('>Project guide</button>')
+    expect(html).toContain('>project guide</button>')
+    expect(html).not.toContain('>Projects/Guide</button>')
+  })
+
   it('renders aliases as safe buttons and leaves code, escaped, or unresolved text alone', () => {
     const markdown = new MarkdownIt({ html: false })
     installWikilinks(markdown)

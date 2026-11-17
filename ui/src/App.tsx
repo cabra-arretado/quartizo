@@ -86,6 +86,9 @@ export default function Quartizo() {
     '--qz-note-font': preferences.noteFont === 'mono' ? 'var(--mono, ui-monospace, monospace)' : undefined,
   } as CSSProperties
 
+  // The TODOs list already says which folders it covers: with "All folders" a single-folder picker would contradict it.
+  const showWorkspace = tab === 'settings' ? section === 'board' : !(tab === 'todos' && preferences.todoScope === 'all')
+
   const selectTab = (next: Tab) => {
     setActiveTab(next)
     if (next !== 'notes') {
@@ -152,7 +155,7 @@ export default function Quartizo() {
             </button>
           ))}
         </div>
-        {(tab !== 'settings' || section === 'board') && <label className="qz-workspace qz-inline-field">
+        {showWorkspace && <label className="qz-workspace qz-inline-field">
           {folder?.color && folder.color !== 'theme' && <span aria-hidden="true" className="qz-folder-dot"
             style={{ backgroundColor: headingColorCss(folder.color) }} />}
           <span>Workspace</span>

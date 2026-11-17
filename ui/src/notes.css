@@ -154,8 +154,13 @@
 .qz-note-backlinks ul { display: grid; gap: 4px; margin: 0; padding-inline-start: 1.25em; }
 .qz-note-image { color: var(--qz-muted); }
 
+.qz-notes-back { display: none; justify-self: start; }
+
 @container qz-app (max-width: 680px) {
   .qz-notes-layout, .qz-note-create { grid-template-columns: minmax(0, 1fr); }
   .qz-notes-layout:has(.qz-note-source) { grid-template-rows: auto 1fr; }
-  .qz-note-browser { max-height: 35vh; }
+  .qz-note-browser { max-height: none; }
+  /* Show the list or the open note: stacking both hid the note below a full screen of folders. */
+  .qz-notes-layout[data-note-open] > .qz-note-browser { display: none; }
+  .qz-notes-layout[data-note-open] > .qz-notes-back { display: inline-flex; }
 }

@@ -171,13 +171,29 @@ function IndexStatusLine({ statuses }: { statuses: IndexStatus[] }) {
   </span>
 }
 
-function IndexWarnings({ statuses }: { statuses: IndexStatus[] }) {
+function IndexWarnings({ statuses, onSettings }: { statuses: IndexStatus[]; onSettings?: () => void }) {
   const warnings = new Set(statuses.map(indexWarning).filter(Boolean))
+  // A failed scan usually means the folder moved or was deleted. Settings is where to fix that.
+  const folderProblem = statuses.some(s => s.state === 'stale' || s.state === 'error')
   return (
     <>
-      {[...warnings].map(w => <div key={w} role="note" className="qz-notice">{w}</div>)}
+      {[...warnings].map(w => <div key={w} role="note" className="qz-notice qz-notice-action">
+        <span>{w}</span>
+        {folderProblem && onSettings && <button type="button" className="qz-button" onClick={onSettings}>Check folders in Settings</button>}
+      </div>)}
     </>
   )
+}
+
+/** A short confirmation that clears itself, so a successful action is visible but never lingers. */
+function useNotice() {
+  const [notice, setNotice] = useState('')
+  useEffect(() => {
+    if (!notice) return
+    const timer = setTimeout(() => setNotice(''), 4000)
+    return () => clearTimeout(timer)
+  }, [notice])
+  return [notice, setNotice] as const
 }
 
 /** Copies the note's name, to find it in Kiro Notes. */
@@ -343,7 +359,8 @@ function useMutation(onChanged: () => void) {
       if (mounted.current) setPending(false)
     }
   }
-  return { pending, failure, run }
+  const clear = useCallback(() => setFailure(null), [])
+  return { pending, failure, run, clear }
 }
 
 const titleOrder = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
@@ -371,6 +388,7 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
     (data, statuses) => ({ ...data, index: statuses[String(wsId)] ?? data.index }),
   )
   const action = useMutation(reload)
+  const [notice, setNotice] = useNotice()
   const columns = data?.workspace.columns ?? workspace.columns
   const { laneSort, hideEmptyLanes } = preferences
   const lanes = useMemo(() => {
@@ -381,6 +399,7 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
     return result
   }, [columns, data, laneSort, wsId])
   const [showView, setShowView] = useState(false)
+  const viewButton = useRef<HTMLButtonElement>(null)
   const [showEmpty, setShowEmpty] = useState(false)
   useEffect(() => { setShowEmpty(false) }, [hideEmptyLanes])
   const emptyCount = columns.filter(column => lanes[column.id].length === 0).length
@@ -437,8 +456,15 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
     const sorted = laneSort[`${wsId}:${status}`] === 'title'
     if (sorted && ticket.lane === status) return
     void action.run(() => moveTicket(api, wsId, planMove(data.tickets, ticket, status, sorted ? undefined : position)))
-      .then(ok => { if (ok) setFocusPath(ticket.path) })
+      .then(ok => {
+        if (!ok) return
+        setFocusPath(ticket.path)
+        const label = columns.find(c => c.id === status)?.label ?? status
+        setNotice(ticket.lane === status ? `Reordered “${ticket.title}”.` : `Moved “${ticket.title}” to ${label}.`)
+      })
   }
+  // A new action starts from a clean slate: an earlier failure must not outlive a later success.
+  const formChanged = (message: string) => () => { action.clear(); setNotice(message); setForm(null); reload() }
   const allowDrop = (event: React.DragEvent, status: TaskStatus) => {
     const ticket = dragging.current
     if (blocked || !ticket || status === 'repair') return
@@ -491,13 +517,14 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
       <div className="qz-toolbar">
         <div className="qz-actions">
           <button type="button" className="qz-button" data-variant="primary" aria-expanded={form === 'create'}
-            onClick={() => setForm(form === 'create' ? null : 'create')} disabled={action.pending || formPending}><Icon name="plus" />New ticket</button>
+            onClick={() => { setShowView(false); setForm(form === 'create' ? null : 'create') }} disabled={action.pending || formPending}><Icon name="plus" />New ticket</button>
           <button type="button" className="qz-button" aria-expanded={form === 'promote'}
-            onClick={() => setForm(form === 'promote' ? null : 'promote')} disabled={action.pending || formPending}><Icon name="note" />Use existing note</button>
+            onClick={() => { setShowView(false); setForm(form === 'promote' ? null : 'promote') }} disabled={action.pending || formPending}><Icon name="note" />Use existing note</button>
         </div>
         <div className="qz-actions">
-          <button type="button" className="qz-button" data-variant="quiet" aria-expanded={showView} aria-controls={`qz-board-view-${wsId}`}
-            onClick={() => setShowView(value => !value)}><Icon name="settings" />View</button>
+          <button ref={viewButton} type="button" className="qz-button" data-variant="quiet" aria-expanded={showView} aria-controls={`qz-board-view-${wsId}`}
+            onClick={() => { setForm(null); setShowView(value => !value) }}
+            onKeyDown={e => { if (e.key === 'Escape' && showView) { e.stopPropagation(); setShowView(false) } }}><Icon name="settings" />View</button>
           <Menu label="More actions">{close => <>
             <button type="button" className="qz-button" data-variant="quiet" onClick={() => { close(); props.onSettings() }}>Customize columns</button>
             <button type="button" className="qz-button" data-variant="quiet" disabled={blocked}
@@ -506,11 +533,12 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
           </>}</Menu>
         </div>
       </div>
-      <section id={`qz-board-view-${wsId}`} className="qz-panel-surface qz-board-view-panel" aria-label="Board view settings" hidden={!showView}>
+      <section id={`qz-board-view-${wsId}`} className="qz-panel-surface qz-board-view-panel" aria-label="Board view settings" hidden={!showView}
+        onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setShowView(false); viewButton.current?.focus() } }}>
         <BoardViewSettings preferences={preferences} onPreferencesChange={props.onPreferencesChange} workspace={data?.workspace ?? workspace} />
       </section>
       {(['create', 'promote'] as const).map(mode => <div key={mode} hidden={form !== mode}>
-        <TicketForm mode={mode} api={api} workspace={workspace} columns={columns} firstField={form === mode ? firstField : undefined} disabled={!active || !!failure || busy || action.pending || !!mutationProblem(data?.index)} maintenance={data?.index.maintenance ?? []} onBusy={setFormPending} onChanged={reload} onClose={() => setForm(null)} onMaintenanceNeeded={needMaintenance} />
+        <TicketForm mode={mode} api={api} workspace={workspace} columns={columns} firstField={form === mode ? firstField : undefined} disabled={!active || !!failure || busy || action.pending || !!mutationProblem(data?.index)} maintenance={data?.index.maintenance ?? []} onBusy={setFormPending} onChanged={formChanged(mode === 'create' ? 'Ticket created. It is in the first column.' : 'Note added to the board.')} onClose={() => setForm(null)} onMaintenanceNeeded={needMaintenance} />
       </div>)}
       <div className="qz-toolbar qz-board-meta">
         {data && <span className="qz-result-count">{data.tickets.length} {data.tickets.length === 1 ? 'ticket' : 'tickets'}</span>}
@@ -521,9 +549,10 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => void refresh()} disabled={busy || action.pending}><Icon name="refresh" />Refresh</button>
         </div>
       </div>
-      <IndexWarnings statuses={indexes} />
+      <IndexWarnings statuses={indexes} onSettings={props.onSettings} />
       <ErrorLine failure={failure} />
       <ErrorLine failure={action.failure} />
+      {notice && !action.failure && <p className="qz-success" role="status"><Icon name="check" />{notice}</p>}
       {mutationProblem(data?.index) && data && <div role="note" className="qz-notice">{mutationProblem(data.index)}</div>}
       {showMaintenance || action.failure?.code === 'rank_exhausted' || action.failure?.code === 'maintenance_pending' || data?.index.maintenance?.length ? (
         <div className="qz-notice qz-stack">
@@ -551,7 +580,7 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
         <p>Remove “{confirmDemote.title}” from the board? Its note and TODOs will remain.</p>
         <div className="qz-actions">
           <button type="button" className="qz-button qz-destructive" disabled={action.pending}
-            onClick={() => { const ticket = confirmDemote; setConfirmDemote(null); void action.run(() => demoteTicket(api, wsId, ticket)) }}>Remove ticket</button>
+            onClick={() => { const ticket = confirmDemote; setConfirmDemote(null); void action.run(() => demoteTicket(api, wsId, ticket)).then(ok => { if (ok) setNotice(`Removed “${ticket.title}” from the board. The note is untouched.`) }) }}>Remove ticket</button>
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => setConfirmDemote(null)}>Cancel</button>
         </div>
       </Dialog>}
@@ -608,8 +637,17 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
   )
 }
 
+/** `Fix login!` becomes `tickets/fix-login.md`. An empty slug leaves the path blank. */
+function ticketPath(title: string): string {
+  const slug = title.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60).replace(/-+$/, '')
+  return slug ? `tickets/${slug}.md` : ''
+}
+
 function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace: Workspace; columns: BoardColumn[]; firstField?: React.Ref<HTMLInputElement>; disabled: boolean; maintenance: TaskStatus[]; onBusy: (busy: boolean) => void; onChanged: () => void; onClose: () => void; onMaintenanceNeeded: (status: TaskStatus) => void }) {
   const [path, setPath] = useState('')
+  // Until the user types a path themselves, it follows the title.
+  const [pathEdited, setPathEdited] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [selectedStatus, setStatus] = useState<TaskStatus>('')
@@ -635,7 +673,7 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
   const discard = () => {
     previewVersion.current++
     setPreviewBusy(false)
-    setPath(''); setTitle(''); setBody(''); setSource(null); setPreviewFailure(null)
+    setPath(''); setPathEdited(false); setTitle(''); setBody(''); setSource(null); setPreviewFailure(null)
     props.onClose()
   }
   const notePath = path.trim().endsWith('.md') ? path.trim() : `${path.trim()}.md`
@@ -658,22 +696,27 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
       ? createTicket(props.api, props.workspace.id, { path: notePath, title: title.trim(), body, status })
       : promoteNote(props.api, props.workspace.id, source!, status))
     if (ok && mounted.current) {
-      setPath(''); setTitle(''); setBody(''); setSource(null)
+      setPath(''); setPathEdited(false); setTitle(''); setBody(''); setSource(null)
       props.onClose()
     }
   }
   const creating = props.mode === 'create'
   const label = creating ? 'New ticket' : 'Use existing note'
   const canSubmit = !blocked && !columnBusy && !!path.trim() && (creating ? !!title.trim() : !!source)
+  const missing = creating
+    ? (!title.trim() ? 'Enter a title' : !path.trim() ? 'Enter a note path' : '')
+    : (!path.trim() ? 'Enter the note’s path' : !source ? 'Preview the note first' : '')
   return <section className="qz-panel-surface qz-ticket-form" aria-label={label}>
     <h3>{label}</h3>
     <form className="qz-stack" onSubmit={e => { e.preventDefault(); if (canSubmit) void submit() }}>
       {creating && <label className="qz-field">Title
-        <input className="qz-input" ref={props.firstField} placeholder="Fix login" value={title} disabled={action.pending} onChange={e => setTitle(e.target.value)} />
+        <input className="qz-input" ref={props.firstField} placeholder="Fix login" value={title} disabled={action.pending}
+          onChange={e => { setTitle(e.target.value); if (!pathEdited) setPath(ticketPath(e.target.value)) }} />
       </label>}
       <label className="qz-field">Note path in {props.workspace.name}
         <input className="qz-input" ref={creating ? undefined : props.firstField} placeholder="tickets/fix-login.md" value={path} disabled={action.pending}
-          onChange={e => { previewVersion.current++; setPreviewBusy(false); setPath(e.target.value); setSource(null) }} />
+          onChange={e => { previewVersion.current++; setPreviewBusy(false); setPath(e.target.value); setPathEdited(!!e.target.value); setSource(null) }} />
+        {creating && !pathEdited && !!path && <span className="qz-muted qz-field-hint">Suggested from the title. Edit it to choose another location.</span>}
       </label>
       {creating ?
         <label className="qz-field"><span>Description <span className="qz-muted">· Optional Markdown</span></span>
@@ -694,6 +737,7 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
       <div className="qz-actions">
         <button type="submit" className="qz-button" data-variant="primary" disabled={!canSubmit}>{creating ? 'Create ticket' : 'Add to board'}</button>
         <button type="button" className="qz-button" data-variant="quiet" disabled={action.pending} onClick={discard}>Cancel</button>
+        {!canSubmit && missing && <span className="qz-muted qz-form-hint">{missing} to continue.</span>}
       </div>
     </form>
   </section>
@@ -830,9 +874,13 @@ export function TodoView(props: CompanionViewProps) {
   const itemCount = groups.reduce((total, group) => total + group.items.length, 0)
   const indexes = data ? Object.values(data.index) : []
   const action = useMutation(reload)
+  // Only the row being saved looks disabled, so the rest of the list doesn't flicker.
+  const [savingKey, setSavingKey] = useState<string | null>(null)
+  const rowKey = (group: TodoGroup, item: TodoItem) => `${group.workspaceId}:${group.path}:${item.ordinal}`
   const toggle = (group: TodoGroup, item: TodoItem, checked: boolean) => {
     if (!active || action.pending || failure || busy || mutationProblem(data?.index[String(group.workspaceId)], group) || item.markerStart === undefined) return
-    void action.run(() => toggleTodo(api, group, item, checked))
+    setSavingKey(rowKey(group, item))
+    void action.run(() => toggleTodo(api, group, item, checked)).finally(() => setSavingKey(null))
   }
 
   if (statusFailure) return <ErrorLine failure={statusFailure} />
@@ -897,7 +945,7 @@ export function TodoView(props: CompanionViewProps) {
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => void refresh()} disabled={busy || action.pending}><Icon name="refresh" />Refresh</button>
         </div>
       </div>
-      <IndexWarnings statuses={indexes} />
+      <IndexWarnings statuses={indexes} onSettings={props.onSettings} />
       <ErrorLine failure={failure} />
       <ErrorLine failure={action.failure} />
       {data?.truncated && (
@@ -931,9 +979,10 @@ export function TodoView(props: CompanionViewProps) {
                 <li key={item.ordinal} className="qz-todo-row" data-checked={item.checked} style={{ paddingInlineStart: `${Math.min(item.depth, 4) * 0.8}rem` }}>
                   <label className="qz-todo-check">
                     <input type="checkbox" aria-label={`Complete ${todoLabel(item.text)}`} checked={item.checked}
-                      disabled={action.pending || !!failure || busy || !!mutationProblem(data?.index[String(g.workspaceId)], g) || item.markerStart === undefined}
+                      disabled={savingKey === rowKey(g, item) || !!failure || !!mutationProblem(data?.index[String(g.workspaceId)], g) || item.markerStart === undefined}
+                      aria-busy={savingKey === rowKey(g, item) || undefined}
                       onChange={e => toggle(g, item, e.target.checked)} />
-                    <span>{todoLabel(item.text)}</span>
+                    <span>{todoLabel(item.text)}{item.heading && <span className="qz-todo-heading"> · {item.heading}</span>}</span>
                   </label>
                   <button
                     type="button"

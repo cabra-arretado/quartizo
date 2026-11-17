@@ -77,3 +77,30 @@
 }
 .qz-todo-filters .qz-todo-saved-row .qz-field { flex: 0 1 240px; }
 .qz-todo-saved-row > p { flex-basis: 100%; font-size: calc(13px * var(--qz-scale, 1)); }
+
+/* Header: tabs stay centred whether or not the workspace picker is shown, so they never jump between views. */
+.qz-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; }
+.qz-header > .qz-workspace { justify-self: end; }
+@container qz-app (max-width: 860px) {
+  .qz-header { display: flex; }
+}
+
+.qz-success {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in srgb, var(--qz-ok) 45%, var(--qz-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--qz-ok) 9%, var(--qz-surface));
+  font-size: calc(13px * var(--qz-scale, 1));
+}
+.qz-success .qz-icon { color: var(--qz-ok); }
+.qz-notice-action { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.qz-form-hint, .qz-field-hint { font-size: calc(12px * var(--qz-scale, 1)); font-weight: 400; }
+.qz-todo-heading { color: var(--qz-muted); font-size: .9em; }
+
+/* The keyboard tip is of no use on touch screens. */
+@media (pointer: coarse) {
+  .qz-board-hint { display: none; }
+}

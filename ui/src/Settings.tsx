@@ -85,6 +85,8 @@ export default function Settings({
   const [workspaces, setWorkspaces] = useState<Workspace[] | null>(null)
   const [loadFailure, setLoadFailure] = useState<ApiFailure | null>(null)
   const [writeBlocked, setWriteBlocked] = useState<ApiFailure | null>(null)
+  // Folders whose directory no longer exists on disk. They are easy to miss and otherwise look normal.
+  const [missing, setMissing] = useState<ReadonlySet<number>>(new Set())
   const [reload, setReload] = useState(0)
   const selectedSection = section ?? (workspaces?.length ? 'defaults' : 'folders')
   const enabled = workspaces?.filter(w => w.companion) ?? []
@@ -101,6 +103,9 @@ export default function Settings({
         if (cancelled) return
         setWorkspaces(value)
         setWriteBlocked(index.writeBlocked ?? null)
+        setMissing(new Set(index.workspaces
+          .filter(({ index: status }) => typeof status.error === 'object' && status.error?.code === 'root_missing')
+          .map(({ workspace }) => workspace.id)))
         setLoadFailure(null)
       })
       .catch(err => !cancelled && setLoadFailure(toFailure(err)))
@@ -175,7 +180,7 @@ export default function Settings({
           <div className="qz-settings-heading"><h3 id="qz-settings-folders">Connected folders</h3></div>
           {!workspaces && !loadFailure && <p className="qz-muted" role="status">Loading folders…</p>}
           {workspaces?.map(w => (
-            <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} onChanged={changed}
+            <WorkspaceItem key={w.id} api={api} workspace={w} writeBlocked={writeBlocked} missing={missing.has(w.id)} onChanged={changed}
               preferences={preferences} onPreferencesChange={onPreferencesChange} />
           ))}
         </section>}
@@ -343,6 +348,7 @@ function WorkspaceItem(props: PreferenceControls & {
   api: AppApi
   workspace: Workspace
   writeBlocked: ApiFailure | null
+  missing: boolean
   onChanged: () => void
 }) {
   const { api, workspace: w, preferences, onPreferencesChange } = props
@@ -370,6 +376,10 @@ function WorkspaceItem(props: PreferenceControls & {
           <code className="qz-mono qz-muted">{w.path}</code>
         </div>
       </div>
+      {props.missing && <div role="alert" className="qz-notice qz-error qz-settings-missing">
+        <strong>This folder is missing.</strong> {w.path} no longer exists on disk. Restore or reconnect it, or remove it here.
+        {w.companion && ' Turn off “Include in Tasks, Notes, and TODOs” to hide it from the other views.'}
+      </div>}
       <div className="qz-settings-folder-controls">
         <label className="qz-settings-check">
           <input
