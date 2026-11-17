@@ -22,7 +22,7 @@ import {
   type NoteDocument, type NoteTree, makeNoteTree, noteBlockOffsets, openDocument, setNoteTaskChecked,
 } from './notesModel'
 import { DEFAULT_NOTE_FOLDER, type NoteFolderPreferences, type NoteWidth, type Preferences } from './preferences'
-import { ErrorLine, Icon, usePageVisible } from './ui'
+import { Dialog, ErrorLine, Icon, inDialog, usePageVisible } from './ui'
 import { type NoteEdits, noteKey, useNoteEdits } from './useNoteEdits'
 import { makeWikilinkResolver } from './wikilinks'
 import styles from './notes.css?inline'
@@ -413,6 +413,7 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
   const [failure, setFailure] = useState<ApiFailure | null>(null)
   const [loading, setLoading] = useState(false)
   const [reloading, setReloading] = useState(false)
+  const [confirmReload, setConfirmReload] = useState(false)
   const [backlinks, setBacklinks] = useState<BacklinksData | null>(null)
   const [backlinkFailure, setBacklinkFailure] = useState<ApiFailure | null>(null)
   const [blockEdit, setBlockEdit] = useState<BlockEdit | null>(null)
@@ -434,6 +435,7 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
     ? renderMarkdownBlocks(renderedText, resolveWikilink, { editable: !readOnly }) : [],
     [preview, renderedText, resolveWikilink, readOnly])
   const columnClass = `qz-note-column qz-note-column-${width}`
+  const pinLimitMessage = `Up to ${MAX_PINNED_NOTES} notes can be pinned per folder. Unpin one first.`
 
   useLayoutEffect(() => {
     const selector = restoreFocus.current
@@ -481,8 +483,10 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
     return () => { cancelled = true }
   }, [api, indexRevision, loadBacklinks, path, workspaceId])
 
-  const reload = async () => {
-    if (loading || saving || reloading || (draft && !window.confirm('Replace your unsaved draft with the version on disk?'))) return
+  const reload = async (confirmed = false) => {
+    if (loading || saving || reloading) return
+    if (draft && !confirmed) { setConfirmReload(true); return }
+    setConfirmReload(false)
     setReloading(true)
     setFailure(null)
     setNotice('')
@@ -525,9 +529,11 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
         <div className="qz-note-toolbar-file">
           <code className="qz-mono qz-path" title={path}>{path}</code>
           <button type="button" className="qz-button qz-note-pin-button" data-variant="quiet"
-            aria-label="Pin note" aria-pressed={pinned} disabled={!pinned && pinLimitReached}
-            title={pinned ? 'Unpin note' : pinLimitReached ? `Up to ${MAX_PINNED_NOTES} notes can be pinned per folder` : 'Pin note'}
-            onClick={onPin}><Icon name="pin" /></button>
+            aria-label="Pin note" aria-pressed={pinned} aria-disabled={!pinned && pinLimitReached ? true : undefined}
+            aria-describedby={!pinned && pinLimitReached ? 'qz-pin-limit' : undefined}
+            title={pinned ? 'Unpin note' : pinLimitReached ? pinLimitMessage : 'Pin note'}
+            onClick={() => { if (pinned || !pinLimitReached) onPin() }}><Icon name="pin" /></button>
+          {!pinned && pinLimitReached && <span id="qz-pin-limit" className="qz-muted qz-note-message" role="status">{pinLimitMessage}</span>}
         </div>
         <div className="qz-actions" role="group" aria-label="Reading options">
           <SegmentedControl segments={[{ key: 'rendered', label: 'Rendered' }, { key: 'raw', label: 'Raw' }]}
@@ -540,6 +546,9 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
             onClick={onWidthChange}>{width === 'full' ? 'Full width' : 'Reading width'}</button>
         </div>
         <div className="qz-actions" role="group" aria-label="Note actions">
+          <span className="qz-muted qz-note-message qz-note-save-status" role="status">
+            {saving ? 'Saving note…' : draft ? 'Unsaved changes' : notice || (edits?.didSave ? 'Note saved.' : '')}
+          </span>
           <button ref={reloadButton} type="button" className="qz-button" data-variant="quiet"
             disabled={loading || saving || reloading} onMouseDown={event => event.preventDefault()}
             onClick={() => void reload()}>Reload from disk</button>
@@ -548,6 +557,13 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
             onClick={() => { if (blockEdit) finishBlockEdit(false); else onSave() }}>Save note</button>
         </div>
       </div>
+      {confirmReload && draft && <Dialog label="Replace unsaved draft" onCancel={() => setConfirmReload(false)}>
+        <p>Replace your unsaved draft with the version on disk?</p>
+        <div className="qz-actions">
+          <button type="button" className="qz-button qz-destructive" onClick={() => void reload(true)}>Replace draft</button>
+          <button type="button" className="qz-button" data-variant="quiet" onClick={() => setConfirmReload(false)}>Keep draft</button>
+        </div>
+      </Dialog>}
       <ErrorLine failure={failure ?? edits?.failure ?? null} />
       {loading && !doc && <p className="qz-muted" role="status">Loading note…</p>}
       {draft?.conflict && <div className="qz-notice" role="alert">
@@ -581,7 +597,7 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
             if (blockEdit && start === blockEdit.start) {
               return <div className="qz-note-block-editor" key={index} onBlur={event => {
                 const target = event.relatedTarget
-                if (target === reloadButton.current || (target instanceof Node && event.currentTarget.contains(target))) return
+                if (target === reloadButton.current || inDialog(target) || (target instanceof Node && event.currentTarget.contains(target))) return
                 finishBlockEdit(false, false)
               }}>
                 <textarea aria-label="Block Markdown" className="qz-input qz-note-block-text" autoFocus spellCheck={false}
@@ -622,11 +638,8 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
         : <label className={`qz-field qz-note-source ${columnClass}`}>Note Markdown
           <textarea autoFocus={focusEditor} className="qz-input qz-note-text" spellCheck={false} value={doc.text}
             readOnly={readOnly} onChange={event => editText(event.target.value)}
-            onBlur={event => { if (!readOnly && event.relatedTarget !== reloadButton.current) onSave() }} />
+            onBlur={event => { if (!readOnly && event.relatedTarget !== reloadButton.current && !inDialog(event.relatedTarget)) onSave() }} />
         </label>)}
-      <span className="qz-muted qz-note-message" role="status">
-        {saving ? 'Saving note…' : draft ? 'Unsaved changes' : notice || (edits?.didSave ? 'Note saved.' : '')}
-      </span>
       {doc && (backlinkFailure || !!backlinks?.notes.length) && (
         <section className="qz-note-backlinks" aria-label="Backlinks">
           <h3>Backlinks</h3>

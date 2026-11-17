@@ -83,6 +83,8 @@
 
 .qz-note-message { font-size: 12px; }
 .qz-note-message:empty { display: none; }
+.qz-note-save-status { white-space: nowrap; }
+.qz-note-pin-button[aria-disabled="true"] { opacity: .55; cursor: default; }
 .qz-notes-rendered {
   min-width: 0;
   min-height: 360px;

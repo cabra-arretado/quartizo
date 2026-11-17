@@ -166,7 +166,8 @@ export default function Quartizo() {
         {status === 'unavailable' && <p className="qz-notice qz-preference-notice" role="status">
           Quartizo can’t save preferences. Changes are kept until you close or reload this page.
         </p>}
-        {!ready ? <p className="qz-muted" role="status">Loading preferences…</p> : <>
+        {/* Render from the local cache or defaults right away. A slow backend must not blank the app. */}
+        <>
           {/* Inactive views pause polling and keep drafts and in-flight writes mounted. */}
           <div hidden={tab !== 'tasks'}>
             <TasksView api={api} active={tab === 'tasks'} workspaceId={current?.id ?? null} preferences={preferences}
@@ -186,7 +187,7 @@ export default function Quartizo() {
           {tab === 'settings' && <Settings api={api} preferences={preferences} onPreferencesChange={update}
             status={status} section={section} onSectionChange={setSection} workspaceId={workspaceId}
             onWorkspaceChange={changeWorkspace} onWorkspacesChanged={() => setWorkspaceReload(n => n + 1)} />}
-        </>}
+        </>
       </div>
     </div>
   )

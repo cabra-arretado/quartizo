@@ -1,5 +1,5 @@
 /** Icons, error feedback, and browser storage shared by the views. */
-import { useEffect, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import type { ApiFailure } from './companionApi'
 
 const icons = {
@@ -36,6 +36,42 @@ export function ErrorLine({ failure }: { failure: ApiFailure | null }) {
   return (
     <div role="alert" className="qz-notice qz-error" data-code={failure.code}>
       {failure.message}
+    </div>
+  )
+}
+
+/** True when focus moved into an in-page confirmation, which must not count as leaving an editor. */
+export function inDialog(target: EventTarget | null): boolean {
+  return target instanceof Element && !!target.closest('[role="alertdialog"]')
+}
+
+/**
+ * Inline confirmation. Takes focus when it opens, cancels on Escape, and gives focus
+ * back to the control that opened it, so keyboard and screen-reader users land on it.
+ */
+export function Dialog({ label, onCancel, className = 'qz-notice qz-stack', children }: {
+  label: string
+  onCancel: () => void
+  className?: string
+  children: ReactNode
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  const cancel = useRef(onCancel)
+  cancel.current = onCancel
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    root.current?.focus()
+    return () => { if (opener?.isConnected) opener.focus() }
+  }, [])
+  return (
+    <div ref={root} role="alertdialog" aria-label={label} tabIndex={-1} className={className}
+      onKeyDown={event => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        event.stopPropagation()
+        cancel.current()
+      }}>
+      {children}
     </div>
   )
 }

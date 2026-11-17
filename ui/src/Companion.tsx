@@ -40,7 +40,7 @@ import {
 import { KIRO_NOTES_ROUTE, type NoteLocation, noteName } from './noteNav'
 import { headingColorCss } from './noteAppearance'
 import type { Preferences } from './preferences'
-import { ErrorLine, Icon, usePageVisible } from './ui'
+import { Dialog, ErrorLine, Icon, usePageVisible } from './ui'
 
 /** Visible views poll SQLite results. Only an explicit Refresh requests a full scan. */
 export const SCANNING_MS = 1500
@@ -390,6 +390,8 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
   ]
   const boardRef = useRef<HTMLDivElement>(null)
   const dragging = useRef<Ticket | null>(null)
+  const [dropTarget, setDropTarget] = useState<{ lane: TaskStatus; before?: string } | null>(null)
+  const [confirmDemote, setConfirmDemote] = useState<Ticket | null>(null)
   const [form, setForm] = useState<'create' | 'promote' | null>(null)
   const firstField = useRef<HTMLInputElement>(null)
   useEffect(() => { if (form) firstField.current?.focus() }, [form])
@@ -426,12 +428,16 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
     if (blocked || !ticket || status === 'repair') return
     if (ticket.lane === status && laneSort[`${wsId}:${status}`] === 'title') return
     event.preventDefault()
+    event.stopPropagation()
+    const before = (event.target as Element).closest('li[data-ticket-path]')?.getAttribute('data-ticket-path') ?? undefined
+    setDropTarget(previous => previous?.lane === status && previous.before === before ? previous : { lane: status, before })
   }
   const drop = (event: React.DragEvent, status: TaskStatus, before?: Ticket) => {
     event.preventDefault()
     event.stopPropagation()
     const ticket = dragging.current
     dragging.current = null
+    setDropTarget(null)
     if (!ticket || before?.path === ticket.path) return
     const position = before && laneSort[`${wsId}:${status}`] !== 'title'
       ? lanes[status].filter(t => t.path !== ticket.path).findIndex(t => t.path === before.path)
@@ -510,7 +516,7 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
             </select>
             <button type="button" className="qz-button" onClick={() => setConfirmMaintenance(true)} disabled={!active || action.pending || !!data?.index.writeBlocked}>Review column…</button>
           </div>
-          {confirmMaintenance && <div className="qz-stack" role="alertdialog" aria-label="Rebalance column">
+          {confirmMaintenance && <Dialog label="Rebalance column" className="qz-stack" onCancel={() => setConfirmMaintenance(false)}>
             <p>Update ordering in each note of this column? Other editors may see progress before all files finish.</p>
             {!!data?.index.maintenance?.includes(maintenanceStatus) && <label className="qz-check-label">
               <input type="checkbox" checked={reconcileMaintenance} onChange={e => setReconcileMaintenance(e.target.checked)} disabled={action.pending} />
@@ -520,34 +526,47 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
               <button type="button" className="qz-button" disabled={!active || action.pending || !!data?.index.writeBlocked} onClick={() => void action.run(() => rebalanceTickets(api, wsId, maintenanceStatus, reconcileMaintenance)).then(ok => { if (ok) { setConfirmMaintenance(false); setReconcileMaintenance(false) } })}>Rebalance column</button>
               <button type="button" className="qz-button" data-variant="quiet" disabled={action.pending} onClick={() => setConfirmMaintenance(false)}>Cancel</button>
             </div>
-          </div>}
+          </Dialog>}
         </div>
       ) : null}
+      {confirmDemote && <Dialog label="Remove ticket" className="qz-notice qz-stack" onCancel={() => setConfirmDemote(null)}>
+        <p>Remove “{confirmDemote.title}” from the board? Its note and TODOs will remain.</p>
+        <div className="qz-actions">
+          <button type="button" className="qz-button qz-destructive" disabled={action.pending}
+            onClick={() => { const ticket = confirmDemote; setConfirmDemote(null); void action.run(() => demoteTicket(api, wsId, ticket)) }}>Remove ticket</button>
+          <button type="button" className="qz-button" data-variant="quiet" onClick={() => setConfirmDemote(null)}>Cancel</button>
+        </div>
+      </Dialog>}
       {!data && !failure && <p className="qz-empty" role="status">Loading the board…</p>}
       {data && data.tickets.length === 0 && data.index.state !== 'scanning' && <p className="qz-notice" data-variant="neutral">No tickets in “{workspace.name}” yet. Create a ticket or use an existing note.</p>}
       {data && shown.length > 0 && (
         <div ref={boardRef} className="qz-board" data-density={preferences.boardDensity} tabIndex={0} onKeyDown={onKey} aria-label={`Board of ${workspace.name}`} role="group">
           {shown.map(({ id: lane, label, color }, li) => (
             <section key={lane} aria-label={label} className="qz-lane" data-lane-status={lane} style={laneColorStyle(color)}
+              data-drop-target={dropTarget?.lane === lane || undefined}
               onDragOver={e => allowDrop(e, lane)}
+              onDragLeave={e => {
+                if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) {
+                  setDropTarget(previous => previous?.lane === lane ? null : previous)
+                }
+              }}
               onDrop={e => { if (lane !== 'repair') drop(e, lane) }}>
               <h3 className="qz-lane-heading"><span className="qz-dot" aria-hidden="true" />{label}<span className="qz-count">{lanes[lane].length}</span></h3>
               {lane === 'repair' && <p className="qz-lane-help qz-muted">Choose a column for tickets with an old status. Open a note to fix other ticket details.</p>}
               {lanes[lane].length === 0 && <p className="qz-lane-empty">No tickets</p>}
               <ul className="qz-cards">
                 {lanes[lane].map((t, ci) => (
-                  <li key={t.path} draggable={!blocked && !mutationProblem(data.index, t)}
+                  <li key={t.path} data-ticket-path={t.path} data-drop-before={dropTarget?.lane === lane && dropTarget.before === t.path || undefined}
+                    draggable={!blocked && !mutationProblem(data.index, t)}
                     onDragStart={e => { dragging.current = t; e.dataTransfer.setData('text/plain', t.path); e.dataTransfer.effectAllowed = 'move' }}
-                    onDragEnd={() => { dragging.current = null }}
+                    onDragEnd={() => { dragging.current = null; setDropTarget(null) }}
                     onDrop={e => { if (lane !== 'repair') drop(e, lane, t) }}>
                     <TicketCard ticket={t} lane={li} index={ci} columns={columns} onOpen={() => props.onOpenNote({ workspaceId: wsId, path: t.path })}
                       disabled={blocked || !!mutationProblem(data.index, t)} maintenance={data.index.maintenance ?? []}
                       canReorder={laneSort[`${wsId}:${lane}`] !== 'title'} fields={preferences.boardFields}
                       folder={workspace.name} folderAppearance={preferences.folderAppearance[String(wsId)]}
                       onMove={(status, position) => move(t, status, position)}
-                      onDemote={() => {
-                        if (window.confirm(`Remove “${t.title}” from the board? Its note and TODOs will remain.`)) void action.run(() => demoteTicket(api, wsId, t))
-                      }}
+                      onDemote={() => setConfirmDemote(t)}
                       count={lanes[lane].length} />
                   </li>
                 ))}
@@ -621,15 +640,15 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
     <h3>{label}</h3>
     <form className="qz-stack" onSubmit={e => { e.preventDefault(); if (canSubmit) void submit() }}>
       {creating && <label className="qz-field">Title
-        <input className="qz-input" ref={props.firstField} aria-label="Ticket title" placeholder="Fix login" value={title} disabled={action.pending} onChange={e => setTitle(e.target.value)} />
+        <input className="qz-input" ref={props.firstField} placeholder="Fix login" value={title} disabled={action.pending} onChange={e => setTitle(e.target.value)} />
       </label>}
       <label className="qz-field">Note path in {props.workspace.name}
-        <input className="qz-input" ref={creating ? undefined : props.firstField} aria-label="Ticket note path" placeholder="tickets/fix-login.md" value={path} disabled={action.pending}
+        <input className="qz-input" ref={creating ? undefined : props.firstField} placeholder="tickets/fix-login.md" value={path} disabled={action.pending}
           onChange={e => { previewVersion.current++; setPreviewBusy(false); setPath(e.target.value); setSource(null) }} />
       </label>
       {creating ?
         <label className="qz-field"><span>Description <span className="qz-muted">· Optional Markdown</span></span>
-          <textarea className="qz-input" aria-label="Ticket description" placeholder="What needs to happen?" value={body} disabled={action.pending} onChange={e => setBody(e.target.value)} rows={4} />
+          <textarea className="qz-input" placeholder="What needs to happen?" value={body} disabled={action.pending} onChange={e => setBody(e.target.value)} rows={4} />
         </label>
       : <>
         <div className="qz-actions"><button type="button" className="qz-button" disabled={blocked || !path.trim()} onClick={() => void preview()}>Preview note</button></div>
@@ -788,7 +807,7 @@ export function TodoView(props: CompanionViewProps) {
         <label className="qz-field">Search
           <span className="qz-search">
             <Icon name="search" />
-            <input className="qz-input" ref={searchField} type="search" aria-label="Filter TODOs" placeholder="Search tasks or notes…"
+            <input className="qz-input" ref={searchField} type="search" placeholder="Search tasks or notes…"
               value={search} maxLength={MAX_FILTER_SEARCH} onChange={e => setSearch(e.target.value)} />
           </span>
         </label>

@@ -24,7 +24,7 @@ import { BoardViewSettings } from './Companion'
 import { DEFAULT_NOTE_APPEARANCE, headingColorCss, headingLines } from './noteAppearance'
 import { DEFAULT_FOLDER_APPEARANCE, folderEmoji, NOTE_WIDTHS, type Preferences } from './preferences'
 import SettingsColor from './SettingsColor'
-import { ErrorLine, Icon } from './ui'
+import { Dialog, ErrorLine, Icon } from './ui'
 import type { PreferenceStatus } from './usePreferences'
 import styles from './settings.css?inline'
 
@@ -412,7 +412,7 @@ function WorkspaceItem(props: PreferenceControls & {
         </div>
       </details>
       {confirmRemove && (
-        <div role="alertdialog" aria-label="Remove folder" className="qz-notice qz-settings-notice">
+        <Dialog label="Remove folder" className="qz-notice qz-settings-notice" onCancel={() => setConfirmRemove(false)}>
           <p>
             Stop showing “{w.name}” in Quartizo? Your folder and files stay on disk.
             {!!w.oldTasks &&
@@ -432,7 +432,7 @@ function WorkspaceItem(props: PreferenceControls & {
               Cancel
             </button>
           </div>
-        </div>
+        </Dialog>
       )}
       {message && (
         <span className="qz-muted" role="status">
@@ -605,7 +605,7 @@ function LegacyMigration({ api, workspace, writeBlocked, onChanged }: { api: App
       <button className="qz-button" type="button" disabled={busy || !workspace.companion} onClick={() => void run(async () => { setPreview(await previewMigration(api, workspace.id)); setResult(null); setAcceptCurrent(false) })}>Preview migration</button>
     </div>
     {exported && <span className="qz-muted" role="status">Export downloaded.</span>}
-    {preview && <div role="alertdialog" aria-label="Confirm old task migration" className="qz-notice qz-settings-notice">
+    {preview && <Dialog label="Confirm old task migration" className="qz-notice qz-settings-notice" onCancel={() => setPreview(null)}>
       <strong>Create {preview.tasks.filter(task => !task.migrated).length} ticket note(s)</strong>
       <p>Quartizo backs up the database tasks before writing each ticket to a new file.</p>
       {preview.warnings.map((warning, i) => <p key={i}>{warning}</p>)}
@@ -624,7 +624,7 @@ function LegacyMigration({ api, workspace, writeBlocked, onChanged }: { api: App
         <button className="qz-button" data-variant="primary" type="button" disabled={busy || !!writeBlocked || preview.complete || !preview.tasks.length} onClick={() => void run(migrate)}>{preview.backup ? 'Resume and verify migration' : 'Back up and migrate'}</button>
         <button className="qz-button" data-variant="quiet" type="button" disabled={busy} onClick={() => setPreview(null)}>Cancel</button>
       </div>
-    </div>}
+    </Dialog>}
     {result && <div className="qz-settings-notice qz-settings-result" role="status">
       <p>{result.migrated.length} ticket note(s) migrated. {result.complete ? 'Migration verified.' : `${result.remaining} task(s) remain; preview again to continue.`}</p>
       <code className="qz-mono qz-muted">Backup: {result.backup.directory}</code>

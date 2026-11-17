@@ -365,7 +365,26 @@
 .qz-ticket-actions summary::-webkit-details-marker { display: none; }
 .qz-ticket-action-list { display: grid; gap: 1px; margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--qz-border); }
 .qz-ticket-action-list .qz-button { justify-content: start; min-height: 32px; text-align: start; }
-.qz-ticket-action-list .qz-destructive:not(:disabled) { color: var(--qz-danger); }
+.qz-ticket-action-list .qz-destructive:not(:disabled),
+.qz-notice .qz-destructive:not(:disabled) { color: var(--qz-danger); }
+.qz-app [role="alertdialog"]:focus-visible { outline: 2px solid var(--qz-accent); outline-offset: 2px; }
+
+/* Drag feedback: highlight the lane under the pointer and mark the insertion point. */
+.qz-lane[data-drop-target] {
+  border-color: var(--qz-accent);
+  box-shadow: 0 0 0 2px var(--qz-accent-soft), inset 0 0 0 1px var(--qz-accent);
+}
+.qz-cards li[data-drop-before] { box-shadow: 0 -3px 0 -1px var(--qz-accent); }
+.qz-cards li[data-drop-before] { position: relative; }
+.qz-cards li[data-drop-before]::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-start: -6px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--qz-accent);
+}
 
 .qz-ticket-form { display: grid; gap: 12px; max-width: 630px; padding: 16px; }
 .qz-ticket-form h3 { font-size: 17px; font-weight: 650; }
