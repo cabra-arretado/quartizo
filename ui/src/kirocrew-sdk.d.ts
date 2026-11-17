@@ -34,7 +34,7 @@ declare module '@kirocrew/app-sdk' {
   export function useNavigate(): (path: string) => void
 
   export function useChatLauncher(): {
-    openChat: (options: { message: string; autoSend: false }) => void
+    openChat: (options: { message: string; autoSend: false; agent?: string }) => void
   }
 }
 

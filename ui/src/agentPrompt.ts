@@ -31,14 +31,14 @@ order: "7fffffffffffffffffffffffffffffff"
 }
 
 /**
- * The chat draft: a one-line heading so the block isn't mistaken for the user's own text, the
- * instructions, then "My request:" last. KiroCrew's composer leaves the cursor at the end, so
- * the user types their request right there instead of scrolling past the instructions.
+ * The chat draft for the quartizo-notes agent, which already carries the full instructions in
+ * its skill. It names the folder and its column IDs, then ends on "My request:", where
+ * KiroCrew's composer leaves the cursor.
  */
 export function agentChatMessage(path: string, columns: readonly { id: string; label: string }[]): string {
-  return `Quartizo folder instructions (keep these; write your request at the end).
-
-${agentPrompt(path, columns)}
+  const ids = columns.map(c => `${c.id} (${JSON.stringify(c.label)})`).join(', ')
+  return `Folder: ${path}
+Board columns, in order: ${ids}
 
 My request: `
 }

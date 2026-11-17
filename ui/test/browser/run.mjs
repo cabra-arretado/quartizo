@@ -250,7 +250,8 @@ async function customColumnsRegression(page, fixture) {
   await button(folder, 'Ask a Bot or agent about Browser vault').click()
   const launch = await page.evaluate(() => window.testChatLaunch)
   assert.equal(launch.autoSend, false)
-  assert.ok(launch.message.includes(prompt))
+  assert.equal(launch.agent, 'quartizo-notes')
+  assert.ok(launch.message.startsWith('Folder: /'))
   assert.ok(launch.message.endsWith('My request: '))
 
   await tab(page, 'Tasks').click()

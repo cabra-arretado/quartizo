@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Quartizo now installs a KiroCrew agent, **quartizo-notes**, and its skill.
+  **Ask a Bot or agent** opens a chat with that agent and a short draft
+  naming the folder, and the Command Bar has **Ask the Quartizo notes agent**.
+- Add an `AGENTS.md` to a folder to describe how that vault works. The agent
+  reads it first, and offers to create one from a template if it's missing.
+- The agent places and checks tickets with a helper that uses Quartizo's own
+  parser, so card order matches the board.
+
 ## 0.12.5 - 2026-11-17
 
 - A deleted or moved folder no longer blocks creating and moving tickets in

@@ -20,7 +20,10 @@ See the [compatibility results](docs/compatibility.md) for tested host versions.
 ## Layout
 
 ```
-app.json              manifest (name, ui page, backend, permissions)
+app.json              manifest (name, ui page, backend, permissions, agent, skill, command)
+agents/               quartizo-notes.json: the KiroCrew agent for working in your folders
+skills/quartizo-notes/  the agent's skill: SKILL.md, vault-template.md (AGENTS.md starter),
+                      scripts/quartizo_ticket.py (read-only ticket IDs, card order, checks)
 ui/quartizo-icon.svg  Quartizo's app catalog and sidebar icon
 backend/server.py     HTTP backend (stdlib): auth, routing
 backend/workspace.py  folder registry + fd-based path confinement
@@ -239,14 +242,28 @@ with the same status ID to restore them to the board. Custom status IDs start
 with a lowercase letter, use lowercase letters, digits, and underscores, and
 are at most 32 characters. Quote them in Markdown frontmatter.
 
-Under **Settings → Folders → Advanced**, choose **Ask a Bot or agent**. In the KiroCrew chat
-composer, pick a Bot or agent, add your request to
-the draft, and send it. The draft includes the folder path, saved column IDs,
-and instructions for creating and updating notes, tickets, and TODOs. The
-selected agent needs read and write access to the connected folder through
-KiroCrew. If the chat needs a project directory, choose the connected folder
-in the composer’s project picker. Use **Copy agent prompt** to bring the same
-instructions to an existing conversation.
+Quartizo installs a KiroCrew agent, **quartizo-notes**, with a skill that
+explains notes, tickets, card order, TODOs and safe edits. Choose **Ask a Bot
+or agent** in the Notes header, the Tasks **More actions** menu, or
+**Settings → Folders → Advanced**. A new chat opens with that agent selected
+and a short draft naming the folder and its column IDs. Type your request after
+"My request:" and send it. You can also start from the Command Bar with **Ask
+the Quartizo notes agent**. The agent needs read and write access to the
+connected folder through KiroCrew. If the chat needs a project directory,
+choose the connected folder in the composer’s project picker.
+
+To tell the agent how a particular vault works, add an `AGENTS.md` at the
+folder root: what lives where, naming habits, what each column means, and what
+it must never do. The agent reads it before every task, and it takes priority
+over the skill's defaults, except for file safety. If a folder has none, the
+agent offers to write one from
+[`skills/quartizo-notes/vault-template.md`](skills/quartizo-notes/vault-template.md).
+
+For tickets, the agent uses the skill's helper, which reads notes with
+Quartizo's own parser, to pick IDs and card order and to check its edits.
+
+Use **Copy agent prompt** to take self-contained instructions to another tool
+or an existing conversation.
 
 ### Personalization
 
