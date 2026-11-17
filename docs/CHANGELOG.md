@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.12.5 - 2026-11-17
+
+- A deleted or moved folder no longer blocks creating and moving tickets in
+  your other folders. Errors name the folder, and **Settings → Folders** marks
+  every missing folder, including ones switched off.
+- **Ask a Bot or agent** is now in the Tasks **More actions** menu, the Notes
+  header and each Settings folder. The KiroCrew chat draft ends with
+  "My request:", so you can type your request right away.
+- Tasks: a short confirmation after creating, moving or removing a ticket, old
+  errors clear after a later success, Escape closes the View panel, and the
+  ticket path follows the title.
+- Notes: list or note on narrow screens, and wikilinks show the note title.
+  Links are easier to read in dark themes.
+- TODOs: only the item being saved is disabled, and index warnings name the
+  folder.
+- Settings opens straight on the right section and no longer shows "Saving…"
+  when you only switched tabs.
+- Larger touch targets for card titles, and steadier header tabs.
+
+Requires KiroCrew 0.12.0 or later.
+
 ## 0.12.4 - 2026-11-17
 
 - Personalize Quartizo in **Settings**: choose the start tab and default
