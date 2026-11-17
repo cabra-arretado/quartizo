@@ -40,7 +40,7 @@ import {
 import { KIRO_NOTES_ROUTE, type NoteLocation, noteName } from './noteNav'
 import { headingColorCss } from './noteAppearance'
 import type { Preferences } from './preferences'
-import { Dialog, ErrorLine, Icon, usePageVisible } from './ui'
+import { Dialog, ErrorLine, Icon, Menu, usePageVisible } from './ui'
 
 /** Visible views poll SQLite results. Only an explicit Refresh requests a full scan. */
 export const SCANNING_MS = 1500
@@ -247,18 +247,18 @@ export function TasksView(props: CompanionViewProps & { onBoardSettings?: () => 
   const current = companions?.find(c => c.workspace.id === props.workspaceId)?.workspace
 
   if (failure && !companions) return <ErrorLine failure={failure} />
-  if (!companions) return <p className="qz-empty" role="status">Loading folders…</p>
+  if (!companions) return <p className="qz-muted qz-loading" role="status">Loading folders…</p>
   return (
     <div className="qz-stack">
       <ErrorLine failure={failure} />
       <div className="qz-view-heading">
         <div>
-          <h2 className="qz-section-title">Task board</h2>
+          <h2 className="qz-section-title">Tasks</h2>
           <p className="qz-section-description">Plan and track tickets stored in your notes.</p>
         </div>
       </div>
       {companions.length === 0 && <NoCompanions onSettings={props.onSettings} />}
-      {companions.length > 0 && !current && !failure && <p className="qz-empty" role="status">Loading the selected folder…</p>}
+      {companions.length > 0 && !current && !failure && <p className="qz-muted qz-loading" role="status">Loading the selected folder…</p>}
       {companions.map(({ workspace }) => <div key={workspace.uid} hidden={workspace.id !== current?.id}>
         <TicketBoard api={props.api} workspace={workspace} active={active && workspace.id === current?.id}
           preferences={props.preferences} onPreferencesChange={props.onPreferencesChange}
@@ -390,6 +390,22 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
   ]
   const boardRef = useRef<HTMLDivElement>(null)
   const dragging = useRef<Ticket | null>(null)
+  const [edges, setEdges] = useState({ start: false, end: false })
+  const hasBoard = !!data && shown.length > 0
+  useEffect(() => {
+    const el = boardRef.current
+    if (!el) return
+    const measure = () => {
+      const start = Math.abs(el.scrollLeft) > 1
+      const end = el.scrollWidth - el.clientWidth - Math.abs(el.scrollLeft) > 1
+      setEdges(previous => previous.start === start && previous.end === end ? previous : { start, end })
+    }
+    measure()
+    el.addEventListener('scroll', measure, { passive: true })
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+    observer?.observe(el)
+    return () => { el.removeEventListener('scroll', measure); observer?.disconnect() }
+  }, [hasBoard, shown.length])
   const [dropTarget, setDropTarget] = useState<{ lane: TaskStatus; before?: string } | null>(null)
   const [confirmDemote, setConfirmDemote] = useState<Ticket | null>(null)
   const [form, setForm] = useState<'create' | 'promote' | null>(null)
@@ -482,10 +498,12 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
         <div className="qz-actions">
           <button type="button" className="qz-button" data-variant="quiet" aria-expanded={showView} aria-controls={`qz-board-view-${wsId}`}
             onClick={() => setShowView(value => !value)}><Icon name="settings" />View</button>
-          <button type="button" className="qz-button" data-variant="quiet" onClick={props.onSettings}>Customize columns</button>
-          <button type="button" className="qz-button" data-variant="quiet" aria-expanded={showMaintenance}
-            onClick={() => setShowMaintenance(value => !value)} disabled={blocked}>Rebalance…</button>
-          <button type="button" className="qz-button" data-variant="quiet" onClick={() => navigate(KIRO_NOTES_ROUTE)}><Icon name="external" />Open Kiro Notes</button>
+          <Menu label="More actions">{close => <>
+            <button type="button" className="qz-button" data-variant="quiet" onClick={() => { close(); props.onSettings() }}>Customize columns</button>
+            <button type="button" className="qz-button" data-variant="quiet" disabled={blocked}
+              onClick={() => { close(); setShowMaintenance(true) }}>Rebalance…</button>
+            <button type="button" className="qz-button" data-variant="quiet" onClick={() => { close(); navigate(KIRO_NOTES_ROUTE) }}><Icon name="external" />Open Kiro Notes</button>
+          </>}</Menu>
         </div>
       </div>
       <section id={`qz-board-view-${wsId}`} className="qz-panel-surface qz-board-view-panel" aria-label="Board view settings" hidden={!showView}>
@@ -537,9 +555,19 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
           <button type="button" className="qz-button" data-variant="quiet" onClick={() => setConfirmDemote(null)}>Cancel</button>
         </div>
       </Dialog>}
-      {!data && !failure && <p className="qz-empty" role="status">Loading the board…</p>}
-      {data && data.tickets.length === 0 && data.index.state !== 'scanning' && <p className="qz-notice" data-variant="neutral">No tickets in “{workspace.name}” yet. Create a ticket or use an existing note.</p>}
+      {!data && !failure && <p className="qz-muted qz-loading" role="status">Loading the board…</p>}
+      {data && data.tickets.length === 0 && data.index.state !== 'scanning' && <div className="qz-empty">
+        <span className="qz-empty-icon"><Icon name="board" /></span>
+        <h3>No tickets in “{workspace.name}” yet</h3>
+        <p>Create a ticket, or turn an existing note into one.</p>
+        <div className="qz-actions">
+          <button type="button" className="qz-button" data-variant="primary" disabled={action.pending || formPending} onClick={() => setForm('create')}><Icon name="plus" />New ticket</button>
+          <button type="button" className="qz-button" disabled={action.pending || formPending} onClick={() => setForm('promote')}><Icon name="note" />Use existing note</button>
+        </div>
+      </div>}
+      {data && shown.length > 0 && <p className="qz-muted qz-board-hint">Tip: focus a card title, then use the arrow keys to move between cards. Scroll sideways for more columns.</p>}
       {data && shown.length > 0 && (
+        <div className="qz-board-wrap" data-more-start={edges.start || undefined} data-more-end={edges.end || undefined}>
         <div ref={boardRef} className="qz-board" data-density={preferences.boardDensity} tabIndex={0} onKeyDown={onKey} aria-label={`Board of ${workspace.name}`} role="group">
           {shown.map(({ id: lane, label, color }, li) => (
             <section key={lane} aria-label={label} className="qz-lane" data-lane-status={lane} style={laneColorStyle(color)}
@@ -573,6 +601,7 @@ function TicketBoard(props: Omit<CompanionViewProps, 'workspaceId' | 'active'> &
               </ul>
             </section>
           ))}
+        </div>
         </div>
       )}
     </div>
@@ -663,7 +692,7 @@ function TicketForm(props: { mode: 'create' | 'promote'; api: AppApi; workspace:
       {columnBusy && <span className="qz-notice">Resume ordering maintenance for this column before adding a ticket.</span>}
       <ErrorLine failure={previewFailure} /><ErrorLine failure={action.failure} />
       <div className="qz-actions">
-        <button type="submit" className="qz-button" data-variant="primary" disabled={!canSubmit}>{creating ? 'Create ticket' : 'Make ticket'}</button>
+        <button type="submit" className="qz-button" data-variant="primary" disabled={!canSubmit}>{creating ? 'Create ticket' : 'Add to board'}</button>
         <button type="button" className="qz-button" data-variant="quiet" disabled={action.pending} onClick={discard}>Cancel</button>
       </div>
     </form>
@@ -689,6 +718,15 @@ function TicketCard(props: {
   const { ticket: t, fields, folderAppearance } = props
   const status = t.lane === 'repair' ? '' : t.lane
   const showFolder = folderAppearance && (folderAppearance.emoji || folderAppearance.color !== 'theme')
+  const actions = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    const outside = (event: MouseEvent) => {
+      const details = actions.current
+      if (details?.open && !(event.target instanceof Node && details.contains(event.target))) details.open = false
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [])
   return <article className="qz-ticket">
     <div className="qz-ticket-content">
       <button type="button" className="qz-note-link" data-lane={props.lane} data-index={props.index} data-note-path={t.path} aria-label={`Open note: ${t.title}`} onClick={props.onOpen}>
@@ -712,7 +750,12 @@ function TicketCard(props: {
           {props.columns.map(c => <option key={c.id} value={c.id} disabled={props.maintenance.includes(c.id)}>{c.label}</option>)}
         </select>
       </div>
-      <details className="qz-ticket-actions">
+      <details ref={actions} className="qz-ticket-actions" onKeyDown={event => {
+        if (event.key !== 'Escape' || !actions.current?.open) return
+        event.stopPropagation()
+        actions.current.open = false
+        actions.current.querySelector('summary')?.focus()
+      }}>
         <summary className="qz-button qz-icon-button" data-variant="quiet" aria-label={`Actions for ${t.title}`} title="Ticket actions"><Icon name="more" /></summary>
         <div className="qz-ticket-action-list">
           <CopyName path={t.path} />
@@ -772,6 +815,7 @@ export function TodoView(props: CompanionViewProps) {
     setSelectedFilter('')
   }
 
+  const currentFolder = companions?.find(item => item.workspace.id === workspaceId)?.workspace.name
   const wsId = scope === 'workspace' ? workspaceId ?? undefined : undefined
   const enabled = active && !!companions?.length && (scope === 'all' || wsId !== undefined)
   const { data, failure, busy, refresh, reload } = useIndexed<TodoData>(
@@ -792,13 +836,13 @@ export function TodoView(props: CompanionViewProps) {
   }
 
   if (statusFailure) return <ErrorLine failure={statusFailure} />
-  if (!companions) return <p className="qz-empty" role="status">Loading folders…</p>
+  if (!companions) return <p className="qz-muted qz-loading" role="status">Loading folders…</p>
   if (companions.length === 0) return <NoCompanions onSettings={props.onSettings} />
   return (
     <div className="qz-stack qz-todos">
       <div className="qz-view-heading">
         <div>
-          <h2 className="qz-section-title">Note checklists</h2>
+          <h2 className="qz-section-title">TODOs</h2>
           <p className="qz-section-description">Find and complete Markdown TODOs across your shared folders.</p>
         </div>
         <button type="button" className="qz-button" data-variant="quiet" onClick={() => navigate(KIRO_NOTES_ROUTE)}><Icon name="external" />Open Kiro Notes</button>
@@ -814,7 +858,7 @@ export function TodoView(props: CompanionViewProps) {
         <label className="qz-field">Folder scope
           <select className="qz-input" value={scope} onChange={e => onPreferencesChange({ todoScope: e.target.value === 'workspace' ? 'workspace' : 'all' })}>
             <option value="all">All folders</option>
-            <option value="workspace">Current folder</option>
+            <option value="workspace">{currentFolder ? `Current folder (${currentFolder})` : 'Current folder'}</option>
           </select>
         </label>
         <label className="qz-field">Show
@@ -861,7 +905,7 @@ export function TodoView(props: CompanionViewProps) {
           Only the first items are listed. Narrow the list by folder or completion status.
         </div>
       )}
-      {!data && !failure && <p className="qz-empty" role="status">Loading TODOs…</p>}
+      {!data && !failure && <p className="qz-muted qz-loading" role="status">Loading TODOs…</p>}
       {data && groups.length === 0 && <div className="qz-empty">
         <span className="qz-empty-icon"><Icon name={search.trim() ? 'search' : 'checklist'} /></span>
         <h3>{search.trim() ? 'No matching TODOs' : 'No TODOs to show'}</h3>

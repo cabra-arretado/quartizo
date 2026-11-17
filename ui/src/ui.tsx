@@ -32,10 +32,47 @@ export function Icon({ name }: { name: IconName }) {
 }
 
 export function ErrorLine({ failure }: { failure: ApiFailure | null }) {
+  const node = useRef<HTMLDivElement>(null)
+  // An error raised by a control far from the top of the view must not appear off-screen.
+  useEffect(() => { if (failure) node.current?.scrollIntoView?.({ block: 'nearest' }) }, [failure])
   if (!failure) return null
   return (
-    <div role="alert" className="qz-notice qz-error" data-code={failure.code}>
+    <div ref={node} role="alert" className="qz-notice qz-error" data-code={failure.code}>
       {failure.message}
+    </div>
+  )
+}
+
+/** A button that discloses a short list of secondary actions. Closes on Escape, outside click, or choosing one. */
+export function Menu({ label, icon = 'more', children }: {
+  label: string
+  icon?: IconName
+  children: (close: () => void) => ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const outside = (event: MouseEvent) => {
+      if (!(event.target instanceof Node && root.current?.contains(event.target))) setOpen(false)
+    }
+    document.addEventListener('mousedown', outside)
+    return () => document.removeEventListener('mousedown', outside)
+  }, [open])
+  return (
+    <div ref={root} className="qz-menu" onKeyDown={event => {
+      if (event.key !== 'Escape' || !open) return
+      event.stopPropagation()
+      setOpen(false)
+      root.current?.querySelector<HTMLElement>('.qz-menu-trigger')?.focus()
+    }}>
+      <button type="button" className="qz-button qz-icon-button qz-menu-trigger" data-variant="quiet"
+        aria-label={label} title={label} aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        <Icon name={icon} />
+      </button>
+      {open && <div className="qz-menu-list qz-panel-surface" role="group" aria-label={label}>
+        {children(() => setOpen(false))}
+      </div>}
     </div>
   )
 }

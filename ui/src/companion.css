@@ -10,7 +10,7 @@
   flex-wrap: wrap;
   align-items: start;
   gap: 16px 24px;
-  font-size: 13px;
+  font-size: calc(13px * var(--qz-scale, 1));
 }
 .qz-board-view-settings > .qz-check-label { align-self: center; }
 .qz-board-setting-group {
@@ -36,7 +36,7 @@
 .qz-board[data-density="compact"] .qz-ticket-content { gap: 2px; padding: 6px; }
 .qz-board[data-density="compact"] .qz-ticket-footer { padding-block: 2px; }
 .qz-board[data-density="compact"] .qz-ticket-actions summary { inset-block-start: 2px; }
-.qz-lane-help { margin: 0 2px 8px; font-size: 12px; }
+.qz-lane-help { margin: 0 2px 8px; font-size: calc(12px * var(--qz-scale, 1)); }
 
 .qz-folder-label {
   display: inline-flex;
@@ -56,7 +56,7 @@
   padding: 2px 5px;
   border: 1px solid var(--qz-border);
   border-radius: 5px;
-  font-size: 11px;
+  font-size: calc(12px * var(--qz-scale, 1));
 }
 
 .qz-todo-saved-filters { flex-basis: 100%; }
@@ -76,4 +76,4 @@
   gap: 8px;
 }
 .qz-todo-filters .qz-todo-saved-row .qz-field { flex: 0 1 240px; }
-.qz-todo-saved-row > p { flex-basis: 100%; font-size: 13px; }
+.qz-todo-saved-row > p { flex-basis: 100%; font-size: calc(13px * var(--qz-scale, 1)); }

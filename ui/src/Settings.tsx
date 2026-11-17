@@ -21,12 +21,11 @@ import {
 } from './companionApi'
 import { agentPrompt } from './agentPrompt'
 import { BoardViewSettings } from './Companion'
-import { DEFAULT_NOTE_APPEARANCE, headingColorCss, headingLines } from './noteAppearance'
+import { DEFAULT_NOTE_APPEARANCE, headingColor, headingColorCss, headingLines } from './noteAppearance'
 import { DEFAULT_FOLDER_APPEARANCE, folderEmoji, NOTE_WIDTHS, type Preferences } from './preferences'
 import SettingsColor from './SettingsColor'
 import { Dialog, ErrorLine, Icon } from './ui'
 import type { PreferenceStatus } from './usePreferences'
-import styles from './settings.css?inline'
 
 function useAction() {
   const [busy, setBusy] = useState(false)
@@ -110,7 +109,6 @@ export default function Settings({
 
   return (
     <div className="qz-settings">
-      <style>{styles}</style>
       <header className="qz-settings-header">
         <h2 className="qz-section-title">Settings</h2>
         <span className="qz-muted qz-settings-saved" role="status">{STATUS[status]}</span>
@@ -145,9 +143,9 @@ export default function Settings({
           <SettingsColor label="Accent color" value={preferences.accent} allowAccent={false} checkContrast
             onChange={accent => onPreferencesChange({ accent })} />
           <div className="qz-stack">
-            <label className="qz-settings-check"><input type="checkbox" checked={preferences.highContrast}
+            <label className="qz-settings-check"><input className="qz-settings-toggle" type="checkbox" role="switch" checked={preferences.highContrast}
               onChange={e => onPreferencesChange({ highContrast: e.currentTarget.checked })} />High contrast</label>
-            <label className="qz-settings-check"><input type="checkbox" checked={preferences.largerInterfaceText}
+            <label className="qz-settings-check"><input className="qz-settings-toggle" type="checkbox" role="switch" checked={preferences.largerInterfaceText}
               onChange={e => onPreferencesChange({ largerInterfaceText: e.currentTarget.checked })} />Larger interface text</label>
             <Choice label="Motion" value={preferences.motion} options={{ system: 'Follow system', reduced: 'Reduce motion' }}
               onChange={motion => onPreferencesChange({ motion })} />
@@ -198,7 +196,7 @@ export default function Settings({
 }
 
 function SettingsPanel({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="qz-panel-surface qz-settings-appearance" aria-label={title}>
+  return <section className="qz-panel-surface qz-settings-panel" aria-label={title}>
     <div className="qz-settings-heading"><h3>{title}</h3></div>
     {children}
   </section>
@@ -306,7 +304,7 @@ function NotesSettings({ preferences, onPreferencesChange }: PreferenceControls)
           onChange={noteFont => onPreferencesChange({ noteFont })} />
       </div>
     </SettingsPanel>
-    <section className="qz-panel-surface qz-settings-appearance" aria-labelledby="qz-note-appearance">
+    <section className="qz-panel-surface qz-settings-panel" aria-labelledby="qz-note-appearance">
       <div className="qz-settings-heading">
         <h3 id="qz-note-appearance">Notes appearance</h3>
         <button className="qz-button" type="button" data-variant="quiet" disabled={isDefault}
@@ -330,7 +328,7 @@ function NotesSettings({ preferences, onPreferencesChange }: PreferenceControls)
       </div>
       <div className="qz-settings-fields">
         {(['Light', 'Dark'] as const).map(theme => <div key={theme} data-preview-theme={theme.toLowerCase()}
-          className="qz-note-headings qz-settings-appearance-preview" role="group" aria-label={`${theme} background preview`}>
+          className="qz-note-headings qz-settings-panel-preview" role="group" aria-label={`${theme} background preview`}>
           <span>{theme} background</span>
           <h2>Project notes</h2>
           <h3>Next steps</h3>
@@ -377,6 +375,7 @@ function WorkspaceItem(props: PreferenceControls & {
           <input
             className="qz-settings-toggle"
             type="checkbox"
+            role="switch"
             checked={!!w.companion}
             disabled={busy}
             onChange={() => void run(() => setCompanion(api, w.id, !w.companion)).then(ok => ok && props.onChanged())}
@@ -473,8 +472,7 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
   })
   const changed = JSON.stringify(columns) !== JSON.stringify(workspace.columns)
   return <>
-    <details className="qz-settings-disclosure">
-      <summary>Board columns</summary>
+    <>
       <div className="qz-stack">
         <p className="qz-muted">The first column is the default for new tickets.</p>
         <ul className="qz-column-list">
@@ -484,17 +482,12 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
               <input className="qz-input" aria-label={`Name for ${column.id}`} value={column.label} maxLength={40} disabled={busy}
                 onChange={e => edit(columns.map(c => c.id === column.id ? { ...c, label: e.target.value } : c))} />
             </label>
+            <SettingsColor label={`Color for ${column.id}`} value={headingColor(column.color)} allowAccent={false}
+              disabled={busy} onChange={color => edit(columns.map(c => {
+                if (c.id !== column.id) return c
+                return color === 'theme' ? { id: c.id, label: c.label } : { ...c, color }
+              }))} />
             <div className="qz-settings-actions">
-              <label className="qz-field">Color
-                <input className="qz-input qz-column-color" type="color" aria-label={`Color for ${column.id}`}
-                  value={column.color ?? '#6757c7'} disabled={busy}
-                  onChange={e => {
-                    const color = e.currentTarget.value
-                    edit(columns.map(c => c.id === column.id ? { ...c, color } : c))
-                  }} />
-              </label>
-              <button className="qz-button" type="button" aria-label={`Reset color for ${column.id}`} disabled={busy || !column.color}
-                onClick={() => edit(columns.map(c => c.id === column.id ? { id: c.id, label: c.label } : c))}>Reset color</button>
               <button className="qz-button" type="button" aria-label={`Move column ${column.id} up`} disabled={busy || index === 0} onClick={() => reorder(index, -1)}><Icon name="up" /></button>
               <button className="qz-button" type="button" aria-label={`Move column ${column.id} down`} disabled={busy || index === columns.length - 1} onClick={() => reorder(index, 1)}><Icon name="down" /></button>
               <button className="qz-button" type="button" aria-label={`Remove column ${column.id}`} disabled={busy || columns.length === 1} onClick={() => edit(columns.filter(c => c.id !== column.id))}>Remove</button>
@@ -512,12 +505,12 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
             <input className="qz-input" value={newLabel} maxLength={40} disabled={busy} onChange={e => setNewLabel(e.target.value)} />
           </label>
           <div className="qz-stack">
-            <label className="qz-field">New status ID
+            <label className="qz-field">New status value
               <input className="qz-input qz-mono" value={statusId} maxLength={32} disabled={busy}
                 aria-describedby={`qz-column-id-${workspace.id}`} onChange={e => setNewId(e.target.value)} />
             </label>
             <p className="qz-muted" id={`qz-column-id-${workspace.id}`}>
-              This value is written to Markdown notes. Quartizo suggests it from the name. You can use lowercase letters, digits, and underscores, starting with a letter.
+              The status value is saved as “status:” in your Markdown notes. Quartizo suggests it from the name. Use lowercase letters, digits and underscores, starting with a letter.
             </p>
           </div>
           <button className="qz-button" type="submit" disabled={busy || !canAdd}>Add column</button>
@@ -530,7 +523,7 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
         </div>
         <ErrorLine failure={failure} />
       </div>
-    </details>
+    </>
   </>
 }
 

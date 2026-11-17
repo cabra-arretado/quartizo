@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { type HeadingColor, headingColor, headingColorCss, relativeLuminance } from './noteAppearance'
+import { DEFAULT_CUSTOM_COLOR, type HeadingColor, headingColor, headingColorCss, relativeLuminance } from './noteAppearance'
 
 const SWATCHES = [
   ['Indigo', '#6757c7'],
@@ -67,7 +67,7 @@ export default function SettingsColor({ label, value, onChange, disabled, allowA
         <label className="qz-field">{label}
           <select className="qz-input" value={custom ? 'custom' : value} disabled={disabled}
             aria-describedby={lowContrast ? `${id}-contrast` : undefined}
-            onChange={event => onChange(event.currentTarget.value === 'custom' ? '#6757c7' : headingColor(event.currentTarget.value))}>
+            onChange={event => onChange(event.currentTarget.value === 'custom' ? DEFAULT_CUSTOM_COLOR : headingColor(event.currentTarget.value))}>
             <option value="theme">Theme default</option>
             {allowAccent && <option value="accent">Theme accent</option>}
             <option value="custom">Custom color</option>
@@ -80,7 +80,7 @@ export default function SettingsColor({ label, value, onChange, disabled, allowA
         <div className="qz-settings-color-mode">
           <label className="qz-field">Hex color
             <input className="qz-input qz-mono" aria-label={`${label} hex`} value={hex} disabled={disabled}
-              placeholder="#6757c7" maxLength={7} spellCheck={false}
+              placeholder={DEFAULT_CUSTOM_COLOR} maxLength={7} spellCheck={false}
               aria-invalid={invalid || undefined} aria-describedby={invalid ? `${id}-format` : undefined}
               onChange={event => {
                 const next = event.currentTarget.value
@@ -92,7 +92,7 @@ export default function SettingsColor({ label, value, onChange, disabled, allowA
           <input className="qz-input" type="color" aria-label={`Custom ${label.toLowerCase()}`}
             value={value} disabled={disabled} onChange={event => onChange(headingColor(event.currentTarget.value))} />
         </div>
-        {invalid && <p id={`${id}-format`} className="qz-muted">Use six hexadecimal digits, for example #6757c7.</p>}
+        {invalid && <p id={`${id}-format`} className="qz-muted">Use six hexadecimal digits, for example {DEFAULT_CUSTOM_COLOR}.</p>}
         <div className="qz-color-swatches" role="group" aria-label={`${label} swatches`}>
           {SWATCHES.map(([name, color]) => <button key={color} type="button" title={name}
             aria-label={name} aria-pressed={value === color} disabled={disabled} style={{ backgroundColor: color }}

@@ -7,6 +7,9 @@ export interface NoteAppearance {
   lineColor: HeadingColor
 }
 
+/** Starting point when a color control switches to Custom. */
+export const DEFAULT_CUSTOM_COLOR: HeadingColor = '#6757c7'
+
 export const DEFAULT_NOTE_APPEARANCE: NoteAppearance = {
   headingColor: 'theme',
   headingLines: 'theme',

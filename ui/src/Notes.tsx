@@ -25,9 +25,9 @@ import { DEFAULT_NOTE_FOLDER, type NoteFolderPreferences, type NoteWidth, type P
 import { Dialog, ErrorLine, Icon, inDialog, usePageVisible } from './ui'
 import { type NoteEdits, noteKey, useNoteEdits } from './useNoteEdits'
 import { makeWikilinkResolver } from './wikilinks'
-import styles from './notes.css?inline'
 
 const POLL_MS = 3000
+const isApple = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 const EMPTY_NOTES: NoteEntry[] = []
 const MAX_PINNED_NOTES = 25
 const MAX_EXPANDED_FOLDERS = 50
@@ -197,7 +197,7 @@ export default function NotesView({ api, active, workspaceId, request, preferenc
 
   if (!workspaces) return failure
     ? <ErrorLine failure={failure} />
-    : <p className="qz-empty" role="status">Loading folders…</p>
+    : <p className="qz-muted qz-loading" role="status">Loading folders…</p>
   if (!current) return (
     <div className="qz-stack">
       <ErrorLine failure={failure} />
@@ -257,11 +257,10 @@ export default function NotesView({ api, active, workspaceId, request, preferenc
 
   return (
     <section ref={viewRoot} className="qz-stack qz-notes-view" aria-label="Notes">
-      <style>{styles}</style>
       <div className="qz-view-heading">
         <h2 className="qz-section-title">Notes</h2>
         <button type="button" className="qz-button" data-variant="primary" aria-expanded={adding}
-          aria-keyshortcuts="Meta+N Control+N" onClick={() => { setAdding(value => !value); setCreateFailure(null) }}
+          aria-keyshortcuts="Meta+N Control+N" title="New note (Cmd/Ctrl+N)" onClick={() => { setAdding(value => !value); setCreateFailure(null) }}
           disabled={creating || !!writeBlocked}><Icon name="plus" />New note</button>
       </div>
       <ErrorLine failure={failure} />
@@ -282,7 +281,7 @@ export default function NotesView({ api, active, workspaceId, request, preferenc
       <div className="qz-notes-layout">
         <aside className="qz-note-browser qz-panel-surface" aria-label="Notes browser">
           <h3 className="qz-note-browser-heading">
-            {folderStyle?.emoji && folderColor && <span className="qz-folder-dot" aria-hidden="true" style={{ backgroundColor: folderColor }} />}
+            {folderColor && <span className="qz-folder-dot" aria-hidden="true" style={{ backgroundColor: folderColor }} />}
             <span className="qz-note-browser-icon" aria-hidden="true" style={{ color: folderColor }}>
               {folderStyle?.emoji || <Icon name="folder" />}
             </span>
@@ -290,10 +289,10 @@ export default function NotesView({ api, active, workspaceId, request, preferenc
           </h3>
           <label className="qz-field">
             Search notes
-            <input ref={searchField} type="search" className="qz-input" value={search} placeholder="Title or path"
+            <input ref={searchField} type="search" className="qz-input" value={search} placeholder="Title or path (press / to focus)"
               aria-keyshortcuts="/" onChange={event => setSearch(event.target.value)} />
           </label>
-          {notes === null && !failure && <p role="status" className="qz-muted">Loading notes…</p>}
+          {notes === null && !failure && <p role="status" className="qz-muted qz-loading">Loading notes…</p>}
           {notes !== null && matches.length === 0 && (
             <p className="qz-muted">{query ? 'No notes match your search.' : current.index.state === 'scanning' ? 'Indexing notes…' : 'No notes in this folder yet.'}</p>
           )}
@@ -306,7 +305,7 @@ export default function NotesView({ api, active, workspaceId, request, preferenc
           {unpinned.length > 0 && <Tree key={query ? 'search' : 'browse'} branch={tree} prefix="" selected={location?.path}
             searching={!!query} expanded={expanded} onOpen={openNote} onToggle={toggleFolder} />}
           {unpinned.length > limit && <button type="button" className="qz-button" data-variant="quiet"
-            onClick={showMore}>Show more notes</button>}
+            onClick={showMore}>Show more notes ({Math.min(limit, unpinned.length)} of {unpinned.length} shown)</button>}
         </aside>
         {location ? <NoteEditor key={key} api={api} active={active} location={location}
           edits={edits.get(key)} onDraft={(next, expected) => edit(key, next, expected)} onLoaded={saved => loaded(key, saved)}
@@ -543,15 +542,16 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
               onViewChange(next)
             }} ariaLabel="Note view" collapse={false} />
           <button type="button" className="qz-button" data-variant="quiet" aria-pressed={width === 'full'}
-            onClick={onWidthChange}>{width === 'full' ? 'Full width' : 'Reading width'}</button>
+            onClick={onWidthChange}>Full width</button>
         </div>
         <div className="qz-actions" role="group" aria-label="Note actions">
           <span className="qz-muted qz-note-message qz-note-save-status" role="status">
             {saving ? 'Saving note…' : draft ? 'Unsaved changes' : notice || (edits?.didSave ? 'Note saved.' : '')}
           </span>
-          <button ref={reloadButton} type="button" className="qz-button" data-variant="quiet"
+          <button ref={reloadButton} type="button" className="qz-button qz-icon-button" data-variant="quiet"
+            aria-label="Reload from disk" title="Reload from disk"
             disabled={loading || saving || reloading} onMouseDown={event => event.preventDefault()}
-            onClick={() => void reload()}>Reload from disk</button>
+            onClick={() => void reload()}><Icon name="refresh" /></button>
           <button type="button" className="qz-button" data-variant="primary"
             disabled={!draft || draft.conflict || readOnly}
             onClick={() => { if (blockEdit) finishBlockEdit(false); else onSave() }}>Save note</button>
@@ -614,6 +614,7 @@ function NoteEditor({ api, active, location, edits, onDraft, onLoaded, onSave, w
                     }
                   }} />
                 <div className="qz-actions">
+                  <span className="qz-muted qz-note-message qz-block-hint">Esc cancels · {isApple ? '⌘' : 'Ctrl'}+Enter saves</span>
                   <button type="button" className="qz-button" onMouseDown={event => event.preventDefault()}
                     onClick={() => finishBlockEdit(false)}>Done</button>
                   <button type="button" className="qz-button" data-variant="quiet" onMouseDown={event => event.preventDefault()}

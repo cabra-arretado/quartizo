@@ -14,7 +14,7 @@ export const REQUEST_TIMEOUT_MS = 15000
 
 export type TaskStatus = string
 export interface BoardColumn { id: TaskStatus; label: string; color?: string }
-export const REPAIR_COLUMN: BoardColumn = { id: 'repair', label: 'Needs repair' }
+export const REPAIR_COLUMN: BoardColumn = { id: 'repair', label: 'Needs a column' }
 
 export interface Workspace {
   id: number

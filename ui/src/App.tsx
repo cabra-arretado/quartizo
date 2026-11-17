@@ -11,6 +11,8 @@ import { usePreferences } from './usePreferences'
 import { Icon, type IconName } from './ui'
 import styles from './quartizo.css?inline'
 import companionStyles from './companion.css?inline'
+import notesStyles from './notes.css?inline'
+import settingsStyles from './settings.css?inline'
 
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'tasks', label: 'Tasks', icon: 'board' },
@@ -133,6 +135,8 @@ export default function Quartizo() {
       data-accent={preferences.accent !== 'theme' ? 'custom' : undefined}>
       <style>{styles}</style>
       <style>{companionStyles}</style>
+      <style>{notesStyles}</style>
+      <style>{settingsStyles}</style>
       <header className="qz-header">
         <div className="qz-brand">
           <span className="qz-mark"><Icon name="gem" /></span>
@@ -148,7 +152,7 @@ export default function Quartizo() {
             </button>
           ))}
         </div>
-        <label className="qz-workspace qz-inline-field">
+        {(tab !== 'settings' || section === 'board') && <label className="qz-workspace qz-inline-field">
           {folder?.color && folder.color !== 'theme' && <span aria-hidden="true" className="qz-folder-dot"
             style={{ backgroundColor: headingColorCss(folder.color) }} />}
           <span>Workspace</span>
@@ -160,7 +164,7 @@ export default function Quartizo() {
               return <option key={w.id} value={w.id}>{emoji ? `${emoji} ${w.name}` : w.name}</option>
             })}
           </select>
-        </label>
+        </label>}
       </header>
       <div className="qz-content" id="qz-panel" role="tabpanel" aria-labelledby={`qz-tab-${tab}`}>
         {status === 'unavailable' && <p className="qz-notice qz-preference-notice" role="status">

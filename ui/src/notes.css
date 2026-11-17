@@ -17,12 +17,12 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  font-size: 15px;
+  font-size: calc(15px * var(--qz-scale, 1));
   overflow-wrap: anywhere;
 }
 .qz-note-browser-icon { display: inline-flex; flex: none; color: var(--qz-accent); }
 .qz-note-pins { display: grid; gap: 5px; }
-.qz-note-pins h4 { margin: 0; font-size: 13px; }
+.qz-note-pins h4 { margin: 0; font-size: calc(13px * var(--qz-scale, 1)); }
 .qz-note-create { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
 .qz-note-create .qz-error { grid-column: 1 / -1; }
 
@@ -81,7 +81,7 @@
 .qz-note-editor:has(.qz-note-source) { align-self: stretch; }
 .qz-note-text { flex: 1 0 auto; min-height: 360px; }
 
-.qz-note-message { font-size: 12px; }
+.qz-note-message { font-size: calc(12px * var(--qz-scale, 1)); }
 .qz-note-message:empty { display: none; }
 .qz-note-save-status { white-space: nowrap; }
 .qz-note-pin-button[aria-disabled="true"] { opacity: .55; cursor: default; }
@@ -135,6 +135,7 @@
 .qz-note-edit-block:focus-visible { opacity: 1; }
 .qz-note-block-editor { display: grid; gap: 6px; margin-block-end: .9em; }
 .qz-note-block-editor .qz-actions { justify-content: end; }
+.qz-block-hint { margin-inline-end: auto; }
 
 .qz-wikilink {
   max-width: 100%;
@@ -149,7 +150,7 @@
   cursor: pointer;
 }
 .qz-note-backlinks { border-top: 1px solid var(--qz-border); padding-top: 12px; }
-.qz-note-backlinks h3 { margin: 0 0 6px; font-size: 14px; }
+.qz-note-backlinks h3 { margin: 0 0 6px; font-size: calc(14px * var(--qz-scale, 1)); }
 .qz-note-backlinks ul { display: grid; gap: 4px; margin: 0; padding-inline-start: 1.25em; }
 .qz-note-image { color: var(--qz-muted); }
 
