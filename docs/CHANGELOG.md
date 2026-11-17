@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.12.4 - 2026-11-17
+
+- Personalize Quartizo in **Settings**: choose the start tab and default
+  workspace, an accent color, high contrast, larger interface text and reduced
+  motion; set note view, reading width, text size, line spacing and font; give
+  each folder an emoji and color. Preferences are saved with Quartizo and
+  follow you across browsers.
+- Customize the board with card density, visible card fields, hidden empty
+  columns, column colors and per-column sorting. Pin notes and save TODO
+  filters.
+- Open the app right away from saved preferences instead of waiting for them
+  to load.
+- Confirm removing a ticket, replacing a draft, removing a folder and
+  migration steps in the page, with focus moved to the confirmation.
+- Show the note save status in the editor toolbar.
+- Show drop targets while dragging tickets, and scroll cues on wide boards.
+- Move secondary board actions into a **More actions** menu.
+- Clearer labels and names for screen readers and voice control, larger touch
+  targets, and text that scales consistently with **Larger interface text**.
+
+Requires KiroCrew 0.12.0 or later.
+
 ## 0.12.3 - 2026-11-17
 
 - Customize heading text and line colors in **Settings → Notes appearance**.
