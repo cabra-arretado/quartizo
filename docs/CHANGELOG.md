@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.7 - 2026-11-20
 
 - The quartizo-notes agent uses your default workspace when a request names no
   folder, so the Command Bar and the agent picker work without a folder path.
