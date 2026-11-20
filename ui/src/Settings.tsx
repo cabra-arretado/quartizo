@@ -53,6 +53,7 @@ const SECTIONS = {
   notes: 'Notes',
   board: 'Board',
   folders: 'Folders',
+  agents: 'Bots & agents',
 } as const
 
 export type SettingsSection = keyof typeof SECTIONS
@@ -181,6 +182,10 @@ export default function Settings({
           </section>)}
         </SettingsPanel>
       </div>
+
+      {selectedSection === 'agents' && <SettingsPanel title="Bots & agents">
+        <BotSetup defaultFolder={(enabled.find(w => w.id === preferences.workspaceId) ?? enabled[0])?.name ?? null} />
+      </SettingsPanel>}
 
       {selectedSection === 'folders' && <div className="qz-settings-grid" data-empty={workspaces?.length === 0 || undefined}>
         {workspaces?.length !== 0 && <section className="qz-settings-folders" aria-labelledby="qz-settings-folders">
@@ -542,6 +547,42 @@ function BoardSettings({ api, workspace, onSaved }: { api: AppApi; workspace: Wo
       </div>
     </>
   </>
+}
+
+export const BOT_COMMANDS = `kirocrew agent create --name notes --display-name "Notes"
+kirocrew agent update notes --kiro-agent quartizo-notes`
+
+/** How to work with the quartizo-notes agent, and how to keep it as a Bot. */
+function BotSetup({ defaultFolder }: { defaultFolder: string | null }) {
+  const [message, setMessage] = useState('')
+  const field = useRef<HTMLTextAreaElement>(null)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(BOT_COMMANDS)
+      setMessage('Commands copied.')
+    } catch {
+      field.current?.focus()
+      field.current?.select()
+      setMessage('Copy the selected commands.')
+    }
+  }
+  return <div className="qz-stack">
+    <p>Quartizo installs the <strong>quartizo-notes</strong> agent. Use it from <strong>Ask a Bot or agent</strong>, the
+      KiroCrew Command Bar, or the chat agent picker.</p>
+    <p className="qz-muted">{defaultFolder
+      ? <>When you don’t name a folder, it works in your default workspace, now <strong>{defaultFolder}</strong>. Change it under Defaults.</>
+      : 'Connect a folder under Folders so the agent has somewhere to work.'}{' '}
+      Add an <code>AGENTS.md</code> at a folder’s root to tell it how that vault works.</p>
+    <h4>Keep it as a Bot</h4>
+    <p className="qz-muted">A Bot built on this agent has its own chat, memory and name, and stays current when Quartizo updates.
+      In KiroCrew, open <strong>Customize → Bots</strong> and choose <strong>New Bot</strong>. Once it’s created, click
+      its card and set <strong>Built from</strong> (under General, last option) to <strong>quartizo-notes</strong>. It saves right away. Or run:</p>
+    <textarea ref={field} className="qz-input qz-mono qz-agent-prompt" aria-label="Bot commands" value={BOT_COMMANDS} rows={2} readOnly />
+    <div className="qz-settings-actions">
+      <button type="button" className="qz-button" onClick={() => void copy()}><Icon name="copy" />Copy commands</button>
+      <span className="qz-muted" role="status">{message}</span>
+    </div>
+  </div>
 }
 
 function AgentPrompt({ workspace }: { workspace: Workspace }) {

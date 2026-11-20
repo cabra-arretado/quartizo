@@ -23,7 +23,7 @@ See the [compatibility results](docs/compatibility.md) for tested host versions.
 app.json              manifest (name, ui page, backend, permissions, agent, skill, command)
 agents/               quartizo-notes.json: the KiroCrew agent for working in your folders
 skills/quartizo-notes/  the agent's skill: SKILL.md, vault-template.md (AGENTS.md starter),
-                      scripts/quartizo_ticket.py (read-only ticket IDs, card order, checks)
+                      scripts/quartizo_ticket.py (read-only: folders, ticket IDs, card order, checks)
 ui/quartizo-icon.svg  Quartizo's app catalog and sidebar icon
 backend/server.py     HTTP backend (stdlib): auth, routing
 backend/workspace.py  folder registry + fd-based path confinement
@@ -259,8 +259,27 @@ over the skill's defaults, except for file safety. If a folder has none, the
 agent offers to write one from
 [`skills/quartizo-notes/vault-template.md`](skills/quartizo-notes/vault-template.md).
 
-For tickets, the agent uses the skill's helper, which reads notes with
-Quartizo's own parser, to pick IDs and card order and to check its edits.
+When a request names no folder, the agent uses your **Default workspace**
+(**Settings → Defaults**; switching folders in the header changes it too). If
+you have several folders, name one in the request ("in my journal").
+
+To keep the agent as a Bot, with its own chat, memory and name, see **Settings
+→ Bots & agents**: in KiroCrew, open **Customize → Bots** and choose **New
+Bot** (the form has no template field). Once it's created, click its card
+and set **Built from** (under General, the last option) to `quartizo-notes`;
+it saves right away. Or run:
+
+```bash
+kirocrew agent create --name notes --display-name "Notes"
+kirocrew agent update notes --kiro-agent quartizo-notes
+```
+
+The Bot runs on the installed agent, so it always has the skill and picks up
+Quartizo updates.
+
+The skill's helper reads Quartizo's folder list and notes, with Quartizo's own
+parser, to find the default folder, pick ticket IDs and card order, and check
+its edits. It never writes files.
 
 Use **Copy agent prompt** to take self-contained instructions to another tool
 or an existing conversation.

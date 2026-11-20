@@ -14,8 +14,15 @@ time.
 
 ## 1. Know the folder before you touch it
 
-1. Confirm the folder's absolute path. It is in the request or the chat draft
-   ("Folder: …"). If it is missing, ask. Never guess a vault.
+1. Find the folder's absolute path, in this order:
+   - the request, the chat draft ("Folder: …") or your own rules;
+   - otherwise run `python3 "$H" folders` (section 4). It lists the folders
+     enabled in Quartizo, the default first. If the person named a folder
+     ("my work vault"), use the one whose name matches. If they named none,
+     use the one marked `default` and say which folder you are using.
+   - If nothing matches, or a folder is marked `MISSING`, ask. Never guess a
+     vault, and never work in a folder Quartizo doesn't list unless the
+     person gives you its path.
 2. Read `AGENTS.md` at the folder root if it exists. It is the person's own
    description of the vault: what lives where, naming habits, what each column
    means, and what you must not do. It overrides the defaults below, except for
@@ -59,9 +66,8 @@ order: "7fffffffffffffffffffffffffffffff"
 
 - **`status`** is a column ID. The defaults are `backlog`, `ready`,
   `in_progress`, `review` and `done`, but each folder can have its own columns.
-  Use the IDs listed in the chat draft or `AGENTS.md`. Otherwise run `column`
-  with a likely ID, or read existing tickets. Use the first column unless the
-  person names another.
+  `folders` lists each folder's column IDs in board order; the chat draft and
+  `AGENTS.md` may too. Use the first column unless the person names another.
 - **`id`** is a fresh UUID for each new ticket. Never change an existing ID, and
   never copy one from another note.
 - **`order`** places the card within its column. Do not work it out by hand:
@@ -76,11 +82,12 @@ order: "7fffffffffffffffffffffffffffffff"
 
 ## 4. The ticket helper
 
-The helper uses Quartizo's own parser, so its answers match the board. It only
-reads files.
+The helper uses Quartizo's own parser and folder list, so its answers match the
+app. It only reads files.
 
 ```bash
 H=~/.kiro/crew/skills/quartizo/quartizo-notes/scripts/quartizo_ticket.py
+python3 "$H" folders                                 # enabled folders, default first
 python3 "$H" new-id                                  # fresh ticket id
 python3 "$H" column "<folder>" backlog               # cards in board order
 python3 "$H" order  "<folder>" backlog               # order for the end of a column

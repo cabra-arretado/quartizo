@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The quartizo-notes agent uses your default workspace when a request names no
+  folder, so the Command Bar and the agent picker work without a folder path.
+- New **Settings → Bots & agents** explains the agent and how to keep it as a
+  KiroCrew Bot built on it, with commands to copy.
+- The agent's prompt now defers to its skill, so the rules live in one place.
+
 ## 0.12.6 - 2026-11-17
 
 - Quartizo now installs a KiroCrew agent, **quartizo-notes**, and its skill.

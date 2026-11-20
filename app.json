@@ -41,9 +41,9 @@
         "argument": {
           "kind": "text",
           "placeholder": "What should it do? e.g. add a ticket to fix the login redirect",
-          "hint": "Name the folder in your request if you have more than one."
+          "hint": "Uses your default Quartizo folder unless you name another."
         },
-        "prompt": "Use the quartizo-notes skill. If it is not clear which Quartizo folder I mean, ask me first.\n\nMy request: {argument}",
+        "prompt": "Use the quartizo-notes skill. If I don't name a folder, use my default Quartizo folder.\n\nMy request: {argument}",
         "autoSend": false,
         "agent": "quartizo-notes"
       }

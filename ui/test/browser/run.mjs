@@ -254,6 +254,13 @@ async function customColumnsRegression(page, fixture) {
   assert.ok(launch.message.startsWith('Folder: /'))
   assert.ok(launch.message.endsWith('My request: '))
 
+  await settingsSection(page, 'Bots & agents').click()
+  const agents = page.getByRole('region', { name: 'Bots & agents', exact: true })
+  await agents.getByText('Browser vault', { exact: true }).waitFor()
+  await button(agents, 'Copy commands').click()
+  await agents.getByText('Commands copied.', { exact: true }).waitFor()
+  assert.match(await page.evaluate(() => navigator.clipboard.readText()), /--kiro-agent quartizo-notes/)
+
   await tab(page, 'Tasks').click()
   const board = page.getByRole('group', { name: 'Board of Browser vault' })
   const lane = name => board.getByRole('region', { name, exact: true })

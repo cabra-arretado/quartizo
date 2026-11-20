@@ -4,6 +4,9 @@
 It reads notes with Quartizo's own parser (backend/mdsource.py), so the answers match
 what the board will show. It never writes files: the agent edits the note itself.
 
+  quartizo_ticket.py folders
+      List the folders enabled in Quartizo (name, path, column IDs), the default one first
+      and marked "default". Use the default when the person names no folder.
   quartizo_ticket.py new-id
       Print a fresh ticket ID (UUID).
   quartizo_ticket.py order FOLDER STATUS [--before PATH | --after PATH]
@@ -21,9 +24,12 @@ when Quartizo's parser cannot be loaded.
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import sqlite3
 import sys
 import uuid
+from contextlib import closing
 from pathlib import Path
 
 # skills/quartizo-notes/scripts/ -> app root. KiroCrew links the skill directory, so
@@ -40,6 +46,8 @@ except Exception as exc:  # noqa: BLE001 -- any import failure means "cannot rea
     sys.exit(2)
 
 MAX_RANK = mdsource.MAX_RANK
+DB_PATH = APP_ROOT / "data" / "quartizo.sqlite3"
+DEFAULT_COLUMN_IDS = ("backlog", "ready", "in_progress", "review", "done")
 
 
 class Refusal(Exception):
@@ -64,6 +72,35 @@ def _notes(folder: Path):
             if len(data) > mdsource.MAX_FILE_BYTES:
                 continue
             yield rel, mdsource.parse_note(rel, data)
+
+
+def folders(db_path: Path | None = None) -> list[dict]:
+    """Enabled folders as Quartizo lists them (by name), the default first.
+
+    The default matches the app: the folder saved in Settings → Defaults if it is still
+    enabled, else the first enabled folder. Reads the database read-only.
+    """
+    db_path = db_path or DB_PATH
+    if not db_path.is_file():
+        raise Refusal(f"Quartizo has no folder list yet ({db_path} is missing). "
+                      "Connect a folder in Quartizo → Settings → Folders.")
+    with closing(sqlite3.connect(f"{db_path.as_uri()}?mode=ro", uri=True)) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM workspaces WHERE companion = 1 ORDER BY name, id").fetchall()
+        prefs = [json.loads(r["data"]) for r in conn.execute("SELECT data FROM preferences")]
+    saved = {p.get("workspaceId") for p in prefs}
+    preferred = saved.pop() if len(saved) == 1 else None  # one dashboard owner, as usual
+    out = []
+    for row in rows:
+        columns = json.loads(row["board_columns"]) if row["board_columns"] else None
+        out.append({"id": row["id"], "name": row["name"], "path": row["path"],
+                    "columns": [c["id"] for c in columns] if columns else list(DEFAULT_COLUMN_IDS),
+                    "missing": not os.path.isdir(row["path"]), "default": False})
+    if out:
+        default = next((f for f in out if f["id"] == preferred), out[0])
+        default["default"] = True
+        out.sort(key=lambda f: not f["default"])
+    return out
 
 
 def _column(folder: Path, status: str) -> list[tuple[str, mdsource.Note]]:
@@ -115,6 +152,7 @@ def check(folder: Path, path: str) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("folders")
     sub.add_parser("new-id")
     p_order = sub.add_parser("order")
     p_order.add_argument("folder", type=Path)
@@ -132,6 +170,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "new-id":
         print(uuid.uuid4())
+        return 0
+    if args.command == "folders":
+        try:
+            found = folders()
+        except (Refusal, sqlite3.Error) as exc:
+            print(exc, file=sys.stderr)
+            return 1
+        if not found:
+            print("No folders are enabled in Quartizo. Ask the person to connect one in "
+                  "Quartizo → Settings → Folders.", file=sys.stderr)
+            return 1
+        for f in found:
+            flags = [flag for flag, on in (("default", f["default"]), ("MISSING", f["missing"])) if on]
+            print("\t".join([f["name"], f["path"], " ".join(f["columns"]), ",".join(flags)]).rstrip("\t"))
         return 0
     folder = args.folder.expanduser().resolve()
     if not folder.is_dir():
