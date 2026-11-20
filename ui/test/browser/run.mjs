@@ -414,7 +414,12 @@ async function notesRegression(page, fixture) {
     await preview.getByText('Editable body.', { exact: true }).waitFor()
     assert.equal(readFileSync(notePath, 'utf8'), saved)
     const editBlock = button(preview, 'Edit block at line 6')
-    await editBlock.press('Enter')
+    // Cancel can leave a save or reload in flight; the note is briefly read-only and ignores Enter.
+    await eventually(async () => {
+      if (await blockEditor.isVisible()) return true
+      if (await editBlock.isVisible()) await editBlock.press('Enter', { timeout: 1000 }).catch(() => {})
+      return blockEditor.isVisible()
+    }, 'Enter on the edit button did not open the block editor')
     await blockEditor.fill('Updated body.\n\nSecond paragraph.')
     await page.getByRole('searchbox', { name: 'Search notes' }).click()
     await preview.getByText('Second paragraph.', { exact: true }).waitFor()
