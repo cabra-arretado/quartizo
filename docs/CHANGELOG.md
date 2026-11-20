@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.12.8 - 2026-11-20
+
+- Fix an intermittent CI failure in the Notes browser regression when opening
+  a block editor right after cancelling another edit.
+
 ## 0.12.7 - 2026-11-20
 
 - The quartizo-notes agent uses your default workspace when a request names no
